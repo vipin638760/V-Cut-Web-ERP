@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 140" fill="none">
+  <path d="M40 95 C42 80, 48 40, 52 30 C56 20, 58 18, 55 28 C50 45, 35 90, 38 95 C40 98, 55 60, 65 50 C75 40, 80 38, 78 42 C74 50, 58 75, 62 78 C66 82, 85 55, 95 48 C105 41, 108 40, 105 45 C100 55, 88 72, 92 75 C96 78, 115 52, 122 46 C129 40, 132 42, 128 48 C120 60, 108 76, 115 76" stroke="#1a5276" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M115 76 C122 74, 140 60, 148 55 C156 50, 158 52, 150 62 C142 72, 130 82, 138 80 C146 78, 175 50, 185 44 C195 38, 198 40, 192 48 C186 56, 168 76, 175 76 C182 76, 200 58, 210 50 C220 42, 225 40, 222 46 C218 54, 205 72, 212 72" stroke="#1a5276" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M212 72 C218 70, 232 55, 240 48 C248 41, 252 40, 248 46 C242 56, 228 74, 235 74 C242 74, 260 55, 268 48 C276 41, 280 42, 276 50 C270 62, 258 78, 265 76 C272 74, 290 50, 298 42 C306 34, 310 36, 305 45 C298 58, 285 76, 290 78 C295 80, 310 68, 318 62 C326 56, 330 55, 325 60" stroke="#1a5276" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Decorative swoosh underneath -->
+  <path d="M60 100 C100 105, 200 108, 310 88" stroke="#1a5276" stroke-width="1.5" stroke-linecap="round" stroke-dasharray="none"/>
+  <!-- Starting upstroke -->
+  <path d="M28 110 C30 100, 35 70, 40 95" stroke="#1a5276" stroke-width="2.2" stroke-linecap="round"/>
+  <!-- Ending arrow/flourish -->
+  <path d="M318 62 C322 58, 330 52, 335 55 C338 57, 332 62, 328 65" stroke="#1a5276" stroke-width="1.8" stroke-linecap="round"/>
+</svg>

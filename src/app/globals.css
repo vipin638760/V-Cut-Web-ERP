@@ -1,0 +1,298 @@
+@import "tailwindcss";
+
+@theme {
+  /* V-Cut Gold Theme Colors */
+  --color-gold: #22d3ee;
+  --color-gold-2: #0891b2;
+  --color-gold-3: #a5f3fc;
+  --color-gold-dim: rgba(34, 211, 238, 0.1);
+
+  /* Light Theme Variant Colors (We can swap using dark selector) */
+  --color-gold-light: #0284c7;
+  --color-gold2-light: #0369a1;
+  --color-gold3-light: #0ea5e9;
+
+  /* Custom fonts */
+  --font-outfit: "Outfit", system-ui, sans-serif;
+  --font-vibes: "Great Vibes", cursive;
+  --font-headline: "Space Grotesk", system-ui, sans-serif;
+  --font-body: "Manrope", system-ui, sans-serif;
+
+  /* Additional utility colors */
+  --color-bg-dark: #020202;
+  --color-bg2-dark: #080808;
+  --color-bg3-dark: #0f0f0f;
+  --color-bg4-dark: #141414;
+  --color-bg5-dark: #1c1c1c;
+  
+  --color-bg-light: #f8fafc;
+  --color-bg2-light: #ffffff;
+  --color-bg3-light: #f1f5f9;
+  --color-bg4-light: #e2e8f0;
+  --color-bg5-light: #cbd5e1;
+}
+
+:root {
+  /* Defaults to Dark Theme */
+  --bg: var(--color-bg-dark);
+  --bg1: var(--color-bg-dark);
+  --bg2: var(--color-bg2-dark);
+  --bg3: var(--color-bg3-dark);
+  --bg4: var(--color-bg4-dark);
+  --bg5: var(--color-bg5-dark);
+  
+  --gold: var(--color-gold);
+  --gold-rgb: 34, 211, 238;
+  --accent: #22d3ee;
+  --accent-rgb: 34, 211, 238;
+  --accent-glow: 0 0 15px rgba(34, 211, 238, 0.4);
+  --gold2: var(--color-gold-2);
+  --gold3: var(--color-gold-3);
+  --gold-dim: var(--color-gold-dim);
+  
+  --border: rgba(255, 255, 255, 0.08);
+  --border2: rgba(255, 255, 255, 0.15);
+  --input-border: rgba(255, 255, 255, 0.25);
+  
+  --text: #ffffff;
+  --text2: #e2e8f0;
+  --text3: #94a3b8;
+  --text-inv: #000000;
+  
+  --red: #f87171;
+  --green: #4ade80;
+  --orange: #fb923c;
+  --blue: #60a5fa;
+  
+  --red-bg: rgba(248, 113, 113, 0.12);
+  --green-bg: rgba(74, 222, 128, 0.12);
+  --orange-bg: rgba(251, 146, 60, 0.12);
+  --blue-bg: rgba(96, 165, 250, 0.12);
+  
+  --glass: rgba(10, 10, 10, 0.7);
+  --card-shadow: 0 8px 25px rgba(0, 0, 0, 0.5);
+  --scrollbar-thumb: rgba(255, 255, 255, 0.2);
+}
+
+:root.light-mode {
+  --bg: var(--color-bg-light);
+  --bg1: var(--color-bg-light);
+  --bg2: var(--color-bg2-light);
+  --bg3: var(--color-bg3-light);
+  --bg4: var(--color-bg4-light);
+  --bg5: var(--color-bg5-light);
+
+  --gold: var(--color-gold-light);
+  --gold-rgb: 2, 132, 199;
+  --accent: #0284c7;
+  --accent-rgb: 2, 132, 199;
+  --accent-glow: 0 0 15px rgba(2, 132, 199, 0.3);
+  --gold2: var(--color-gold2-light);
+  --gold3: var(--color-gold3-light);
+  --gold-dim: rgba(2, 132, 199, 0.1);
+
+  --border: rgba(0, 0, 0, 0.08);
+  --border2: rgba(0, 0, 0, 0.12);
+  --input-border: rgba(0, 0, 0, 0.2);
+
+  --text: #0f172a;
+  --text2: #1e293b;
+  --text3: #475569;
+  --text-inv: #ffffff;
+
+  --red: #dc2626;
+  --green: #16a34a;
+  --orange: #ea580c;
+  --blue: #2563eb;
+
+  --red-bg: rgba(220, 38, 38, 0.08);
+  --green-bg: rgba(22, 163, 74, 0.08);
+  --orange-bg: rgba(234, 88, 12, 0.08);
+  --blue-bg: rgba(37, 99, 235, 0.08);
+
+  --glass: rgba(255, 255, 255, 0.85);
+  --card-shadow: 0 4px 15px rgba(0, 0, 0, 0.06);
+  --scrollbar-thumb: rgba(0, 0, 0, 0.2);
+}
+
+body {
+  font-family: var(--font-outfit);
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  font-size: 13px;
+  letter-spacing: 0.25px;
+  line-height: 1.5;
+}
+
+/* Hide number input spinners globally */
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  -moz-appearance: textfield; /* Firefox */
+}
+
+/* Date picker color visibility fixes */
+input[type="date"] {
+  color-scheme: dark;
+  position: relative;
+  cursor: pointer;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+}
+.light-mode input[type="date"] {
+  color-scheme: light;
+}
+
+input[type="date"]::-webkit-date-and-time-value {
+  text-align: left;
+}
+
+input[type="date"]::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+}
+.light-mode input[type="date"]::-webkit-calendar-picker-indicator {
+  opacity: 0;
+}
+
+input[type="date"]::-webkit-inner-spin-button,
+input[type="date"]::-webkit-clear-button {
+  display: none;
+  -webkit-appearance: none;
+}
+
+/* Select dropdown in light mode */
+.light-mode select option {
+  background: #ffffff;
+  color: #0f172a;
+}
+
+/* Global Styles migrated from Old UI */
+.global-watermark {
+  @apply fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-[18vw] font-black opacity-[0.03] pointer-events-none z-10 select-none whitespace-nowrap;
+  font-family: var(--font-outfit);
+  letter-spacing: -1vw;
+}
+
+.brand-v {
+  color: #f06464 !important;
+  font-weight: 400 !important;
+  -webkit-text-fill-color: #f06464 !important;
+  font-family: var(--font-vibes);
+  font-size: 1.6em;
+  text-shadow: 0 0 10px rgba(240, 100, 100, 0.5);
+}
+
+.brand-cut {
+  color: var(--text);
+  font-family: var(--font-vibes);
+  font-size: 1.4em;
+  font-weight: 400;
+}
+
+.brand-group {
+  background: linear-gradient(90deg, var(--gold), var(--gold3));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* ── Login Page: Digital Atelier Design System ── */
+.login-page {
+  --surface: #0e0e0e;
+  --surface-low: #131313;
+  --surface-mid: #1a1a1a;
+  --surface-high: #20201f;
+  --surface-highest: #262626;
+  --surface-variant: #262626;
+  --outline-v: #484847;
+  --on-surface-variant: #adaaaa;
+  --primary-login: #50e1f9;
+  --primary-container-login: #00bcd4;
+  --primary-dim: #3cd2eb;
+  font-family: var(--font-body);
+}
+
+.login-page .login-input {
+  background: var(--surface-highest);
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 12px;
+  color: #fff;
+  font-family: var(--font-body);
+  font-size: 14px;
+  font-weight: 500;
+  padding: 16px 16px 16px 48px;
+  width: 100%;
+  outline: none;
+  transition: all 0.2s ease;
+}
+.login-page .login-input::placeholder {
+  color: var(--on-surface-variant);
+  opacity: 0.3;
+}
+.login-page .login-input:focus {
+  border-bottom-color: var(--primary-login);
+  background: #2a2a2a;
+}
+
+@layer utilities {
+  @keyframes float {
+    0%, 100% { transform: translateY(0) translateX(0); }
+    33% { transform: translateY(-20px) translateX(10px); }
+    66% { transform: translateY(-10px) translateX(-15px); }
+  }
+  .animate-float {
+    animation: float 15s ease-in-out infinite;
+  }
+
+  /* Login form entrance animation */
+  @keyframes loginSlideUp {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .login-form-enter {
+    animation: loginSlideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
+
+  /* Login button spinner */
+  @keyframes loginSpin {
+    to { transform: rotate(360deg); }
+  }
+  .login-spinner {
+    animation: loginSpin 0.6s linear infinite;
+  }
+}
+
+/* Custom scrollbar for premium feel */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 10px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--accent);
+  background-clip: content-box;
+}

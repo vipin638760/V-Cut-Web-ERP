@@ -1,0 +1,648 @@
+"use client";
+import { useEffect, useState } from "react";
+import { collection, onSnapshot, query, orderBy, doc, deleteDoc, setDoc, addDoc, updateDoc } from "firebase/firestore";
+import { db } from "@/lib/firebase";
+import { useCurrentUser } from "@/lib/currentUser";
+import {
+  INR, ROLES,
+  staffOverallStatus, staffStatusForMonth, staffLeavesInMonth,
+  staffBillingInPeriod, lastMonthData, proRataSalary, makeFilterPrefix, periodLabel,
+  getStaffSalaryForMonth
+} from "@/lib/calculations";
+import { MONTHS } from "@/lib/constants";
+import { Icon, IconBtn, Pill, Card, PeriodWidget, TH, TD, StatCard, ProgressBar, Modal, useConfirm, useToast } from "@/components/ui";
+
+
+const NOW = new Date();
+
+export default function StaffPage() {
+  const [staff, setStaff] = useState([]);
+  const [branches, setBranches] = useState([]);
+  const [entries, setEntries] = useState([]);
+  const [leaves, setLeaves] = useState([]);
+  const [salaryHistory, setSalaryHistory] = useState([]);
+  const [statusLog, setStatusLog] = useState([]);
+  const [globalSettings, setGlobalSettings] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [historyModal, setHistoryModal] = useState(null); // staff object
+  const [monthlyLogModal, setMonthlyLogModal] = useState(null); // staff object for yearly breakdown
+
+  // Period filter state
+  const [filterMode, setFilterMode] = useState("month");
+  const [filterYear, setFilterYear] = useState(NOW.getFullYear());
+  const [filterMonth, setFilterMonth] = useState(NOW.getMonth() + 1);
+  const filterPrefix = makeFilterPrefix(filterYear, filterMonth);
+
+  // UI state
+  const [branchFilter, setBranchFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState("active");
+  const [showForm, setShowForm] = useState(false);
+  const [editId, setEditId] = useState(null);
+
+  // Form state
+  const [form, setForm] = useState({ name: "", branch_id: "", role: "", mobile: "", salary: "", incentive_pct: "10", target: "", join: "", exit_date: "" });
+  const [increment, setIncrement] = useState("");
+
+  // Status toggle pending state
+  const [pendingStatus, setPendingStatus] = useState({}); // { staffId: { open: bool, date: string, newStatus: bool } }
+
+  const { confirm, ConfirmDialog } = useConfirm();
+  const { toast, ToastContainer } = useToast();
+  const currentUser = useCurrentUser() || {};
+  const isAdmin = currentUser?.role === "admin";
+  const isAccountant = currentUser?.role === "accountant";
+  const canEdit = currentUser?.role === "admin" || currentUser?.role === "accountant";
+
+  useEffect(() => {
+    if (!db) return;
+    const unsubs = [
+      onSnapshot(collection(db, "branches"), sn => setBranches(sn.docs.map(d => ({ ...d.data(), id: d.id })))),
+      onSnapshot(collection(db, "staff"), sn => setStaff(sn.docs.map(d => ({ ...d.data(), id: d.id })))),
+      onSnapshot(query(collection(db, "entries"), orderBy("date", "desc")), sn => setEntries(sn.docs.map(d => ({ ...d.data(), id: d.id })))),
+      onSnapshot(collection(db, "leaves"), sn => setLeaves(sn.docs.map(d => ({ ...d.data(), id: d.id })))),
+      onSnapshot(doc(db, "settings", "global"), sn => setGlobalSettings(sn.data())),
+      onSnapshot(query(collection(db, "staff_status_log"), orderBy("at", "desc")), sn => setStatusLog(sn.docs.map(d => ({ ...d.data(), id: d.id })))),
+      onSnapshot(query(collection(db, "salary_history"), orderBy("effective_from", "asc")), sn => {
+        setSalaryHistory(sn.docs.map(d => ({ ...d.data(), id: d.id })));
+        setLoading(false);
+      }),
+    ];
+    return () => unsubs.forEach(u => u());
+  }, []);
+
+  const statusRefMon = filterMode === "month" ? filterPrefix : filterYear + "-" + String(NOW.getMonth() + 1).padStart(2, "0");
+
+  // Filtered list
+  let filtered = branchFilter ? staff.filter(s => s.branch_id === branchFilter) : [...staff];
+  if (statusFilter === "active") filtered = filtered.filter(s => staffOverallStatus(s, statusRefMon) === "active");
+  else if (statusFilter === "inactive") filtered = filtered.filter(s => staffOverallStatus(s, statusRefMon) !== "active");
+  // For admin, hide pending-setup staff from the main table (they appear in the Pending Setup section above)
+  if (isAdmin) filtered = filtered.filter(s => !s.pending_setup);
+
+  const totalActive = staff.filter(s => staffOverallStatus(s, statusRefMon) === "active").length;
+  const totalInactive = staff.filter(s => staffOverallStatus(s, statusRefMon) !== "active").length;
+
+  // Last month label
+  const lmDate = new Date(NOW.getFullYear(), NOW.getMonth() - 1, 1);
+  const lmLabel = lmDate.toLocaleString("default", { month: "long", year: "numeric" });
+
+  const handleSave = async (e) => {
+    e.preventDefault();
+    if (!form.name || !form.branch_id) { confirm({ title: "Missing Fields", message: "Name and Branch are required.", confirmText: "OK", cancelText: "Close", type: "warning", onConfirm: () => {} }); return; }
+    if (!form.join) { confirm({ title: "Joining Date Required", message: "Please select the joining date before saving.", confirmText: "OK", cancelText: "Close", type: "warning", onConfirm: () => {} }); return; }
+
+    // Accountant adding a new staff member: auto-apply default salary of ₹15,000 (they cannot edit salary).
+    // For edits, accountant must never change salary — preserve the existing value.
+    let effectiveSalary = Number(form.salary) || 0;
+    if (isAccountant) {
+      if (editId) {
+        const existing = staff.find(x => x.id === editId);
+        effectiveSalary = Number(existing?.salary) || 0;
+      } else {
+        effectiveSalary = 15000;
+      }
+    }
+
+    const payload = {
+      name: form.name.trim(),
+      branch_id: form.branch_id,
+      role: form.role,
+      mobile: form.mobile,
+      salary: effectiveSalary,
+      incentive_pct: Number(form.incentive_pct) || 10,
+      target: Number(form.target) || 50000,
+      join: form.join || null,
+      exit_date: form.exit_date || null,
+    };
+
+    // Mark accountant-added new staff as pending admin setup; admin clears it on save
+    if (isAccountant && !editId) {
+      payload.pending_setup = true;
+      payload.added_by_role = "accountant";
+    }
+    if (isAdmin && editId) {
+      payload.pending_setup = false;
+    }
+    try {
+      if (editId) {
+        const existing = staff.find(x => x.id === editId);
+        await updateDoc(doc(db, "staff", editId), payload);
+        // Log salary change if salary was modified
+        if (existing && Number(existing.salary) !== Number(payload.salary)) {
+          // If this is the admin's first setup of an accountant-added staff, backdate the
+          // effective date to the joining date so salary calculations start from day 1.
+          const isInitialAdminSetup = isAdmin && existing.pending_setup;
+          const effectiveFrom = isInitialAdminSetup
+            ? (payload.join || existing.join || new Date().toISOString().split("T")[0])
+            : new Date().toISOString().split("T")[0];
+          await addDoc(collection(db, "salary_history"), {
+            staff_id: editId,
+            staff_name: payload.name,
+            old_salary: isInitialAdminSetup ? 0 : (Number(existing.salary) || 0),
+            salary: Number(payload.salary) || 0,
+            effective_from: effectiveFrom,
+            changed_by: currentUser?.name || "admin",
+            changed_at: new Date().toISOString(),
+            note: isInitialAdminSetup ? "Initial salary set by admin (backdated to joining date)" : undefined,
+          });
+        }
+      } else {
+        await addDoc(collection(db, "staff"), payload);
+      }
+      const wasEdit = !!editId;
+      const savedName = payload.name;
+      setShowForm(false);
+      setEditId(null);
+      setForm({ name: "", branch_id: "", role: "", mobile: "", salary: "", incentive_pct: "10", target: "", join: "", exit_date: "" });
+      toast({ title: wasEdit ? "Record Updated" : "Employee Added", message: `${savedName} has been ${wasEdit ? 'updated' : 'added'} successfully.`, type: "success" });
+    } catch (err) {
+      confirm({ title: "Save Failed", message: err.message, confirmText: "OK", cancelText: "Close", type: "danger", onConfirm: () => {} });
+    }
+  };
+
+  const handleEdit = (s) => {
+    setForm({
+      name: s.name || "", branch_id: s.branch_id || "", role: s.role || "", mobile: s.mobile || "",
+      salary: s.salary || "", incentive_pct: s.incentive_pct ?? 10, target: s.target || "",
+      join: s.join || "", exit_date: s.exit_date || "",
+    });
+    setEditId(s.id);
+    setIncrement("");
+    setShowForm(true);
+  };
+
+  const handleDelete = (sid) => {
+    const s = staff.find(x => x.id === sid);
+    confirm({
+      title: "Delete Employee",
+      message: `<strong>${s?.name || 'this employee'}</strong>, are you sure you want to permanently delete this record? This action cannot be undone.`,
+      confirmText: "Yes, Delete",
+      cancelText: "No, Keep",
+      type: "danger",
+      onConfirm: async () => {
+        try { await deleteDoc(doc(db, "staff", sid)); toast({ title: "Deleted", message: `${s?.name || 'Employee'} has been removed.`, type: "success" }); }
+        catch (err) { confirm({ title: "Error", message: err.message, confirmText: "OK", type: "warning", onConfirm: () => {} }); }
+      }
+    });
+  };
+
+  const handleToggleStatus = (s, checked) => {
+    const dateVal = new Date().toISOString().slice(0, 10);
+    setPendingStatus(prev => ({ ...prev, [s.id]: { open: true, date: dateVal, goingActive: checked } }));
+  };
+
+  const confirmStatusChange = async (sid) => {
+    const pending = pendingStatus[sid];
+    if (!pending) return;
+    try {
+      const s = staff.find(x => x.id === sid);
+      const update = pending.goingActive ? { exit_date: null } : { exit_date: pending.date };
+      await updateDoc(doc(db, "staff", sid), update);
+      // Non-blocking log
+      addDoc(collection(db, "staff_status_log"), {
+        staff_id: sid,
+        staff_name: s?.name,
+        date: pending.date,
+        action: pending.goingActive ? "activated" : "deactivated",
+        by: currentUser?.name || "user",
+        at: new Date().toISOString(),
+      }).catch(() => {});
+      toast({ title: pending.goingActive ? "Activated" : "Deactivated", message: `${s?.name} has been ${pending.goingActive ? 'activated' : 'deactivated'}.`, type: pending.goingActive ? "success" : "warning" });
+    } catch (err) { confirm({ title: "Error", message: err.message, confirmText: "OK", cancelText: "Close", type: "danger", onConfirm: () => {} }); }
+    setPendingStatus(prev => { const n = { ...prev }; delete n[sid]; return n; });
+  };
+
+  if (loading) return <div className="text-center text-[var(--gold)] font-bold p-10">Loading Staff...</div>;
+
+  // Yearly salary helper — sum pro-rata across all months
+  const yearlyStaffSalary = (s) => {
+    if (filterMode !== 'year') return proRataSalary(s, filterPrefix, branches, salaryHistory, staff, globalSettings);
+    const limit = filterYear === NOW.getFullYear() ? NOW.getMonth() + 1 : 12;
+    let total = 0;
+    for (let m = 1; m <= limit; m++) total += proRataSalary(s, `${filterYear}-${String(m).padStart(2,'0')}`, branches, salaryHistory, staff, globalSettings);
+    return total;
+  };
+
+  // Totals
+  const totalTarget = filtered.reduce((s, x) => s + ((x.target || 0) * (filterMode === 'year' ? (filterYear === NOW.getFullYear() ? NOW.getMonth() + 1 : 12) : 1)), 0);
+  const totalAchieved = filtered.reduce((s, x) => s + staffBillingInPeriod(x.id, entries, filterPrefix, filterMode, filterYear), 0);
+  const totalSalary = filtered.reduce((s, x) => s + yearlyStaffSalary(x), 0);
+
+  return (
+    <div>
+      {/* Page Header */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20, flexWrap: "wrap", gap: 12 }}>
+        <div className="page-title" style={{ fontSize: 24, fontWeight: 800, color: "var(--gold)", letterSpacing: 1, textTransform: "capitalize" }}>Staff</div>
+        <button onClick={() => { location.reload(); }} className="refresh-btn" style={{ width: 36, height: 36, borderRadius: "50%", background: "var(--bg3)", border: "1px solid var(--border2)", color: "var(--text2)", cursor: "pointer", fontSize: 16 }}>↻</button>
+      </div>
+
+      {/* Period Widget */}
+      <PeriodWidget filterMode={filterMode} setFilterMode={setFilterMode} filterYear={filterYear} setFilterYear={setFilterYear} filterMonth={filterMonth} setFilterMonth={setFilterMonth} />
+
+      {/* Summary Metrics */}
+      <div style={{ display: "flex", gap: 16, marginBottom: 24, flexWrap: "wrap" }}>
+        <StatCard label="Total Staff" value={filtered.length} subtext={`${totalActive} Active / ${totalInactive} Inactive`} icon={<Icon name="log" size={24} />} color="blue" />
+        <StatCard label={filterMode === 'year' ? "Yearly Billing" : "Monthly Billing"} value={INR(totalAchieved)} subtext={`Target: ${INR(totalTarget)}`} icon={<Icon name="check" size={24} />} trend={`${Math.round((totalAchieved / (totalTarget || 1)) * 100)}% of goal`} color="green" />
+        {!isAccountant && <StatCard label={filterMode === 'year' ? "Est. Yearly Payroll" : "Est. Payroll"} value={INR(totalSalary)} subtext="Pro-rata basis" icon={<Icon name="plus" size={24} />} color="gold" />}
+      </div>
+
+      {/* Filters & Controls */}
+      <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid var(--border)", borderRadius: 16, padding: 12, marginBottom: 16, display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
+        <select value={branchFilter} onChange={e => setBranchFilter(e.target.value)}
+          style={{ padding: "8px 12px", border: "1px solid var(--border2)", borderRadius: 10, fontSize: 13, background: "var(--bg3)", color: "var(--text)", minWidth: 160 }}>
+          <option value="">All Branches</option>
+          {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+        </select>
+
+        <div style={{ display: "inline-flex", background: "var(--bg3)", border: "1.5px solid var(--border2)", borderRadius: 12, padding: 3, gap: 2 }}>
+          {[["all", "All"], ["active", "Active"], ["inactive", "Inactive"]].map(([val, label]) => (
+            <button key={val} onClick={() => setStatusFilter(val)}
+              style={{ padding: "6px 16px", fontSize: 11, fontWeight: 700, color: statusFilter === val ? "#000" : "var(--text3)", background: statusFilter === val ? (val === "active" ? "var(--green)" : val === "inactive" ? "var(--red)" : "var(--accent)") : "transparent", border: "none", borderRadius: 9, cursor: "pointer", transition: "all 0.2s", textTransform: "uppercase" }}>
+              {label}
+            </button>
+          ))}
+        </div>
+
+        <div style={{ marginLeft: "auto", display: "flex", gap: 12 }}>
+          {canEdit && (
+            <button onClick={() => { setShowForm(true); setEditId(null); setForm({ name: "", branch_id: "", role: "", mobile: "", salary: "", incentive_pct: "10", target: "", join: new Date().toISOString().split("T")[0], exit_date: "" }); }}
+              style={{ padding: "8px 20px", fontSize: 13, borderRadius: 10, background: "var(--accent)", color: "#000", border: "none", cursor: "pointer", fontWeight: 800, display: "flex", alignItems: "center", gap: 8, boxShadow: "var(--accent-glow)" }}>
+              <Icon name="plus" size={16} /> Add Staff Member
+            </button>
+          )}
+        </div>
+      </div>
+
+      <Modal isOpen={showForm} onClose={() => setShowForm(false)} title={editId ? "Edit Staff Details" : "Register New Staff"}>
+        {!isAdmin && <div style={{ fontSize: 11, color: "var(--red)", marginBottom: 16 }}>⚠️ Salary & Incentive % require Admin.</div>}
+        <form onSubmit={handleSave} style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+          <FormField label="Full Name"><input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="Enter name" /></FormField>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+            <FormField label="Branch">
+              <select value={form.branch_id} onChange={e => setForm({ ...form, branch_id: e.target.value })}>
+                <option value="">Select...</option>
+                {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+              </select>
+            </FormField>
+            <FormField label="Role">
+              <select value={form.role} onChange={e => setForm({ ...form, role: e.target.value })}>
+                <option value="">Select...</option>
+                {ROLES.map(r => <option key={r}>{r}</option>)}
+              </select>
+            </FormField>
+          </div>
+          <FormField label="Mobile Number"><input value={form.mobile} onChange={e => setForm({ ...form, mobile: e.target.value })} placeholder="9999999999" /></FormField>
+
+          {isAdmin && (
+            <>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                <FormField label="Monthly Salary (₹)"><input type="number" value={form.salary} onChange={e => { setForm({ ...form, salary: e.target.value }); setIncrement(""); }} placeholder="30000" /></FormField>
+                <FormField label="Incentive %"><input type="number" value={form.incentive_pct} onChange={e => setForm({ ...form, incentive_pct: e.target.value })} placeholder="10" /></FormField>
+              </div>
+              {editId && (
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, alignItems: "end" }}>
+                  <FormField label="Increment Amount (₹)">
+                    <input type="number" value={increment} placeholder="e.g. 2000" onChange={e => {
+                      const inc = e.target.value;
+                      setIncrement(inc);
+                      if (inc) {
+                        const existing = staff.find(x => x.id === editId);
+                        const base = Number(existing?.salary) || 0;
+                        setForm(f => ({ ...f, salary: String(base + Number(inc)) }));
+                      }
+                    }} />
+                  </FormField>
+                  <div style={{ fontSize: 12, color: "var(--text3)", paddingBottom: 14 }}>
+                    {increment && Number(increment) ? (
+                      <span>New Salary: <strong style={{ color: "var(--green)", fontSize: 14 }}>{INR(Number(form.salary))}</strong></span>
+                    ) : null}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+          
+          <FormField label="Monthly Billing Target (₹)"><input type="number" value={form.target} onChange={e => setForm({ ...form, target: e.target.value })} placeholder="60000" /></FormField>
+          
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+            <FormField label="Joining Date *"><input type="date" required value={form.join} onChange={e => setForm({ ...form, join: e.target.value })} /></FormField>
+            <FormField label="Exit Date (Opt)"><input type="date" value={form.exit_date} onChange={e => setForm({ ...form, exit_date: e.target.value })} /></FormField>
+          </div>
+
+          <div style={{ display: "flex", gap: 12, marginTop: 12 }}>
+            <button type="submit" style={{ flex: 1, padding: "14px", borderRadius: 12, background: "var(--accent)", color: "#000", border: "none", fontWeight: 800, cursor: "pointer" }}>Save Employee</button>
+            <button type="button" onClick={() => setShowForm(false)} style={{ padding: "14px 24px", borderRadius: 12, background: "var(--bg3)", color: "var(--text2)", border: "1px solid var(--border)", cursor: "pointer", fontWeight: 600 }}>Cancel</button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Status Confirmation Modal */}
+      {Object.keys(pendingStatus).length > 0 && (() => {
+        const sid = Object.keys(pendingStatus)[0];
+        const pending = pendingStatus[sid];
+        const s = staff.find(x => x.id === sid);
+        return (
+          <Modal isOpen={true} onClose={() => setPendingStatus({})} title="Change Employee Status">
+            <div style={{ fontSize: 13, color: "var(--text2)", marginBottom: 20 }}>
+              You are changing the status for <strong>{s?.name}</strong> to <strong>{pending.goingActive ? "Active" : "Inactive"}</strong>.
+              Please select the effective date for this change.
+            </div>
+            <FormField label="Effective Date">
+              <input type="date" value={pending.date} onChange={e => setPendingStatus({ [sid]: { ...pending, date: e.target.value } })} />
+            </FormField>
+            <div style={{ display: "flex", gap: 12, marginTop: 24 }}>
+              <button onClick={() => confirmStatusChange(sid)} style={{ flex: 1, padding: "14px", borderRadius: 12, background: pending.goingActive ? "var(--green)" : "var(--red)", color: "#fff", border: "none", fontWeight: 800, cursor: "pointer" }}>
+                Confirm {pending.goingActive ? "Activation" : "Deactivation"}
+              </button>
+              <button onClick={() => setPendingStatus({})} style={{ padding: "14px 24px", borderRadius: 12, background: "var(--bg3)", color: "var(--text2)", border: "1px solid var(--border)", cursor: "pointer", fontWeight: 600 }}>Cancel</button>
+            </div>
+          </Modal>
+        );
+      })()}
+
+      {/* Pending Setup Table (admin only) */}
+      {isAdmin && (() => {
+        const pending = staff.filter(s => s.pending_setup);
+        if (pending.length === 0) return null;
+        return (
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+              <span style={{ padding: "4px 10px", borderRadius: 999, background: "rgba(251,146,60,0.15)", color: "var(--orange)", fontSize: 10, fontWeight: 900, textTransform: "uppercase", letterSpacing: 1 }}>Action Needed</span>
+              <h4 style={{ fontSize: 14, fontWeight: 800, color: "var(--orange)", margin: 0 }}>Pending Setup — {pending.length} new staff added by accountant</h4>
+            </div>
+            <Card style={{ border: "1px solid rgba(251,146,60,0.35)" }}>
+              <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 13 }}>
+                <thead>
+                  <tr>
+                    <TH>Name</TH><TH>Branch</TH><TH>Role</TH><TH>Mobile</TH><TH>Joined</TH>
+                    <TH right>Default Salary</TH><TH right>Default Inc %</TH><TH right sticky>Action</TH>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pending.map(s => {
+                    const b = branches.find(x => x.id === s.branch_id);
+                    return (
+                      <tr key={s.id} style={{ background: "rgba(251,146,60,0.03)" }}>
+                        <TD style={{ fontWeight: 700 }}>{s.name}</TD>
+                        <TD>{b?.name || "—"}</TD>
+                        <TD>{s.role || "—"}</TD>
+                        <TD style={{ color: "var(--text3)" }}>{s.mobile || "—"}</TD>
+                        <TD style={{ color: "var(--text3)" }}>{s.join || "—"}</TD>
+                        <TD right style={{ color: "var(--orange)", fontWeight: 700 }}>{INR(s.salary || 0)}</TD>
+                        <TD right style={{ color: "var(--orange)", fontWeight: 700 }}>{s.incentive_pct || 10}%</TD>
+                        <TD sticky right>
+                          <button onClick={() => handleEdit(s)}
+                            style={{ padding: "6px 14px", borderRadius: 8, background: "linear-gradient(135deg,var(--accent),var(--gold2))", color: "#000", border: "none", fontWeight: 800, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 }}>
+                            <Icon name="edit" size={12} /> Setup Now
+                          </button>
+                        </TD>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </Card>
+          </div>
+        );
+      })()}
+
+      {/* Staff Table */}
+      <Card>
+        <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 13 }}>
+          <thead>
+            <tr>
+              <TH>Staff Identity</TH>
+              <TH>Role & Status</TH>
+              <TH>Goal Progress</TH>
+              {!isAccountant && <TH right>{filterMode === 'year' ? 'Yearly Salary' : 'Monthly Salary'}</TH>}
+              {canEdit && <TH right sticky>Actions</TH>}
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map((s, i) => {
+              const b = branches.find(x => x.id === s.branch_id);
+              const ach = staffBillingInPeriod(s.id, entries, filterPrefix, filterMode, filterYear);
+              const monthsInView = filterMode === 'year' ? (filterYear === NOW.getFullYear() ? NOW.getMonth() + 1 : 12) : 1;
+              const tgt = (s.target || 50000) * monthsInView;
+              const overall = staffOverallStatus(s, statusRefMon);
+              const checkMon = filterMode === "month" ? filterPrefix : filterYear + "-" + String(NOW.getMonth() + 1).padStart(2, "0");
+              const monthSt = staffStatusForMonth(s, checkMon);
+              const sal = yearlyStaffSalary(s);
+              const isPending = pendingStatus[s.id];
+
+              return (
+                <tr key={s.id} style={{ opacity: overall === "inactive" ? 0.6 : 1, transition: "background 0.2s" }}>
+                  <TD>
+                    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                      <div style={{ width: 40, height: 40, borderRadius: 12, background: "var(--bg4)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, fontWeight: 800, color: "var(--accent)", border: "1px solid var(--border)" }}>{s.name[0]}</div>
+                      <div>
+                        <div style={{ fontWeight: 700, fontSize: 14 }}>{s.name}</div>
+                        <div style={{ fontSize: 11, color: "var(--text3)", display: "flex", alignItems: "center", gap: 5 }}>
+                          <Icon name="log" size={10} /> {b?.name || "No Branch"} • {s.mobile || "No Mobile"}
+                        </div>
+                      </div>
+                    </div>
+                  </TD>
+                  <TD>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <Pill label={s.role || "Trainee"} color={s.role === 'Captain' ? 'purple' : 'blue'} />
+                        {overall === 'active' ? <Pill label="Active" color="green" /> : <Pill label="Inactive" color="red" />}
+                      </div>
+                      {monthSt.status === 'partial' && <div style={{ fontSize: 10, color: "var(--orange)", fontWeight: 600 }}>Partial: {monthSt.daysWorked} working days</div>}
+                    </div>
+                  </TD>
+                  <TD style={{ minWidth: 200 }}>
+                    <ProgressBar value={ach} max={tgt} label={`${INR(ach)} / ${INR(tgt)}`} color={ach >= tgt ? "green" : "accent"} />
+                  </TD>
+                  {!isAccountant && (
+                    <TD right>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, justifyContent: "flex-end" }}>
+                        <div>
+                          <div style={{ fontSize: 14, fontWeight: 800, color: "var(--accent)" }}>{INR(sal)}</div>
+                          <div style={{ fontSize: 10, color: "var(--text3)" }}>{filterMode === 'year' ? 'Yearly payroll' : 'Pro-rata payroll'}</div>
+                        </div>
+                        {filterMode === 'year' && (
+                          <button onClick={() => setMonthlyLogModal(s)} title="Monthly Breakdown"
+                            style={{ padding: "4px 6px", borderRadius: 6, background: "var(--bg4)", border: "1px solid var(--border)", cursor: "pointer", display: "inline-flex", alignItems: "center" }}>
+                            <Icon name="log" size={14} style={{ color: "var(--accent)" }} />
+                          </button>
+                        )}
+                      </div>
+                    </TD>
+                  )}
+                  {canEdit && (
+                    <TD sticky right>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "flex-end" }}>
+                        {!isAccountant && <IconBtn name="log" onClick={() => setHistoryModal(s)} variant="secondary" title="History Log" />}
+                        <IconBtn name={overall === 'active' ? 'close' : 'check'} onClick={() => handleToggleStatus(s, !(overall === 'active'))} variant={overall === 'active' ? 'danger' : 'success'} title={overall === 'active' ? "Mark as Exited" : "Activate"} />
+                        <IconBtn name="edit" onClick={() => handleEdit(s)} variant="secondary" title="Edit Staff" />
+                        {!isAccountant && <IconBtn name="del" onClick={() => handleDelete(s.id)} variant="danger" title="Delete" />}
+                      </div>
+                    </TD>
+                  )}
+                </tr>
+              );
+            })}
+            {filtered.length === 0 && (
+              <tr><td colSpan={13} style={{ textAlign: "center", padding: 24, color: "var(--text3)" }}>No staff found for this filter</td></tr>
+            )}
+          </tbody>
+          <tfoot>
+            <tr style={{ background: "var(--bg3)", fontWeight: 800, color: "var(--accent)", borderTop: "2px solid var(--border2)" }}>
+              <td colSpan={2} style={{ padding: "16px 20px" }}>NETWORK TOTALS ({filtered.length} staff)</td>
+              <td style={{ padding: "16px 20px" }}>
+                <ProgressBar value={totalAchieved} max={totalTarget} label={`${INR(totalAchieved)} / ${INR(totalTarget)}`} color="accent" />
+              </td>
+              {!isAccountant && <td style={{ padding: "16px 20px", textAlign: "right", fontSize: 18 }}>{INR(totalSalary)}</td>}
+              {canEdit && <td style={{ position: "sticky", right: 0, background: "var(--bg3)" }}></td>}
+            </tr>
+          </tfoot>
+        </table>
+      </Card>
+
+      {/* Employee History Log Modal */}
+      <Modal isOpen={!!historyModal} onClose={() => setHistoryModal(null)} title={`Employee Log — ${historyModal?.name || ''}`} width={620}>
+        {historyModal && (() => {
+          const sHist = salaryHistory.filter(h => h.staff_id === historyModal.id);
+          const sLog = statusLog.filter(l => l.staff_id === historyModal.id);
+          const b = branches.find(x => x.id === historyModal.branch_id);
+          // Merge all events into a single timeline
+          const timeline = [
+            ...sHist.map(h => ({
+              date: h.effective_from,
+              type: 'salary',
+              action: 'Salary Changed',
+              details: `${INR(h.old_salary || 0)} → ${INR(h.salary)}${h.old_salary != null && h.salary > h.old_salary ? ` (+${INR(h.salary - h.old_salary)} increment)` : ''}`,
+              by: h.changed_by || '—',
+              color: 'accent',
+            })),
+            ...sLog.map(l => ({
+              date: l.date,
+              type: 'status',
+              action: l.action === 'activated' ? 'Activated' : l.action === 'deactivated' ? 'Deactivated' : l.action,
+              details: l.action === 'deactivated' ? `Exit date set: ${l.date}` : 'Rejoined / Reactivated',
+              by: l.by || '—',
+              color: l.action === 'activated' ? 'green' : 'red',
+            })),
+          ].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+
+          return (
+            <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+              {/* Employee Info Card */}
+              <div style={{ background: "var(--bg4)", padding: 16, borderRadius: 10 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, fontSize: 12 }}>
+                  <div><span style={{ color: "var(--text3)" }}>Branch:</span> <strong>{b?.name || '—'}</strong></div>
+                  <div><span style={{ color: "var(--text3)" }}>Role:</span> <strong>{historyModal.role || '—'}</strong></div>
+                  <div><span style={{ color: "var(--text3)" }}>Joined:</span> <strong>{historyModal.join || '—'}</strong></div>
+                  <div><span style={{ color: "var(--text3)" }}>Status:</span> <strong style={{ color: historyModal.exit_date ? "var(--red)" : "var(--green)" }}>{historyModal.exit_date ? `Exited ${historyModal.exit_date}` : 'Active'}</strong></div>
+                  <div><span style={{ color: "var(--text3)" }}>Current Salary:</span> <strong style={{ color: "var(--accent)" }}>{INR(historyModal.salary)}</strong></div>
+                  <div><span style={{ color: "var(--text3)" }}>Mobile:</span> <strong>{historyModal.mobile || '—'}</strong></div>
+                </div>
+              </div>
+
+              {/* Unified Activity Log Table */}
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.5, marginBottom: 10 }}>Activity Log</div>
+                {timeline.length > 0 ? (
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                    <thead>
+                      <tr style={{ borderBottom: "1px solid var(--border)" }}>
+                        <th style={{ padding: "8px 10px", textAlign: "left", fontSize: 9, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1 }}>Date</th>
+                        <th style={{ padding: "8px 10px", textAlign: "left", fontSize: 9, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1 }}>Action</th>
+                        <th style={{ padding: "8px 10px", textAlign: "left", fontSize: 9, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1 }}>Details</th>
+                        <th style={{ padding: "8px 10px", textAlign: "right", fontSize: 9, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1 }}>By</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {timeline.map((t, i) => (
+                        <tr key={i} style={{ borderBottom: "1px solid rgba(72,72,71,0.08)" }}>
+                          <td style={{ padding: "10px 10px", color: "var(--text3)", whiteSpace: "nowrap" }}>{t.date}</td>
+                          <td style={{ padding: "10px 10px" }}><Pill label={t.action} color={t.color} /></td>
+                          <td style={{ padding: "10px 10px", color: "var(--text2)", fontWeight: 600 }}>{t.details}</td>
+                          <td style={{ padding: "10px 10px", textAlign: "right", color: "var(--text3)", fontSize: 11 }}>{t.by}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                ) : <div style={{ fontSize: 12, color: "var(--text3)", padding: "16px 0", textAlign: "center" }}>No activity recorded yet.</div>}
+              </div>
+            </div>
+          );
+        })()}
+      </Modal>
+
+      {/* Monthly Breakdown Modal (yearly view) */}
+      <Modal isOpen={!!monthlyLogModal} onClose={() => setMonthlyLogModal(null)} title={`Monthly Breakdown — ${monthlyLogModal?.name || ''}`} width={520}>
+        {monthlyLogModal && (() => {
+          const MONTH_NAMES = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+          const limit = filterYear === NOW.getFullYear() ? NOW.getMonth() + 1 : 12;
+          const rows = [];
+          let yearTotal = 0;
+          for (let m = 1; m <= limit; m++) {
+            const mp = `${filterYear}-${String(m).padStart(2,'0')}`;
+            const mSal = proRataSalary(monthlyLogModal, mp, branches, salaryHistory, staff, globalSettings);
+            const mBill = staffBillingInPeriod(monthlyLogModal.id, entries, mp, 'month', filterYear);
+            const mStatus = staffStatusForMonth(monthlyLogModal, mp);
+            yearTotal += mSal;
+            rows.push({ month: MONTH_NAMES[m-1], prefix: mp, salary: mSal, billing: mBill, status: mStatus.status, days: mStatus.daysWorked });
+          }
+          return (
+            <div>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                <thead>
+                  <tr style={{ borderBottom: "1px solid var(--border)" }}>
+                    <th style={{ padding: "8px 10px", textAlign: "left", fontSize: 9, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1 }}>Month</th>
+                    <th style={{ padding: "8px 10px", textAlign: "center", fontSize: 9, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1 }}>Status</th>
+                    <th style={{ padding: "8px 10px", textAlign: "right", fontSize: 9, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1 }}>Days</th>
+                    <th style={{ padding: "8px 10px", textAlign: "right", fontSize: 9, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1 }}>Billing</th>
+                    <th style={{ padding: "8px 10px", textAlign: "right", fontSize: 9, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1 }}>Salary</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((r, i) => (
+                    <tr key={i} style={{ borderBottom: "1px solid rgba(72,72,71,0.08)" }}>
+                      <td style={{ padding: "10px 10px", fontWeight: 600 }}>{r.month} {filterYear}</td>
+                      <td style={{ padding: "10px 10px", textAlign: "center" }}>
+                        <Pill label={r.status === 'active' ? 'Full' : r.status === 'partial' ? 'Partial' : 'N/A'} color={r.status === 'active' ? 'green' : r.status === 'partial' ? 'orange' : 'red'} />
+                      </td>
+                      <td style={{ padding: "10px 10px", textAlign: "right", color: "var(--text3)" }}>{r.days}</td>
+                      <td style={{ padding: "10px 10px", textAlign: "right", color: "var(--text2)", fontWeight: 600 }}>{INR(r.billing)}</td>
+                      <td style={{ padding: "10px 10px", textAlign: "right", color: "var(--accent)", fontWeight: 700 }}>{INR(r.salary)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr style={{ borderTop: "2px solid var(--border)" }}>
+                    <td colSpan={3} style={{ padding: "12px 10px", fontWeight: 800, fontSize: 13 }}>TOTAL</td>
+                    <td style={{ padding: "12px 10px", textAlign: "right", fontWeight: 800, fontSize: 13, color: "var(--text)" }}>{INR(rows.reduce((s,r) => s + r.billing, 0))}</td>
+                    <td style={{ padding: "12px 10px", textAlign: "right", fontWeight: 800, fontSize: 13, color: "var(--accent)" }}>{INR(yearTotal)}</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          );
+        })()}
+      </Modal>
+
+      {ConfirmDialog}
+      {ToastContainer}
+    </div>
+  );
+}
+
+// ── Sub-components ───────────────────────────────────────
+function FormField({ label, children }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6, justifyContent: "flex-end" }}>
+      <label style={{ fontSize: 12, color: "var(--text2)", fontWeight: 700, textTransform: "capitalize", letterSpacing: 1 }}>{label}</label>
+      {children && <div style={{ display: "contents" }}>
+        {React.cloneElement(children, {
+          style: { padding: "12px 16px", border: "2px solid var(--input-border)", borderRadius: 10, fontSize: 15, background: "var(--bg2)", color: "var(--text)", fontFamily: "var(--font-outfit)", width: "100%", transition: "all .3s", ...(children.props.style || {}) }
+        })}
+      </div>}
+    </div>
+  );
+}
+
+import React from "react";
