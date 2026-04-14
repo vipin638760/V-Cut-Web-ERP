@@ -23,8 +23,12 @@ export function getStaffSalaryForMonth(staffId, monthStr, salaryHistory, staffLi
   return s.salary || 0;
 }
 
-/** Pro-rata salary for a staff member in a given month */
-export function proRataSalary(st, monthStr, branches, salaryHistory, staffList, globalSettings = {}) {
+/** Pro-rata salary for a staff member in a given month
+ *  Leaves: pass an array of leaves docs ({staff_id, date, days, type, status}) to deduct unpaid leaves.
+ *  - Paid allowance is pro-rated based on the active portion of the month.
+ *  - Each approved leave consumes the paid allowance first; the remainder is unpaid and reduces salary.
+ */
+export function proRataSalary(st, monthStr, branches, salaryHistory, staffList, globalSettings = {}, leaves = []) {
   const salary = getStaffSalaryForMonth(st.id, monthStr, salaryHistory, staffList);
   if (!salary) return 0;
 
@@ -61,8 +65,19 @@ export function proRataSalary(st, monthStr, branches, salaryHistory, staffList, 
   const periodOffs = Math.floor(calDays / 7) * 2 + (calDays % 7 >= 6 ? 1 : 0);
   const periodWorkDays = Math.max(0, calDays - periodOffs);
   const proPaidLeave = Math.round(paidLeave * calDays / daysInMonth);
-  const payableDays = Math.min(periodWorkDays + proPaidLeave, workingDays + paidLeave);
   const fullPayBasis = workingDays + paidLeave;
+
+  // Approved leaves in this month for this staff
+  const approvedLeaves = (leaves || []).filter(l =>
+    l.staff_id === st.id && l.status === 'approved' && l.date && l.date.startsWith(monthStr)
+  );
+  const totalLeaveDays = approvedLeaves.reduce((s, l) => s + (Number(l.days) || 1), 0);
+  // Paid allowance covers up to proPaidLeave days; the rest is unpaid (reduces salary).
+  const unpaidLeaveDays = Math.max(0, totalLeaveDays - proPaidLeave);
+  const payableDays = Math.max(
+    0,
+    Math.min(periodWorkDays + proPaidLeave, workingDays + paidLeave) - unpaidLeaveDays
+  );
 
   return Math.round(salary * payableDays / fullPayBasis);
 }
@@ -164,6 +179,22 @@ export function periodLabel(filterMode, filterYear, filterMonth) {
     return new Date(filterYear, filterMonth - 1, 1).toLocaleString('default', { month: 'long', year: 'numeric' });
   }
   return String(filterYear);
+}
+
+/** Resolve a staff member's effective branch on a given date, honoring active transfers */
+export function effectiveBranchOnDate(st, dateStr, transfers = []) {
+  if (!st) return null;
+  const t = (transfers || []).find(x =>
+    x.staff_id === st.id && x.status === 'active' &&
+    (!x.start_date || x.start_date <= dateStr) &&
+    (!x.end_date || x.end_date >= dateStr)
+  );
+  return t ? t.to_branch_id : (st.branch_id || null);
+}
+
+/** Get all staff members whose effective branch on the given date is `branchId` */
+export function staffAtBranchOnDate(branchId, dateStr, staffList = [], transfers = []) {
+  return (staffList || []).filter(s => effectiveBranchOnDate(s, dateStr, transfers) === branchId);
 }
 
 /** Get approved advances for a staff member in a given month */

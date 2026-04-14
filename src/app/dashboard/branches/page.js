@@ -148,16 +148,27 @@ export default function BranchesPage() {
     const net      = income - expenses;
     const totalGst = bEntries.reduce((s, ent) => s + (ent.total_gst || 0), 0);
 
-    return { 
-      b, 
-      i: income, 
-      e: expenses, 
-      n: net, 
-      staffCount: staff.filter(s => s.branch_id === b.id).length, 
+    // Cash reconciliation aggregates (entries where actual cash was recorded)
+    let totalDeficit = 0, totalExcess = 0, reconciledDays = 0;
+    bEntries.forEach(ent => {
+      if (ent.cash_diff == null) return;
+      reconciledDays += 1;
+      if (ent.cash_diff < 0) totalDeficit += Math.abs(ent.cash_diff);
+      else if (ent.cash_diff > 0) totalExcess += ent.cash_diff;
+    });
+    const netDiff = totalExcess - totalDeficit;
+
+    return {
+      b,
+      i: income,
+      e: expenses,
+      n: net,
+      staffCount: staff.filter(s => s.branch_id === b.id).length,
       vInc, vMatE, vOther, vPetrol,
       fShopRent, fRoomRent, fWifi, fElec,
       actualSalary, actualLeaves,
-      totalGst, factor 
+      totalGst, factor,
+      totalDeficit, totalExcess, netDiff, reconciledDays,
     };
   });
   if (brFilter === "profit") branchData = branchData.filter(d => d.n >= 0);
@@ -994,7 +1005,7 @@ function DraggableBranchGrid({ branchData, isAdmin, onCardClick }) {
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(280px,1fr))", gap: 16 }}>
-      {ordered.map(({ b, i, vInc, vMatE, vOther, fShopRent, fRoomRent, fWifi, fElec, actualSalary, actualLeaves, n, staffCount }) => {
+      {ordered.map(({ b, i, vInc, vMatE, vOther, fShopRent, fRoomRent, fWifi, fElec, actualSalary, actualLeaves, n, staffCount, totalDeficit, totalExcess, netDiff, reconciledDays }) => {
         const isDragging = dragging === b.id;
         const isOver = dragOver === b.id;
         
@@ -1044,6 +1055,9 @@ function DraggableBranchGrid({ branchData, isAdmin, onCardClick }) {
                 <CompactStat label="Travel" val={INR(vOther)} col="var(--red)" />
                 <CompactStat label="Elec/Wifi" val={INR(fElec + fWifi)} col="var(--orange)" />
                 <CompactStat label="Leaves" val={actualLeaves + " d"} col="var(--text3)" />
+                <CompactStat label="Deficit" val={totalDeficit ? INR(totalDeficit) : "—"} col={totalDeficit ? "var(--red)" : "var(--text3)"} />
+                <CompactStat label="Excess" val={totalExcess ? INR(totalExcess) : "—"} col={totalExcess ? "var(--green)" : "var(--text3)"} />
+                <CompactStat label={`Net (${reconciledDays}d)`} val={reconciledDays ? (netDiff === 0 ? "✓ Match" : (netDiff > 0 ? "+" : "") + INR(netDiff)) : "—"} col={!reconciledDays ? "var(--text3)" : netDiff === 0 ? "var(--green)" : netDiff > 0 ? "var(--green)" : "var(--red)"} bold />
               </div>
               <div style={{ marginTop: 14, textAlign: "center", fontSize: 10, color: "var(--gold)", fontWeight: 600, opacity: 0.7, borderTop: "1px solid var(--border)", paddingTop: 10, letterSpacing: 0.5 }}>
                 ⋮⋮ DRAG TO REORDER · CLICK TO EXPAND

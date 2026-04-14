@@ -22,10 +22,13 @@ export default function StaffPage() {
   const [leaves, setLeaves] = useState([]);
   const [salaryHistory, setSalaryHistory] = useState([]);
   const [statusLog, setStatusLog] = useState([]);
+  const [transfers, setTransfers] = useState([]);
   const [globalSettings, setGlobalSettings] = useState(null);
   const [loading, setLoading] = useState(true);
   const [historyModal, setHistoryModal] = useState(null); // staff object
   const [monthlyLogModal, setMonthlyLogModal] = useState(null); // staff object for yearly breakdown
+  const [transferModal, setTransferModal] = useState(null); // staff object being transferred
+  const [transferForm, setTransferForm] = useState({ to_branch_id: "", start_date: "", end_date: "", reason: "" });
 
   // Period filter state
   const [filterMode, setFilterMode] = useState("month");
@@ -62,6 +65,7 @@ export default function StaffPage() {
       onSnapshot(collection(db, "leaves"), sn => setLeaves(sn.docs.map(d => ({ ...d.data(), id: d.id })))),
       onSnapshot(doc(db, "settings", "global"), sn => setGlobalSettings(sn.data())),
       onSnapshot(query(collection(db, "staff_status_log"), orderBy("at", "desc")), sn => setStatusLog(sn.docs.map(d => ({ ...d.data(), id: d.id })))),
+      onSnapshot(query(collection(db, "staff_transfers"), orderBy("start_date", "desc")), sn => setTransfers(sn.docs.map(d => ({ ...d.data(), id: d.id })))),
       onSnapshot(query(collection(db, "salary_history"), orderBy("effective_from", "asc")), sn => {
         setSalaryHistory(sn.docs.map(d => ({ ...d.data(), id: d.id })));
         setLoading(false);
@@ -212,14 +216,81 @@ export default function StaffPage() {
     setPendingStatus(prev => { const n = { ...prev }; delete n[sid]; return n; });
   };
 
+  // Active transfer for a staff member = status 'active' and today within start..end (or no end)
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const getActiveTransfer = (sid) => transfers.find(t =>
+    t.staff_id === sid && t.status === "active" &&
+    (!t.start_date || t.start_date <= todayStr) &&
+    (!t.end_date || t.end_date >= todayStr)
+  );
+
+  const openTransfer = (s) => {
+    setTransferForm({ to_branch_id: "", start_date: todayStr, end_date: "", reason: "" });
+    setTransferModal(s);
+  };
+
+  const handleSaveTransfer = async (e) => {
+    e.preventDefault();
+    if (!transferModal) return;
+    if (!transferForm.to_branch_id) { confirm({ title: "Missing Destination", message: "Please select the branch to transfer to.", confirmText: "OK", cancelText: "Close", type: "warning", onConfirm: () => {} }); return; }
+    if (transferForm.to_branch_id === transferModal.branch_id) { confirm({ title: "Same Branch", message: "Destination must differ from current branch.", confirmText: "OK", cancelText: "Close", type: "warning", onConfirm: () => {} }); return; }
+    if (!transferForm.start_date) { confirm({ title: "Start Date Required", message: "Please select a start date.", confirmText: "OK", cancelText: "Close", type: "warning", onConfirm: () => {} }); return; }
+    if (transferForm.end_date && transferForm.end_date < transferForm.start_date) { confirm({ title: "Invalid Date Range", message: "End date cannot be before start date.", confirmText: "OK", cancelText: "Close", type: "warning", onConfirm: () => {} }); return; }
+
+    const toBranch = branches.find(b => b.id === transferForm.to_branch_id);
+    try {
+      await addDoc(collection(db, "staff_transfers"), {
+        staff_id: transferModal.id,
+        staff_name: transferModal.name,
+        from_branch_id: transferModal.branch_id || null,
+        from_branch_name: branches.find(b => b.id === transferModal.branch_id)?.name || null,
+        to_branch_id: transferForm.to_branch_id,
+        to_branch_name: toBranch?.name || null,
+        start_date: transferForm.start_date,
+        end_date: transferForm.end_date || null,
+        reason: transferForm.reason.trim() || null,
+        status: "active",
+        created_by: currentUser?.name || "user",
+        created_at: new Date().toISOString(),
+      });
+      toast({ title: "Transfer Created", message: `${transferModal.name} → ${toBranch?.name}${transferForm.end_date ? ` until ${transferForm.end_date}` : ""}.`, type: "success" });
+      setTransferModal(null);
+    } catch (err) {
+      confirm({ title: "Transfer Failed", message: err.message, confirmText: "OK", cancelText: "Close", type: "danger", onConfirm: () => {} });
+    }
+  };
+
+  const handleEndTransfer = (t) => {
+    confirm({
+      title: "Return Staff to Home Branch",
+      message: `Return <strong>${t.staff_name}</strong> to <strong>${t.from_branch_name || "home branch"}</strong>? This will end the current transfer today.`,
+      confirmText: "Yes, Return",
+      cancelText: "Cancel",
+      type: "warning",
+      onConfirm: async () => {
+        try {
+          await updateDoc(doc(db, "staff_transfers", t.id), {
+            status: "completed",
+            end_date: todayStr,
+            ended_by: currentUser?.name || "user",
+            ended_at: new Date().toISOString(),
+          });
+          toast({ title: "Transfer Ended", message: `${t.staff_name} returned to ${t.from_branch_name || "home branch"}.`, type: "success" });
+        } catch (err) {
+          confirm({ title: "Error", message: err.message, confirmText: "OK", cancelText: "Close", type: "danger", onConfirm: () => {} });
+        }
+      },
+    });
+  };
+
   if (loading) return <div className="text-center text-[var(--gold)] font-bold p-10">Loading Staff...</div>;
 
-  // Yearly salary helper — sum pro-rata across all months
+  // Yearly salary helper — sum pro-rata across all months (honors approved leaves)
   const yearlyStaffSalary = (s) => {
-    if (filterMode !== 'year') return proRataSalary(s, filterPrefix, branches, salaryHistory, staff, globalSettings);
+    if (filterMode !== 'year') return proRataSalary(s, filterPrefix, branches, salaryHistory, staff, globalSettings, leaves);
     const limit = filterYear === NOW.getFullYear() ? NOW.getMonth() + 1 : 12;
     let total = 0;
-    for (let m = 1; m <= limit; m++) total += proRataSalary(s, `${filterYear}-${String(m).padStart(2,'0')}`, branches, salaryHistory, staff, globalSettings);
+    for (let m = 1; m <= limit; m++) total += proRataSalary(s, `${filterYear}-${String(m).padStart(2,'0')}`, branches, salaryHistory, staff, globalSettings, leaves);
     return total;
   };
 
@@ -360,6 +431,40 @@ export default function StaffPage() {
         );
       })()}
 
+      {/* Transfer Modal */}
+      <Modal isOpen={!!transferModal} onClose={() => setTransferModal(null)} title={`Transfer Staff — ${transferModal?.name || ''}`}>
+        {transferModal && (
+          <form onSubmit={handleSaveTransfer} style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+            <div style={{ background: "var(--bg4)", padding: 12, borderRadius: 10, fontSize: 12, color: "var(--text2)" }}>
+              Temporarily reassigning <strong>{transferModal.name}</strong> from{" "}
+              <strong>{branches.find(b => b.id === transferModal.branch_id)?.name || "—"}</strong>.
+              This does not change their home branch.
+            </div>
+            <FormField label="Transfer To Branch">
+              <select value={transferForm.to_branch_id} onChange={e => setTransferForm({ ...transferForm, to_branch_id: e.target.value })}>
+                <option value="">Select...</option>
+                {branches.filter(b => b.id !== transferModal.branch_id).map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+              </select>
+            </FormField>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+              <FormField label="Start Date *">
+                <input type="date" required value={transferForm.start_date} onChange={e => setTransferForm({ ...transferForm, start_date: e.target.value })} />
+              </FormField>
+              <FormField label="End Date (Opt)">
+                <input type="date" value={transferForm.end_date} onChange={e => setTransferForm({ ...transferForm, end_date: e.target.value })} />
+              </FormField>
+            </div>
+            <FormField label="Reason">
+              <input value={transferForm.reason} onChange={e => setTransferForm({ ...transferForm, reason: e.target.value })} placeholder="e.g. Covering staff shortage at destination branch" />
+            </FormField>
+            <div style={{ display: "flex", gap: 12, marginTop: 12 }}>
+              <button type="submit" style={{ flex: 1, padding: "14px", borderRadius: 12, background: "var(--accent)", color: "#000", border: "none", fontWeight: 800, cursor: "pointer" }}>Confirm Transfer</button>
+              <button type="button" onClick={() => setTransferModal(null)} style={{ padding: "14px 24px", borderRadius: 12, background: "var(--bg3)", color: "var(--text2)", border: "1px solid var(--border)", cursor: "pointer", fontWeight: 600 }}>Cancel</button>
+            </div>
+          </form>
+        )}
+      </Modal>
+
       {/* Pending Setup Table (admin only) */}
       {isAdmin && (() => {
         const pending = staff.filter(s => s.pending_setup);
@@ -429,6 +534,7 @@ export default function StaffPage() {
               const monthSt = staffStatusForMonth(s, checkMon);
               const sal = yearlyStaffSalary(s);
               const isPending = pendingStatus[s.id];
+              const activeTransfer = getActiveTransfer(s.id);
 
               return (
                 <tr key={s.id} style={{ opacity: overall === "inactive" ? 0.6 : 1, transition: "background 0.2s" }}>
@@ -440,6 +546,12 @@ export default function StaffPage() {
                         <div style={{ fontSize: 11, color: "var(--text3)", display: "flex", alignItems: "center", gap: 5 }}>
                           <Icon name="log" size={10} /> {b?.name || "No Branch"} • {s.mobile || "No Mobile"}
                         </div>
+                        {activeTransfer && (
+                          <div style={{ marginTop: 4, display: "inline-flex", alignItems: "center", gap: 6, padding: "2px 8px", borderRadius: 999, background: "rgba(96,165,250,0.12)", border: "1px solid rgba(96,165,250,0.3)", fontSize: 10, fontWeight: 700, color: "var(--blue, #60a5fa)" }}>
+                            <span>↪ Temp @ {activeTransfer.to_branch_name}</span>
+                            {activeTransfer.end_date && <span style={{ opacity: 0.8 }}>until {activeTransfer.end_date}</span>}
+                          </div>
+                        )}
                       </div>
                     </div>
                   </TD>
@@ -475,6 +587,19 @@ export default function StaffPage() {
                     <TD sticky right>
                       <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "flex-end" }}>
                         {!isAccountant && <IconBtn name="log" onClick={() => setHistoryModal(s)} variant="secondary" title="History Log" />}
+                        {overall === 'active' && (
+                          activeTransfer ? (
+                            <button onClick={() => handleEndTransfer(activeTransfer)} title="Return to home branch"
+                              style={{ padding: "6px 10px", borderRadius: 8, background: "var(--green-bg)", border: "1px solid rgba(74,222,128,0.3)", color: "var(--green)", fontSize: 11, fontWeight: 800, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>
+                              ↩ Return
+                            </button>
+                          ) : (
+                            <button onClick={() => openTransfer(s)} title="Transfer to another branch"
+                              style={{ padding: "6px 10px", borderRadius: 8, background: "rgba(96,165,250,0.12)", border: "1px solid rgba(96,165,250,0.3)", color: "var(--blue, #60a5fa)", fontSize: 11, fontWeight: 800, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>
+                              ↪ Transfer
+                            </button>
+                          )
+                        )}
                         <IconBtn name={overall === 'active' ? 'close' : 'check'} onClick={() => handleToggleStatus(s, !(overall === 'active'))} variant={overall === 'active' ? 'danger' : 'success'} title={overall === 'active' ? "Mark as Exited" : "Activate"} />
                         <IconBtn name="edit" onClick={() => handleEdit(s)} variant="secondary" title="Edit Staff" />
                         {!isAccountant && <IconBtn name="del" onClick={() => handleDelete(s.id)} variant="danger" title="Delete" />}
@@ -506,6 +631,7 @@ export default function StaffPage() {
         {historyModal && (() => {
           const sHist = salaryHistory.filter(h => h.staff_id === historyModal.id);
           const sLog = statusLog.filter(l => l.staff_id === historyModal.id);
+          const sTransfers = transfers.filter(t => t.staff_id === historyModal.id);
           const b = branches.find(x => x.id === historyModal.branch_id);
           // Merge all events into a single timeline
           const timeline = [
@@ -524,6 +650,14 @@ export default function StaffPage() {
               details: l.action === 'deactivated' ? `Exit date set: ${l.date}` : 'Rejoined / Reactivated',
               by: l.by || '—',
               color: l.action === 'activated' ? 'green' : 'red',
+            })),
+            ...sTransfers.map(t => ({
+              date: t.start_date,
+              type: 'transfer',
+              action: t.status === 'active' ? 'Transferred' : 'Transfer Ended',
+              details: `${t.from_branch_name || '—'} → ${t.to_branch_name || '—'}${t.end_date ? ` (until ${t.end_date})` : ''}${t.reason ? ` • ${t.reason}` : ''}`,
+              by: t.created_by || '—',
+              color: t.status === 'active' ? 'blue' : 'accent',
             })),
           ].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
 
@@ -581,7 +715,7 @@ export default function StaffPage() {
           let yearTotal = 0;
           for (let m = 1; m <= limit; m++) {
             const mp = `${filterYear}-${String(m).padStart(2,'0')}`;
-            const mSal = proRataSalary(monthlyLogModal, mp, branches, salaryHistory, staff, globalSettings);
+            const mSal = proRataSalary(monthlyLogModal, mp, branches, salaryHistory, staff, globalSettings, leaves);
             const mBill = staffBillingInPeriod(monthlyLogModal.id, entries, mp, 'month', filterYear);
             const mStatus = staffStatusForMonth(monthlyLogModal, mp);
             yearTotal += mSal;

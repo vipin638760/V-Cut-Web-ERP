@@ -5,7 +5,7 @@ import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
 import { INR } from "@/lib/calculations";
 import { Icon, IconBtn, Card, PeriodWidget, TH, TD, Modal, useConfirm, useToast } from "@/components/ui";
-import { staffStatusForMonth } from "@/lib/calculations";
+import { staffStatusForMonth, effectiveBranchOnDate } from "@/lib/calculations";
 
 // ExcelJS is ~200KB — load only when Template/Upload/Export is actually used.
 let _excelJSPromise = null;
@@ -56,6 +56,7 @@ export default function EntryPage() {
 
   const [branches, setBranches] = useState([]);
   const [staff, setStaff] = useState([]);
+  const [transfers, setTransfers] = useState([]);
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -71,10 +72,11 @@ export default function EntryPage() {
   const [selBranch, setSelBranch] = useState("");
   const [selDate, setSelDate] = useState(new Date().toISOString().slice(0, 10));
   const [onlineInc, setOnlineInc] = useState("");
-  const [cashInc, setCashInc] = useState("");
   const [matExp, setMatExp] = useState("");
   const [otherExp, setOtherExp] = useState("");
   const [petrol, setPetrol] = useState("");
+  const [actualCash, setActualCash] = useState("");
+  const [leavePrompt, setLeavePrompt] = useState(null); // { staff, type, reason }
   const [globalSettings, setGlobalSettings] = useState(null);
   const [globalGst, setGlobalGst] = useState("5");
   const [gstPct, setGstPct] = useState("5"); // Form's active GST %
@@ -124,12 +126,13 @@ export default function EntryPage() {
     setSelDate(e.date);
     setOrigBranch(e.branch_id);
     setOrigDate(e.date);
-    setCashInc(e.cash || "");
+    setOnlineInc(e.online || "");
     setMatExp(e.mat_expense || "");
     setOtherExp(e.others || "");
     setPetrol(e.petrol || "");
+    setActualCash(e.actual_cash != null ? String(e.actual_cash) : "");
     setGstPct(e.global_gst_pct?.toString() || "18");
-    
+
     const rows = {};
     if (e.staff_billing) {
       e.staff_billing.forEach(sb => {
@@ -140,6 +143,9 @@ export default function EntryPage() {
            mat_incentive: sb.mat_incentive || 0,
            tips: sb.tips || 0,
            gst: sb.gst || 0,
+           tip_in: sb.tip_in || "online",
+           tip_paid: sb.tip_paid || "cash",
+           present: sb.present !== false,
            staff_total_inc: sb.staff_total_inc || 0,
         };
       });
@@ -170,6 +176,7 @@ export default function EntryPage() {
     const unsubs = [
       onSnapshot(collection(db, "branches"), sn => setBranches(sn.docs.map(d => ({ ...d.data(), id: d.id })))),
       onSnapshot(collection(db, "staff"), sn => setStaff(sn.docs.map(d => ({ ...d.data(), id: d.id })))),
+      onSnapshot(collection(db, "staff_transfers"), sn => setTransfers(sn.docs.map(d => ({ ...d.data(), id: d.id })))),
       onSnapshot(query(collection(db, "entries"), orderBy("date", "desc")), handleEntriesSn),
       onSnapshot(doc(db, "settings", "global"), sn => {
         if (sn.exists()) {
@@ -191,10 +198,11 @@ export default function EntryPage() {
     return m;
   }, [branches]);
 
-  // Active staff for selected branch and date
+  // Active staff for selected branch and date — honors active transfers
+  // (transferred-in staff appear here; home staff currently on transfer elsewhere are excluded)
   const branchStaff = selBranch && selDate
     ? staff.filter(s => {
-        if (s.branch_id !== selBranch) return false;
+        if (effectiveBranchOnDate(s, selDate, transfers) !== selBranch) return false;
         const mon = selDate.slice(0, 7);
         return staffStatusForMonth(s, mon).status !== "inactive";
       })
@@ -203,6 +211,10 @@ export default function EntryPage() {
   const updateStaffRow = (sid, field, value) => {
     setStaffRows(prev => {
       const row = prev[sid] || {};
+      // Pass-through fields that don't trigger recalculation
+      if (field === "tip_in" || field === "tip_paid" || field === "present" || field === "leave_type" || field === "leave_reason") {
+        return { ...prev, [sid]: { ...row, [field]: value } };
+      }
       const billing = field === "billing" ? Number(value) : (row.billing || 0);
       const material = field === "material" ? Number(value) : (row.material || 0);
       const tips = field === "tips" ? Number(value) : (row.tips || 0);
@@ -227,7 +239,7 @@ export default function EntryPage() {
       const staffTotalInc = incentive + mat_incentive + tips;
       
       const total = billing + material + tips - incentive - mat_incentive;
-      return { ...prev, [sid]: { billing, material, tips, incentive, mat_incentive, staff_total_inc: staffTotalInc, total } };
+      return { ...prev, [sid]: { ...row, billing, material, tips, incentive, mat_incentive, staff_total_inc: staffTotalInc, total } };
     });
   };
 
@@ -248,15 +260,73 @@ export default function EntryPage() {
     return acc;
   }, [staffRows]);
   
-  // New GST logic: strictly based on Online value
-  const totalRowGst = Math.round((Math.max(0, (totalBilling + totalMatSale) - (Number(cashInc) || 0))) * (Number(gstPct) || 0) / 100);
-  
-  // Auto-deduct Online Income logic
+  // Online is the manual input; Cash auto-fills to absorb the remainder of total sales.
   const globalTotalSales = totalBilling + totalMatSale;
-  const totalCash = Number(cashInc) || 0;
-  const totalOnline = Math.max(0, globalTotalSales - totalCash);
-  
-  const cashInHand = totalCash - totalIncentive - totalTips - (Number(otherExp) || 0) - (Number(petrol) || 0);
+  const totalOnline = Math.max(0, Number(onlineInc) || 0);
+  const totalCash = Math.max(0, globalTotalSales - totalOnline);
+
+  // GST calculated on the Online portion
+  const totalRowGst = Math.round(totalOnline * (Number(gstPct) || 0) / 100);
+
+  // Tip flow — defaults: received online, paid in cash (most common)
+  const { tipsInCash, tipsPaidCash } = useMemo(() => {
+    let inCash = 0, outCash = 0;
+    Object.values(staffRows).forEach(r => {
+      const t = Number(r.tips) || 0;
+      if (!t) return;
+      if ((r.tip_in || "online") === "cash") inCash += t;
+      if ((r.tip_paid || "cash") === "cash") outCash += t;
+    });
+    return { tipsInCash: inCash, tipsPaidCash: outCash };
+  }, [staffRows]);
+
+  // Cash drawer balance: cash sales + cash tips received − cash tips paid − incentive − expenses
+  const cashInHand = totalCash + tipsInCash - tipsPaidCash - totalIncentive - (Number(otherExp) || 0) - (Number(petrol) || 0);
+
+  // Reconciliation: actual counted cash vs expected cash-in-hand
+  const actualCashNum = actualCash === "" ? null : Number(actualCash);
+  const cashDiff = actualCashNum === null ? null : Math.round(actualCashNum - cashInHand);
+
+  // Attendance handlers
+  const handleAttendanceToggle = (s, present) => {
+    if (present) {
+      // Marking present: remove any draft leave + restore inputs
+      updateStaffRow(s.id, "present", true);
+      updateStaffRow(s.id, "leave_type", "");
+      updateStaffRow(s.id, "leave_reason", "");
+    } else {
+      // Marking absent: open leave application popup
+      setLeavePrompt({ staff: s, type: "Paid", reason: "" });
+    }
+  };
+
+  const confirmLeave = async () => {
+    if (!leavePrompt) return;
+    const { staff: ls, type, reason } = leavePrompt;
+    try {
+      await addDoc(collection(db, "leaves"), {
+        staff_id: ls.id,
+        staff_name: ls.name,
+        date: selDate,
+        days: 1,
+        type: type || "Paid",
+        reason: reason || "",
+        status: "approved",
+        created_by: currentUser?.name || "user",
+        created_at: new Date().toISOString(),
+        source: "daily_entry",
+      });
+      // Mark row absent + clear billing fields so it doesn't contribute to totals
+      setStaffRows(prev => ({
+        ...prev,
+        [ls.id]: { ...(prev[ls.id] || {}), present: false, leave_type: type, leave_reason: reason, billing: 0, material: 0, tips: 0, incentive: 0, mat_incentive: 0, staff_total_inc: 0, total: 0 },
+      }));
+      toast({ title: "Leave Recorded", message: `${ls.name} marked absent (${type}) on ${selDate}.`, type: "success" });
+      setLeavePrompt(null);
+    } catch (err) {
+      confirm({ title: "Save Failed", message: err.message, confirmText: "OK", cancelText: "Close", type: "danger", onConfirm: () => {} });
+    }
+  };
 
   const handleSave = async (e) => {
     e.preventDefault();
@@ -293,8 +363,15 @@ export default function EntryPage() {
           incentive: staffRows[s.id]?.incentive || 0,
           mat_incentive: staffRows[s.id]?.mat_incentive || 0,
           tips: staffRows[s.id]?.tips || 0,
+          tip_in: staffRows[s.id]?.tip_in || "online",
+          tip_paid: staffRows[s.id]?.tip_paid || "cash",
+          present: staffRows[s.id]?.present !== false,
           staff_total_inc: staffRows[s.id]?.staff_total_inc || 0
         })),
+        actual_cash: actualCashNum,
+        cash_diff: cashDiff,
+        tips_in_cash: tipsInCash,
+        tips_paid_cash: tipsPaidCash,
         global_gst_pct: Number(gstPct) || 0,
         total_gst: totalRowGst,
         created_at: new Date().toISOString(),
@@ -353,7 +430,7 @@ export default function EntryPage() {
       }
 
       // Clear form
-      setSelBranch(""); setOnlineInc(""); setCashInc(""); setMatExp(""); setOtherExp(""); setPetrol("");
+      setSelBranch(""); setOnlineInc(""); setMatExp(""); setOtherExp(""); setPetrol(""); setActualCash("");
       setStaffRows({});
       setEditId(null);
       setGstPct(globalGst);
@@ -968,13 +1045,13 @@ export default function EntryPage() {
           {/* Branch + Date */}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(200px,1fr))", gap: 12, marginBottom: 16 }}>
             <FG label="Branch">
-              <select value={selBranch} onChange={e => { setSelBranch(e.target.value); setStaffRows({}); setOnlineInc(""); setCashInc(""); setMatExp(""); setOtherExp(""); setPetrol(""); setEditId(null); if(!editId) setGstPct(globalGst); }}>
+              <select value={selBranch} onChange={e => { setSelBranch(e.target.value); setStaffRows({}); setOnlineInc(""); setMatExp(""); setOtherExp(""); setPetrol(""); setEditId(null); if(!editId) setGstPct(globalGst); }}>
                 <option value="">Select branch...</option>
                 {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
               </select>
             </FG>
             <FG label="Date">
-              <input type="date" value={selDate} onChange={e => { setSelDate(e.target.value); setStaffRows({}); setOnlineInc(""); setCashInc(""); setMatExp(""); setOtherExp(""); setPetrol(""); setEditId(null); if(!editId) setGstPct(globalGst); }} />
+              <input type="date" value={selDate} onChange={e => { setSelDate(e.target.value); setEditId(null); if(!editId) setGstPct(globalGst); }} />
             </FG>
             <FG label="Global GST (%)">
               <div style={{ padding: "12px 16px", borderRadius: 10, border: "2px solid var(--border)", background: "var(--bg3)", color: "var(--red)", fontWeight: 700, fontSize: 14, fontFamily: "var(--font-outfit)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -989,12 +1066,14 @@ export default function EntryPage() {
               {/* Income */}
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(200px,1fr))", gap: 12, marginBottom: 16 }}>
                 <FG label="Online Income (₹)" income>
-                  <input type="number" readOnly value={totalOnline} style={{ background: "transparent", color: "var(--green)", cursor: "not-allowed", fontWeight: 700 }} title="Auto-calculated: Total Sale - Cash" />
+                  <input type="number" placeholder="0" min="0" value={onlineInc} onChange={e => setOnlineInc(e.target.value)} title="Enter online portion — Cash auto-fills the remainder" />
                 </FG>
                 <FG label={`TOTAL GST @ ${gstPct}%`} expense>
                   <input type="number" readOnly value={totalRowGst} style={{ background: "transparent", color: "var(--red)", cursor: "not-allowed", fontWeight: 700 }} title="Calculated on Online Income" />
                 </FG>
-                <FG label="Cash Income (₹)" income><input type="number" placeholder="0" min="0" value={cashInc} onChange={e => setCashInc(e.target.value)} /></FG>
+                <FG label="Cash Income (₹)" income>
+                  <input type="number" readOnly value={totalCash} style={{ background: "transparent", color: "var(--green)", cursor: "not-allowed", fontWeight: 700 }} title="Auto-calculated: Total Sale − Online" />
+                </FG>
                 <FG label="Material Expense (₹)" expense><input type="number" placeholder="0" min="0" value={matExp} onChange={e => setMatExp(e.target.value)} /></FG>
               </div>
 
@@ -1007,31 +1086,39 @@ export default function EntryPage() {
                   <table style={{ width: "100%", minWidth: 900, borderCollapse: "collapse" }}>
                     <thead>
                       <tr style={{ background: "var(--bg4)" }}>
-                        {["Staff", "Billing (₹)", "Mat Sale", "Mat Inc (5%auto)", "Incentive", "Tips (₹)", "Staff Total Inc", "Staff Total"].map((h, i) => (
-                          <th key={i} style={{ textAlign: i === 0 ? "left" : "right", padding: "10px 14px", fontSize: 11, fontWeight: 700, color: "var(--text2)", textTransform: "uppercase", letterSpacing: 1, borderBottom: "2px solid var(--gold)", whiteSpace: "nowrap" }}>{h}</th>
+                        {["Present", "Staff", "Billing (₹)", "Mat Sale", "Mat Inc (5%auto)", "Incentive", "Tips (₹)", "Tip In/Out", "Staff Total Inc", "Staff Total"].map((h, i) => (
+                          <th key={i} style={{ textAlign: i === 0 || i === 1 ? "left" : "right", padding: "10px 14px", fontSize: 11, fontWeight: 700, color: "var(--text2)", textTransform: "uppercase", letterSpacing: 1, borderBottom: "2px solid var(--gold)", whiteSpace: "nowrap" }}>{h}</th>
                         ))}
                       </tr>
                     </thead>
                     <tbody>
                       {branchStaff.map(s => {
                         const r = staffRows[s.id] || {};
+                        const isPresent = r.present !== false; // default true
                         const incPct = (s.incentive_pct ?? 10) / 100;
                         const matInc = Math.round((r.material || 0) * 0.05);
                         const inc = r.incentive !== undefined ? r.incentive : Math.round((r.billing || 0) * incPct);
-                        const gstV = r.gst !== undefined ? r.gst : Math.round((r.billing || 0) * (Number(gstPct) || 0) / 100);
                         const staffTInc = inc + matInc + (r.tips || 0);
                         const total = (r.billing || 0) + (r.material || 0) + (r.tips || 0);
+                        const tipIn = r.tip_in || "online";
+                        const tipPaid = r.tip_paid || "cash";
+                        const disabledStyle = !isPresent ? { opacity: 0.4, pointerEvents: "none" } : {};
                         return (
-                          <tr key={s.id} style={{ borderBottom: "1px solid var(--border)", transition: "background .15s" }}>
+                          <tr key={s.id} style={{ borderBottom: "1px solid var(--border)", transition: "background .15s", background: !isPresent ? "rgba(248,113,113,0.05)" : undefined }}>
+                            <td style={{ padding: "10px 14px", textAlign: "center" }}>
+                              <input type="checkbox" checked={isPresent} onChange={e => handleAttendanceToggle(s, e.target.checked)} title={isPresent ? "Present (uncheck to record leave)" : "On leave"} style={{ width: 18, height: 18, accentColor: isPresent ? "var(--green)" : "var(--red)", cursor: "pointer" }} />
+                            </td>
                             <td style={{ padding: "10px 14px", fontWeight: 600, fontSize: 13 }}>
                               {s.name}
-                              <div style={{ fontSize: 10, color: "var(--text3)", fontWeight: 400, marginTop: 2 }}>{s.role || ""}</div>
+                              <div style={{ fontSize: 10, color: "var(--text3)", fontWeight: 400, marginTop: 2 }}>
+                                {!isPresent ? <span style={{ color: "var(--red)", fontWeight: 700 }}>ON LEAVE ({r.leave_type || "Paid"}){r.leave_reason ? ` — ${r.leave_reason}` : ""}</span> : (s.role || "")}
+                              </div>
                             </td>
-                            <td style={{ padding: "6px 14px", textAlign: "right" }}>
-                              <input type="number" placeholder="0" min="0" value={r.billing || ""} onChange={e => updateStaffRow(s.id, "billing", e.target.value)} style={{ ...inp, borderColor: "var(--green)" }} onFocus={e => e.target.style.borderColor = "var(--gold)"} onBlur={e => e.target.style.borderColor = "var(--green)"} />
+                            <td style={{ padding: "6px 14px", textAlign: "right", ...disabledStyle }}>
+                              <input type="number" placeholder="0" min="0" disabled={!isPresent} value={r.billing || ""} onChange={e => updateStaffRow(s.id, "billing", e.target.value)} style={{ ...inp, borderColor: "var(--green)" }} onFocus={e => e.target.style.borderColor = "var(--gold)"} onBlur={e => e.target.style.borderColor = "var(--green)"} />
                             </td>
-                            <td style={{ padding: "6px 14px", textAlign: "right" }}>
-                              <input type="number" placeholder="0" min="0" value={r.material || ""} onChange={e => updateStaffRow(s.id, "material", e.target.value)} style={{ ...inp, borderColor: "var(--green)", color: "var(--green)", fontWeight: 600 }} onFocus={e => e.target.style.borderColor = "var(--gold)"} onBlur={e => e.target.style.borderColor = "var(--green)"} />
+                            <td style={{ padding: "6px 14px", textAlign: "right", ...disabledStyle }}>
+                              <input type="number" placeholder="0" min="0" disabled={!isPresent} value={r.material || ""} onChange={e => updateStaffRow(s.id, "material", e.target.value)} style={{ ...inp, borderColor: "var(--green)", color: "var(--green)", fontWeight: 600 }} onFocus={e => e.target.style.borderColor = "var(--gold)"} onBlur={e => e.target.style.borderColor = "var(--green)"} />
                             </td>
                             <td style={{ padding: "6px 14px", textAlign: "right" }}>
                               <input type="text" readOnly value={INR(matInc)} title="Auto-calculated (5%)" style={{ ...inp, borderColor: "var(--red)", background: "rgba(255,255,255,0.03)", color: "var(--red)", cursor: "not-allowed", fontWeight: 700 }} />
@@ -1039,8 +1126,21 @@ export default function EntryPage() {
                             <td style={{ padding: "6px 14px", textAlign: "right" }}>
                               <input type="text" readOnly value={INR(inc)} title="Auto-calculated (Incentive %)" style={{ ...inp, borderColor: "var(--red)", background: "rgba(255,255,255,0.03)", color: "var(--red)", cursor: "not-allowed", fontWeight: 700 }} />
                             </td>
-                            <td style={{ padding: "6px 14px", textAlign: "right" }}>
-                              <input type="number" placeholder="0" min="0" value={r.tips || ""} onChange={e => updateStaffRow(s.id, "tips", e.target.value)} style={{ ...inp, borderColor: "var(--red)", color: "var(--red)", fontWeight: 600 }} onFocus={e => e.target.style.borderColor = "var(--gold)"} onBlur={e => e.target.style.borderColor = "var(--red)"} />
+                            <td style={{ padding: "6px 14px", textAlign: "right", ...disabledStyle }}>
+                              <input type="number" placeholder="0" min="0" disabled={!isPresent} value={r.tips || ""} onChange={e => updateStaffRow(s.id, "tips", e.target.value)} style={{ ...inp, borderColor: "var(--red)", color: "var(--red)", fontWeight: 600 }} onFocus={e => e.target.style.borderColor = "var(--gold)"} onBlur={e => e.target.style.borderColor = "var(--red)"} />
+                            </td>
+                            <td style={{ padding: "6px 14px", textAlign: "right", ...disabledStyle }}>
+                              <div style={{ display: "inline-flex", gap: 4, alignItems: "center", fontSize: 11 }}>
+                                <select disabled={!isPresent} value={tipIn} onChange={e => updateStaffRow(s.id, "tip_in", e.target.value)} title="Tip received as" style={{ padding: "4px 6px", borderRadius: 6, background: "var(--bg3)", border: "1px solid var(--border2)", color: "var(--text2)", fontSize: 11 }}>
+                                  <option value="online">In: Online</option>
+                                  <option value="cash">In: Cash</option>
+                                </select>
+                                <span style={{ color: "var(--text3)" }}>→</span>
+                                <select disabled={!isPresent} value={tipPaid} onChange={e => updateStaffRow(s.id, "tip_paid", e.target.value)} title="Tip paid to staff as" style={{ padding: "4px 6px", borderRadius: 6, background: "var(--bg3)", border: "1px solid var(--border2)", color: "var(--text2)", fontSize: 11 }}>
+                                  <option value="cash">Out: Cash</option>
+                                  <option value="online">Out: Online</option>
+                                </select>
+                              </div>
                             </td>
                             <td style={{ padding: "6px 14px", textAlign: "right", fontWeight: 700, color: "var(--gold)" }}>{INR(staffTInc)}</td>
                             <td style={{ padding: "6px 14px", textAlign: "right", fontWeight: 700, color: "var(--text2)" }}>{INR(total)}</td>
@@ -1049,12 +1149,14 @@ export default function EntryPage() {
                       })}
                       {/* Totals row */}
                       <tr style={{ background: "var(--bg3)", fontWeight: 700, color: "var(--gold)", borderTop: "2px solid var(--border2)" }}>
+                        <td style={{ padding: "10px 14px" }}></td>
                         <td style={{ padding: "10px 14px" }}>TOTALS</td>
                         <td style={{ padding: "10px 14px", textAlign: "right", color: "var(--green)" }}>{INR(totalBilling)}</td>
                         <td style={{ padding: "10px 14px", textAlign: "right", color: "var(--green)" }}>{INR(totalMatSale)}</td>
                         <td style={{ padding: "10px 14px", textAlign: "right", color: "var(--text3)" }}></td>
                         <td style={{ padding: "10px 14px", textAlign: "right", color: "var(--red)" }}>{INR(totalIncentive - totalTips)}</td>
                         <td style={{ padding: "10px 14px", textAlign: "right", color: "var(--red)" }}>{INR(totalTips)}</td>
+                        <td style={{ padding: "10px 14px", textAlign: "right", color: "var(--text3)", fontSize: 10 }}>cash↑ {INR(tipsInCash)} • cash↓ {INR(tipsPaidCash)}</td>
                         <td style={{ padding: "10px 14px", textAlign: "right", color: "var(--gold)" }}>{INR(totalStaffIncCombined)}</td>
                         <td style={{ padding: "10px 14px", textAlign: "right" }}>{INR(totalBilling + totalMatSale + totalTips)}</td>
                       </tr>
@@ -1068,10 +1170,39 @@ export default function EntryPage() {
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(200px,1fr))", gap: 12, marginBottom: 16 }}>
                 <FG label="Other Expenses (₹)" expense><input type="number" placeholder="0" min="0" value={otherExp} onChange={e => setOtherExp(e.target.value)} /></FG>
                 <FG label="Petrol / Travel (₹)" expense><input type="number" placeholder="0" min="0" value={petrol} onChange={e => setPetrol(e.target.value)} /></FG>
-                <FG label="Cash in Hand">
+                <FG label="Cash in Hand (Expected)">
                   <div style={{ padding: "12px 16px", borderRadius: 10, border: `2px solid ${cashInHand >= 0 ? "var(--green)" : "var(--red)"}`, background: "var(--bg3)", fontSize: 18, fontWeight: 700, color: cashInHand >= 0 ? "var(--green)" : "var(--red)" }}>{INR(cashInHand)}</div>
                 </FG>
+                <FG label="Actual Cash Counted (₹)">
+                  <input type="number" placeholder="leave blank to skip" min="0" value={actualCash} onChange={e => setActualCash(e.target.value)}
+                    style={cashDiff === null ? undefined : {
+                      borderColor: cashDiff === 0 ? "var(--green)" : cashDiff > 0 ? "var(--green)" : "var(--red)",
+                      color: cashDiff === 0 ? "var(--green)" : cashDiff > 0 ? "var(--green)" : "var(--red)",
+                      fontWeight: 700,
+                    }} />
+                </FG>
               </div>
+
+              {/* Reconciliation banner */}
+              {actualCashNum !== null && (
+                <div style={{
+                  padding: "10px 16px", borderRadius: 10, marginBottom: 16,
+                  border: `2px solid ${cashDiff === 0 ? "var(--green)" : cashDiff < 0 ? "var(--red)" : "var(--orange, #fb923c)"}`,
+                  background: cashDiff === 0 ? "rgba(74,222,128,0.08)" : cashDiff < 0 ? "rgba(248,113,113,0.08)" : "rgba(251,146,60,0.08)",
+                  display: "flex", alignItems: "center", gap: 12, fontWeight: 700,
+                }}>
+                  <span style={{ fontSize: 18 }}>
+                    {cashDiff === 0 ? "✓" : cashDiff < 0 ? "▼" : "▲"}
+                  </span>
+                  <span style={{ color: cashDiff === 0 ? "var(--green)" : cashDiff < 0 ? "var(--red)" : "var(--orange, #fb923c)" }}>
+                    {cashDiff === 0
+                      ? `MATCH — actual cash equals expected (${INR(cashInHand)})`
+                      : cashDiff < 0
+                        ? `DEFICIT — short by ${INR(Math.abs(cashDiff))} (expected ${INR(cashInHand)}, counted ${INR(actualCashNum)})`
+                        : `EXCESS — over by ${INR(cashDiff)} (expected ${INR(cashInHand)}, counted ${INR(actualCashNum)})`}
+                  </span>
+                </div>
+              )}
 
               {/* Save / Clear */}
               <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 16 }}>
@@ -1080,7 +1211,7 @@ export default function EntryPage() {
                   <Icon name="save" size={16} />
                   {saving ? "Saving..." : editId ? "Update Entry" : "Save to Database"}
                 </button>
-                <button type="button" onClick={() => { setSelBranch(""); setOnlineInc(""); setCashInc(""); setMatExp(""); setOtherExp(""); setPetrol(""); setStaffRows({}); setSaveStatus(""); setEditId(null); }}
+                <button type="button" onClick={() => { setSelBranch(""); setOnlineInc(""); setMatExp(""); setOtherExp(""); setPetrol(""); setStaffRows({}); setSaveStatus(""); setEditId(null); }}
                   style={{ padding: "10px 18px", borderRadius: 10, fontSize: 13, background: "var(--bg4)", color: "var(--text2)", border: "1px solid var(--border2)", cursor: "pointer", fontWeight: 600 }}>
                   {editId ? "Cancel Edit" : "Clear"}
                 </button>
@@ -1152,6 +1283,7 @@ export default function EntryPage() {
               <TH right>Staff T.Inc</TH><TH right>Staff T.Sale</TH>
               <TH right>Other Out</TH>
               <TH right>Cash in Hand</TH>
+              <TH right>Def / Exc</TH>
               <TH right>Actions</TH>
             </tr>
           </thead>
@@ -1182,6 +1314,10 @@ export default function EntryPage() {
                   <TD right style={{ color: "var(--text2)", fontWeight: 700 }}>{INR(staffTotalSaleE)}</TD>
                   <TD right style={{ color: "var(--red)" }}>{INR(totalOthE)}</TD>
                   <TD right style={{ fontWeight: 700, color: cih >= 0 ? "var(--green)" : "var(--red)" }}>{INR(cih)}</TD>
+                  <TD right style={{ fontWeight: 700, color: e.cash_diff == null ? "var(--text3)" : e.cash_diff === 0 ? "var(--green)" : e.cash_diff > 0 ? "var(--green)" : "var(--red)", whiteSpace: "nowrap" }}
+                    title={e.cash_diff == null ? "Actual cash not recorded" : e.cash_diff === 0 ? "Match" : e.cash_diff > 0 ? `Excess ${INR(e.cash_diff)}` : `Deficit ${INR(Math.abs(e.cash_diff))}`}>
+                    {e.cash_diff == null ? "—" : e.cash_diff === 0 ? "✓ Match" : e.cash_diff > 0 ? `▲ ${INR(e.cash_diff)}` : `▼ ${INR(Math.abs(e.cash_diff))}`}
+                  </TD>
                   <TD right>
                     <div style={{ display: "flex", gap: 6, alignItems: "center", justifyContent: "flex-end" }}>
                       <IconBtn name="log" title="View log" variant="secondary" onClick={() => setLogView(e)} />
@@ -1193,7 +1329,7 @@ export default function EntryPage() {
               );
             })}
             {filteredEntries.length === 0 && (
-              <tr><td colSpan={11} style={{ textAlign: "center", padding: 24, color: "var(--text3)" }}>No entries for this period</td></tr>
+              <tr><td colSpan={15} style={{ textAlign: "center", padding: 24, color: "var(--text3)" }}>No entries for this period</td></tr>
             )}
           </tbody>
         </table>
@@ -1368,6 +1504,37 @@ export default function EntryPage() {
           <div style={{ fontSize: 11, color: "var(--text3)", fontWeight: 500 }}>Building sheets, formulas, and validations</div>
         </div>
       )}
+
+      {/* Leave Application Modal — opens when attendance is unchecked */}
+      <Modal isOpen={!!leavePrompt} onClose={() => setLeavePrompt(null)} title={`Leave Application — ${leavePrompt?.staff?.name || ""}`}>
+        {leavePrompt && (
+          <form onSubmit={(e) => { e.preventDefault(); confirmLeave(); }} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            <div style={{ background: "var(--bg4)", padding: 12, borderRadius: 10, fontSize: 12, color: "var(--text2)" }}>
+              Marking <strong>{leavePrompt.staff.name}</strong> absent on <strong>{selDate}</strong>.
+              Salary will pro-rate based on present days; paid-leave allowance is consumed first.
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <label style={{ fontSize: 12, color: "var(--text2)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Leave Type</label>
+              <select value={leavePrompt.type} onChange={e => setLeavePrompt({ ...leavePrompt, type: e.target.value })}
+                style={{ padding: "12px 16px", border: "2px solid var(--input-border)", borderRadius: 10, fontSize: 14, background: "var(--bg2)", color: "var(--text)" }}>
+                <option value="Paid">Paid Leave</option>
+                <option value="Unpaid">Unpaid Leave</option>
+                <option value="Sick Leave">Sick Leave</option>
+                <option value="Casual">Casual Leave</option>
+              </select>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <label style={{ fontSize: 12, color: "var(--text2)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Reason (optional)</label>
+              <input value={leavePrompt.reason} onChange={e => setLeavePrompt({ ...leavePrompt, reason: e.target.value })} placeholder="e.g. Personal emergency"
+                style={{ padding: "12px 16px", border: "2px solid var(--input-border)", borderRadius: 10, fontSize: 14, background: "var(--bg2)", color: "var(--text)" }} />
+            </div>
+            <div style={{ display: "flex", gap: 12, marginTop: 8 }}>
+              <button type="submit" style={{ flex: 1, padding: "14px", borderRadius: 12, background: "var(--accent)", color: "#000", border: "none", fontWeight: 800, cursor: "pointer" }}>Record Leave</button>
+              <button type="button" onClick={() => setLeavePrompt(null)} style={{ padding: "14px 24px", borderRadius: 12, background: "var(--bg3)", color: "var(--text2)", border: "1px solid var(--border)", cursor: "pointer", fontWeight: 600 }}>Cancel</button>
+            </div>
+          </form>
+        )}
+      </Modal>
 
       {ConfirmDialog}
       {ToastContainer}
