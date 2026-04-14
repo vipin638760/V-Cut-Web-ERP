@@ -198,11 +198,17 @@ export default function EntryPage() {
     return m;
   }, [branches]);
 
-  // Active staff for selected branch and date — honors active transfers
-  // (transferred-in staff appear here; home staff currently on transfer elsewhere are excluded)
+  // Active staff for selected branch and date — honors active transfers and day-level bounds.
+  // Rules:
+  //   - Must be at their effective branch on this date (handles temporary transfers).
+  //   - selDate must not be before the join date.
+  //   - selDate must not be after the exit date (so a mid-month exit hides them on later days
+  //     but keeps them available for days up to and including the exit date).
   const branchStaff = selBranch && selDate
     ? staff.filter(s => {
         if (effectiveBranchOnDate(s, selDate, transfers) !== selBranch) return false;
+        if (s.join && selDate < s.join) return false;
+        if (s.exit_date && selDate > s.exit_date) return false;
         const mon = selDate.slice(0, 7);
         return staffStatusForMonth(s, mon).status !== "inactive";
       })
