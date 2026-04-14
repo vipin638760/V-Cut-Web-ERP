@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
-import { Icon, Pill } from "./ui";
+import { Icon } from "./ui";
 import { useRouter } from "next/navigation";
 
 export default function SearchPalette({ isOpen, onClose, context }) {
@@ -8,15 +8,25 @@ export default function SearchPalette({ isOpen, onClose, context }) {
   const [results, setResults] = useState([]);
   const router = useRouter();
 
-  // Unified search registry
+  // Unified search registry — kept in sync with sidebar nav in dashboard/layout.js
   const registry = useCallback(() => {
     const items = [
-      { id: "dashboard", label: "Operational Dashboard", cat: "Navigation", icon: "home", path: "/dashboard" },
-      { id: "branches",  label: "Network Nodes (Branches)", cat: "Navigation", icon: "grid", path: "/dashboard/branches" },
-      { id: "staff",     label: "Force Registry (Staff)", cat: "Navigation", icon: "users", path: "/dashboard/staff" },
-      { id: "leaves",    label: "Leave Authorization", cat: "Navigation", icon: "checkCircle", path: "/dashboard/leaves" },
-      { id: "payroll",   label: "Financial Settlements", cat: "Navigation", icon: "wallet", path: "/dashboard/payroll" },
-      { id: "setup",     label: "Master Protocols", cat: "Navigation", icon: "settings", path: "/dashboard/users" },
+      { id: "dashboard",       label: "Dashboard",              cat: "Navigation", icon: "home",        path: "/dashboard" },
+      { id: "branches",        label: "Branch Details",         cat: "Navigation", icon: "grid",        path: "/dashboard/branches" },
+      { id: "entry",           label: "Daily Business Entry",   cat: "Navigation", icon: "edit",        path: "/dashboard/entry" },
+      { id: "pos",             label: "POS Terminal",           cat: "Navigation", icon: "wallet",      path: "/dashboard/pos" },
+      { id: "customers",       label: "Customers",              cat: "Navigation", icon: "users",       path: "/dashboard/customers" },
+      { id: "menu-config",     label: "Menu Configuration",     cat: "Navigation", icon: "grid",        path: "/dashboard/menu-config" },
+      { id: "staff",           label: "Staff Management",       cat: "Navigation", icon: "users",       path: "/dashboard/staff" },
+      { id: "materials",       label: "Materials",              cat: "Navigation", icon: "wallet",      path: "/dashboard/materials" },
+      { id: "material-master", label: "Material Master",        cat: "Navigation", icon: "grid",        path: "/dashboard/material-master" },
+      { id: "expenses",        label: "Operational Expenses",   cat: "Navigation", icon: "trending",    path: "/dashboard/expenses" },
+      { id: "pl",              label: "P&L Analytics",          cat: "Navigation", icon: "pie",         path: "/dashboard/pl" },
+      { id: "leaves",          label: "Leave Management",       cat: "Navigation", icon: "checkCircle", path: "/dashboard/leaves" },
+      { id: "payroll",         label: "Payroll",                cat: "Navigation", icon: "wallet",      path: "/dashboard/payroll" },
+      { id: "users",           label: "Master Setup",           cat: "Navigation", icon: "settings",    path: "/dashboard/users" },
+      { id: "my-payroll",      label: "My Payroll",             cat: "Navigation", icon: "wallet",      path: "/dashboard/my-payroll" },
+      { id: "apply-leave",     label: "Apply Leave",            cat: "Navigation", icon: "checkCircle", path: "/dashboard/apply-leave" },
     ];
 
     // Add branches if provided
@@ -159,13 +169,17 @@ export default function SearchPalette({ isOpen, onClose, context }) {
             </div>
           ) : (
             <div style={{ padding: 24 }}>
-              <div style={{ fontSize: 11, fontWeight: 900, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 2, marginBottom: 16 }}>Suggested Commands</div>
+              <div style={{ fontSize: 11, fontWeight: 900, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 2, marginBottom: 16 }}>Quick Access</div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
                 {[
-                  { l: "Operational P&L", p: "/dashboard/pl", i: "pie" },
-                  { l: "Employee Setup", p: "/dashboard/staff", i: "users" },
-                  { l: "Network Hub", p: "/dashboard/branches", i: "grid" },
-                  { l: "Protocol Settings", p: "/dashboard/users", i: "settings" }
+                  { l: "Dashboard",            p: "/dashboard",           i: "home" },
+                  { l: "Daily Business Entry", p: "/dashboard/entry",     i: "edit" },
+                  { l: "POS Terminal",         p: "/dashboard/pos",       i: "wallet" },
+                  { l: "Customers",            p: "/dashboard/customers", i: "users" },
+                  { l: "Branch Details",       p: "/dashboard/branches",  i: "grid" },
+                  { l: "Staff Management",     p: "/dashboard/staff",     i: "users" },
+                  { l: "P&L Analytics",        p: "/dashboard/pl",        i: "pie" },
+                  { l: "Leave Management",     p: "/dashboard/leaves",    i: "checkCircle" },
                 ].map((s, i) => (
                   <div 
                     key={i}
