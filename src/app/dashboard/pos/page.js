@@ -495,21 +495,29 @@ export default function POSPage() {
     }
   };
 
-  const handleSave = async (e) => {
+  const handleSave = async (e, opts = {}) => {
     e.preventDefault();
     if (!selBranch) { confirm({ title: "Notice", message: "Select a branch first.", confirmText: "OK", cancelText: "Close", type: "warning", onConfirm: () => {} }); return; }
     setSaving(true);
     setSaveStatus("");
 
-    // Check for duplicates (same branch and date)
-    // Only block if we are creating NEW, or if we changed branch/date to a combination that conflict with ANOTHER record
-    const hasChanged = selBranch !== origBranch || selDate !== origDate;
-    if (!editId || hasChanged) {
-      const exists = entries.find(e => e.branch_id === selBranch && e.date === selDate && e.id !== editId);
-      if (exists) {
-        confirm({ title: "Duplicate Detected", message: `An entry for ${branchesById.get(selBranch)?.name} on ${selDate} already exists. Please edit the existing entry instead of creating a new one.`, confirmText: "OK", cancelText: "Close", type: "warning", onConfirm: () => {} });
-        setSaving(false);
-        return;
+    // Resolve the entry id to write to. POS settles pass rollup:true and auto-target
+    // any existing daily entry for this branch+date so each bill just accumulates
+    // into the day rollup (no "duplicate" prompt — duplicates are what we want here).
+    const existingForDay = entries.find(x => x.branch_id === selBranch && x.date === selDate);
+    const effectiveEditId = editId || (opts.rollup ? existingForDay?.id : null) || null;
+
+    // Duplicate guard still applies to accountant edits: if they changed branch/date
+    // onto a slot that already has a different doc, block it so they go edit that one.
+    if (!opts.rollup) {
+      const hasChanged = selBranch !== origBranch || selDate !== origDate;
+      if (!effectiveEditId || hasChanged) {
+        const exists = entries.find(x => x.branch_id === selBranch && x.date === selDate && x.id !== effectiveEditId);
+        if (exists) {
+          confirm({ title: "Duplicate Detected", message: `An entry for ${branchesById.get(selBranch)?.name} on ${selDate} already exists. Please edit the existing entry instead of creating a new one.`, confirmText: "OK", cancelText: "Close", type: "warning", onConfirm: () => {} });
+          setSaving(false);
+          return;
+        }
       }
     }
 
@@ -548,10 +556,10 @@ export default function POSPage() {
         created_by: currentUser?.id || "unknown",
       };
       
-      let savedEntryId = editId;
-      if (editId) {
+      let savedEntryId = effectiveEditId;
+      if (effectiveEditId) {
         // DETAILED LOGGING LOGIC
-        const old = entries.find(x => x.id === editId);
+        const old = entries.find(x => x.id === effectiveEditId);
         const changes = [];
         if (old) {
           if (old.online !== payload.online) changes.push(`Online updated: ${INR(old.online)} -> ${INR(payload.online)}`);
@@ -580,7 +588,7 @@ export default function POSPage() {
           notes: changes.length > 0 ? changes.join(", ") : "Bill added via POS"
         };
 
-        await updateDoc(doc(db, "entries", editId), {
+        await updateDoc(doc(db, "entries", effectiveEditId), {
           ...payload,
           updated_at: new Date().toISOString(),
           updated_by: currentUser?.id || "unknown",
@@ -1532,7 +1540,9 @@ export default function POSPage() {
       await Promise.all(logPayloads.map(p => addDoc(collection(db, "service_logs"), p)));
 
       // 3. Rollup into the daily entries doc so accountant can edit petrol/etc later.
-      await handleSave({ preventDefault: () => {} });
+      // rollup:true auto-targets any existing entry for this branch+date — each bill
+      // just adds to the daily total instead of tripping the duplicate-detection guard.
+      await handleSave({ preventDefault: () => {} }, { rollup: true });
 
       setEditingDraftId(null);
 
