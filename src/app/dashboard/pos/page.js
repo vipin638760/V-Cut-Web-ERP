@@ -187,7 +187,8 @@ export default function POSPage() {
     const newItem = {
       ...service,
       cartId: Date.now() + Math.random(),
-      staffId: targetStaffId
+      staffId: targetStaffId,
+      home_branch_id: homeOf(targetStaffId),
     };
     setCart([...cart, newItem]);
 
@@ -217,7 +218,7 @@ export default function POSPage() {
           const newBill = staffRows[newStaffId]?.billing || 0;
           updateStaffRow(newStaffId, "billing", newBill + item.price);
         }
-        return { ...item, staffId: newStaffId };
+        return { ...item, staffId: newStaffId, home_branch_id: homeOf(newStaffId) };
       }
       return item;
     }));
@@ -396,15 +397,53 @@ export default function POSPage() {
   //   - selDate must not be before the join date.
   //   - selDate must not be after the exit date (so a mid-month exit hides them on later days
   //     but keeps them available for days up to and including the exit date).
-  const branchStaff = selBranch && selDate
-    ? staff.filter(s => {
-        if (effectiveBranchOnDate(s, selDate, transfers) !== selBranch) return false;
-        if (s.join && selDate < s.join) return false;
-        if (s.exit_date && selDate > s.exit_date) return false;
-        const mon = selDate.slice(0, 7);
-        return staffStatusForMonth(s, mon).status !== "inactive";
-      })
+  // All staff active on the selected date, regardless of branch — powers the
+  // loan resource workflow where a stylist physically works at a branch other
+  // than their home for a specific bill (e.g. specialist service called in).
+  const allActiveStaffOnDate = useMemo(() => {
+    if (!selDate) return [];
+    return staff.filter(s => {
+      if (s.join && selDate < s.join) return false;
+      if (s.exit_date && selDate > s.exit_date) return false;
+      const mon = selDate.slice(0, 7);
+      return staffStatusForMonth(s, mon).status !== "inactive";
+    });
+  }, [staff, selDate]);
+
+  const branchStaff = selBranch
+    ? allActiveStaffOnDate.filter(s => effectiveBranchOnDate(s, selDate, transfers) === selBranch)
     : [];
+
+  // Staff from other branches who can be borrowed today, grouped by home branch.
+  const loanableStaffGroups = useMemo(() => {
+    if (!selBranch) return [];
+    const groups = new Map();
+    allActiveStaffOnDate.forEach(s => {
+      const home = effectiveBranchOnDate(s, selDate, transfers);
+      if (!home || home === selBranch) return;
+      if (!groups.has(home)) groups.set(home, []);
+      groups.get(home).push(s);
+    });
+    return [...groups.entries()]
+      .map(([home, list]) => ({
+        home_branch_id: home,
+        home_branch_name: (branchesById.get(home)?.name || "Branch").replace("V-CUT ", ""),
+        staff: list.sort((a, b) => (a.name || "").localeCompare(b.name || "")),
+      }))
+      .sort((a, b) => a.home_branch_name.localeCompare(b.home_branch_name));
+  }, [allActiveStaffOnDate, selBranch, selDate, transfers, branchesById]);
+
+  // Fast lookup: is a given staff id "loaned" for this branch (home != selBranch)?
+  const homeOf = (sid) => {
+    if (!sid) return null;
+    const s = staff.find(x => x.id === sid);
+    if (!s) return null;
+    return effectiveBranchOnDate(s, selDate, transfers) || s.branch_id || null;
+  };
+  const isLoanStaff = (sid) => {
+    const h = homeOf(sid);
+    return h && h !== selBranch;
+  };
 
   const updateStaffRow = (sid, field, value) => {
     setStaffRows(prev => {
@@ -553,6 +592,28 @@ export default function POSPage() {
     }
 
     try {
+      // Loan rows: staff present in staffRows/cart but not in branchStaff (home != this branch).
+      // They still need to appear in staff_billing so branch reports credit sale/incentive here.
+      const branchStaffIds = new Set(branchStaff.map(s => s.id));
+      const loanStaffIds = new Set();
+      cart.forEach(it => { if (it.staffId && !branchStaffIds.has(it.staffId)) loanStaffIds.add(it.staffId); });
+      Object.keys(staffRows).forEach(sid => { if (!branchStaffIds.has(sid) && (staffRows[sid]?.billing || 0) > 0) loanStaffIds.add(sid); });
+
+      const buildSbRow = (sid, { loan }) => ({
+        staff_id: sid,
+        billing: staffRows[sid]?.billing || 0,
+        material: staffRows[sid]?.material || 0,
+        incentive: staffRows[sid]?.incentive || 0,
+        mat_incentive: staffRows[sid]?.mat_incentive || 0,
+        tips: staffRows[sid]?.tips || 0,
+        tip_in: staffRows[sid]?.tip_in || "online",
+        tip_paid: staffRows[sid]?.tip_paid || "cash",
+        present: staffRows[sid]?.present !== false,
+        staff_total_inc: staffRows[sid]?.staff_total_inc || 0,
+        home_branch_id: loan ? (homeOf(sid) || null) : selBranch,
+        loan_flag: loan,
+      });
+
       const payload = {
         branch_id: selBranch,
         date: selDate,
@@ -562,18 +623,10 @@ export default function POSPage() {
         others: Number(otherExp) || 0,
         petrol: Number(petrol) || 0,
         cash_in_hand: cashInHand,
-        staff_billing: branchStaff.map(s => ({
-          staff_id: s.id,
-          billing: staffRows[s.id]?.billing || 0,
-          material: staffRows[s.id]?.material || 0,
-          incentive: staffRows[s.id]?.incentive || 0,
-          mat_incentive: staffRows[s.id]?.mat_incentive || 0,
-          tips: staffRows[s.id]?.tips || 0,
-          tip_in: staffRows[s.id]?.tip_in || "online",
-          tip_paid: staffRows[s.id]?.tip_paid || "cash",
-          present: staffRows[s.id]?.present !== false,
-          staff_total_inc: staffRows[s.id]?.staff_total_inc || 0
-        })),
+        staff_billing: [
+          ...branchStaff.map(s => buildSbRow(s.id, { loan: false })),
+          ...[...loanStaffIds].map(sid => buildSbRow(sid, { loan: true })),
+        ],
         actual_cash: actualCashNum,
         cash_diff: cashDiff,
         tips_in_cash: tipsInCash,
@@ -1413,20 +1466,32 @@ export default function POSPage() {
       branch_id: selBranch,
       branch_name: branch?.name || "",
       date: selDate,
-      items: cart.map(it => ({
-        cart_id: String(it.cartId),
-        name: it.name,
-        price: Number(it.price) || 0,
-        staff_id: it.staffId || null,
-        staff_name: staffMap.get(it.staffId)?.name || "",
-        menu_id: it.menu_id || "",
-        menu_type: it.menu_type || "",
-        group: it.group || "",
-        icon: it.icon || "",
-      })),
-      staff_split: [...split.entries()].map(([staff_id, billing]) => ({
-        staff_id, billing, staff_name: staffMap.get(staff_id)?.name || "",
-      })),
+      items: cart.map(it => {
+        const hb = it.home_branch_id || homeOf(it.staffId);
+        return {
+          cart_id: String(it.cartId),
+          name: it.name,
+          price: Number(it.price) || 0,
+          staff_id: it.staffId || null,
+          staff_name: staffMap.get(it.staffId)?.name || "",
+          home_branch_id: hb,
+          loan_flag: !!(hb && hb !== selBranch),
+          menu_id: it.menu_id || "",
+          menu_type: it.menu_type || "",
+          group: it.group || "",
+          icon: it.icon || "",
+        };
+      }),
+      staff_split: [...split.entries()].map(([staff_id, billing]) => {
+        const hb = homeOf(staff_id);
+        return {
+          staff_id,
+          billing,
+          staff_name: staffMap.get(staff_id)?.name || "",
+          home_branch_id: hb,
+          loan_flag: !!(hb && hb !== selBranch),
+        };
+      }),
       customer_id: selectedCustomer?.id || null,
       customer_name: selectedCustomer?.name || null,
       customer_phone: selectedCustomer?.phone || null,
@@ -1546,11 +1611,16 @@ export default function POSPage() {
     if (!selBranch) { toast({ title: "Branch Required", message: "Pick a branch first.", type: "warning" }); return; }
     const branch = branches.find(b => b.id === selBranch);
     const staffMap = new Map(branchStaff.map(s => [s.id, s]));
-    const items = cart.map(it => ({
-      name: it.name,
-      price: it.price,
-      stylist: staffMap.get(it.staffId)?.name || "—",
-    }));
+    const items = cart.map(it => {
+      const hb = it.home_branch_id || homeOf(it.staffId);
+      const isLoan = !!(hb && hb !== selBranch);
+      return {
+        name: it.name,
+        price: it.price,
+        stylist: staffMap.get(it.staffId)?.name || "—",
+        loan_flag: isLoan,
+      };
+    });
     const subtotal = items.reduce((s, it) => s + it.price, 0);
     const gstAmt = Math.round(subtotal * (Number(gstPct) || 0) / 100);
     const onlineAmt = Math.max(0, Number(onlineInc) || 0);
@@ -1589,6 +1659,7 @@ export default function POSPage() {
       name: it.name,
       price: Number(it.price) || 0,
       stylist: staffMap.get(it.staff_id)?.name || it.staff_name || "—",
+      loan_flag: !!it.loan_flag,
     }));
     const subtotal = Number(inv.subtotal) || items.reduce((s, it) => s + it.price, 0);
     const onlineAmt = Number(inv.online) || 0;
@@ -1638,32 +1709,38 @@ export default function POSPage() {
 
       // 2. Per-item service_logs tagged source="pos" with invoice linkage.
       const staffMap = new Map(staff.map(s => [s.id, s]));
-      const logPayloads = cart.filter(it => it.staffId).map(it => ({
-        staff_id: it.staffId,
-        staff_name: staffMap.get(it.staffId)?.name || "",
-        branch_id: selBranch,
-        date: selDate,
-        service_name: it.name || "",
-        service_group: it.group || "",
-        menu_id: it.menu_id || "",
-        menu_type: it.menu_type || "",
-        amount: Number(it.price) || 0,
-        standard_price: Number(it.price) || 0,
-        custom_price: false,
-        price_note: "",
-        tip: 0,
-        tip_in: "online",
-        material_sale: 0,
-        material_name: "",
-        source: "pos",
-        invoice_id: invoiceId,
-        invoice_no,
-        pos_cart_id: String(it.cartId),
-        customer_id: selectedCustomer?.id || null,
-        customer_name: selectedCustomer?.name || null,
-        created_by: currentUser?.id || "unknown",
-        created_at: new Date().toISOString(),
-      }));
+      const logPayloads = cart.filter(it => it.staffId).map(it => {
+        const hb = it.home_branch_id || homeOf(it.staffId);
+        const isLoan = !!(hb && hb !== selBranch);
+        return {
+          staff_id: it.staffId,
+          staff_name: staffMap.get(it.staffId)?.name || "",
+          branch_id: selBranch,          // branch where service was performed (sale attribution)
+          home_branch_id: hb,            // staff's home (salary attribution)
+          loan_flag: isLoan,
+          date: selDate,
+          service_name: it.name || "",
+          service_group: it.group || "",
+          menu_id: it.menu_id || "",
+          menu_type: it.menu_type || "",
+          amount: Number(it.price) || 0,
+          standard_price: Number(it.price) || 0,
+          custom_price: false,
+          price_note: "",
+          tip: 0,
+          tip_in: "online",
+          material_sale: 0,
+          material_name: "",
+          source: "pos",
+          invoice_id: invoiceId,
+          invoice_no,
+          pos_cart_id: String(it.cartId),
+          customer_id: selectedCustomer?.id || null,
+          customer_name: selectedCustomer?.name || null,
+          created_by: currentUser?.id || "unknown",
+          created_at: new Date().toISOString(),
+        };
+      });
       await Promise.all(logPayloads.map(p => addDoc(collection(db, "service_logs"), p)));
 
       // 3. Rollup into the daily entries doc so accountant can edit petrol/etc later.
@@ -2016,20 +2093,35 @@ export default function POSPage() {
                    <Icon name="log" size={48} />
                    <div style={{ fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Cart is Empty</div>
                 </div>
-              ) : cart.map((item) => (
+              ) : cart.map((item) => {
+                const loan = isLoanStaff(item.staffId);
+                const loanHomeName = loan ? (branchesById.get(item.home_branch_id)?.name || "").replace("V-CUT ", "") : "";
+                return (
                 <div key={item.cartId}
                   style={{
-                    background: "linear-gradient(135deg, var(--bg3), var(--bg4))",
+                    background: loan
+                      ? "linear-gradient(135deg, rgba(251,146,60,0.08), rgba(251,146,60,0.02))"
+                      : "linear-gradient(135deg, var(--bg3), var(--bg4))",
                     borderRadius: 14, padding: "10px 12px",
-                    border: "1px solid var(--border2)",
+                    border: `1px solid ${loan ? "rgba(251,146,60,0.35)" : "var(--border2)"}`,
                     display: "flex", flexDirection: "column", gap: 8,
                     position: "relative", overflow: "hidden",
                     animation: "pos-card-in .22s ease-out",
                   }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
                     <div style={{ minWidth: 0 }}>
-                      <div style={{ fontSize: 12, fontWeight: 800, color: "var(--text)", lineHeight: 1.2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.name}</div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <div style={{ fontSize: 12, fontWeight: 800, color: "var(--text)", lineHeight: 1.2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.name}</div>
+                        {loan && (
+                          <span style={{ padding: "1px 6px", borderRadius: 6, background: "rgba(251,146,60,0.15)", border: "1px solid rgba(251,146,60,0.4)", color: "var(--orange)", fontSize: 9, fontWeight: 800, letterSpacing: 1, textTransform: "uppercase" }}>
+                            LOAN
+                          </span>
+                        )}
+                      </div>
                       <div style={{ fontSize: 14, fontWeight: 900, color: "var(--accent)", marginTop: 2 }}>{INR(item.price)}</div>
+                      {loan && loanHomeName && (
+                        <div style={{ fontSize: 10, color: "var(--orange)", fontWeight: 700, marginTop: 2 }}>Home: {loanHomeName}</div>
+                      )}
                     </div>
                     <button onClick={() => removeFromCart(item)} style={{ background: "transparent", border: "none", color: "var(--red)", opacity: 0.7, cursor: "pointer", padding: 0 }} title="Remove">
                       <Icon name="del" size={14} />
@@ -2045,12 +2137,20 @@ export default function POSPage() {
                         padding: "4px 6px", color: "var(--text2)", fontSize: 10, fontWeight: 600, outline: "none"
                       }}>
                       <option value="">Select…</option>
-                      {branchStaff.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                      <optgroup label="This branch">
+                        {branchStaff.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                      </optgroup>
+                      {loanableStaffGroups.map(g => (
+                        <optgroup key={g.home_branch_id} label={`Borrow · ${g.home_branch_name}`}>
+                          {g.staff.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                        </optgroup>
+                      ))}
                     </select>
                   </div>
-                  <div style={{ position: "absolute", bottom: -20, right: -20, width: 60, height: 60, background: "var(--accent)", filter: "blur(30px)", opacity: 0.06 }} />
+                  <div style={{ position: "absolute", bottom: -20, right: -20, width: 60, height: 60, background: loan ? "var(--orange)" : "var(--accent)", filter: "blur(30px)", opacity: 0.06 }} />
                 </div>
-              ))}
+              );
+              })}
             </div>
 
             {/* Financials */}
@@ -2488,7 +2588,10 @@ export default function POSPage() {
                     {billPreview.items.map((it, i) => (
                       <tr key={i} style={{ borderBottom: "1px dashed #ccc" }}>
                         <td style={{ padding: "8px 4px", fontWeight: 600 }}>{it.name}</td>
-                        <td style={{ padding: "8px 4px", color: "#555" }}>{it.stylist}</td>
+                        <td style={{ padding: "8px 4px", color: "#555" }}>
+                          {it.stylist}
+                          {it.loan_flag && <span style={{ marginLeft: 6, padding: "1px 5px", background: "#fef3c7", color: "#b45309", border: "1px solid #fde68a", borderRadius: 4, fontSize: 9, fontWeight: 700, letterSpacing: 0.5 }}>LOAN</span>}
+                        </td>
                         <td style={{ padding: "8px 4px", textAlign: "right", fontWeight: 700 }}>{INR(it.price)}</td>
                       </tr>
                     ))}
