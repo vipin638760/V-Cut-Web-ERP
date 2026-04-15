@@ -112,7 +112,7 @@ export default function POSPage() {
   const [editingDraftId, setEditingDraftId] = useState(null);
   const [historyInvoices, setHistoryInvoices] = useState([]); // all invoices (settled + draft) in current filter period
   const [historySearch, setHistorySearch] = useState("");
-  const [expandedBranchId, setExpandedBranchId] = useState(null);
+  const [selectedBranchIds, setSelectedBranchIds] = useState(() => new Set());
   // Drill-down filters for the expanded branch
   const [branchSortBy, setBranchSortBy] = useState("date_desc"); // date_desc | date_asc | amount_desc | amount_asc
   const [branchDateFilter, setBranchDateFilter] = useState("");
@@ -1344,13 +1344,13 @@ export default function POSPage() {
     return [...map.values()].sort((a, b) => b.total - a.total);
   }, [filteredInvoices, historyInvoices, branchesById]);
 
-  // Invoices for the expanded branch card — applies filter controls + sort.
+  // Invoices for the selected branch cards — applies filter controls + sort.
   // Includes drafts when status filter is "all" or "draft".
   const filteredBranchInvoices = useMemo(() => {
-    if (!expandedBranchId) return [];
+    if (selectedBranchIds.size === 0) return [];
     const custQ = branchCustomerFilter.trim().toLowerCase();
     const list = historyInvoices.filter(inv => {
-      if (inv.branch_id !== expandedBranchId) return false;
+      if (!selectedBranchIds.has(inv.branch_id)) return false;
       if (branchStatusFilter !== "all" && inv.status !== branchStatusFilter) return false;
       if (branchDateFilter && inv.date !== branchDateFilter) return false;
       if (custQ) {
@@ -1369,7 +1369,16 @@ export default function POSPage() {
       default:            list.sort((a, b) => (b.date || "").localeCompare(a.date || "") || (b.invoice_no || "").localeCompare(a.invoice_no || "")); break;
     }
     return list;
-  }, [historyInvoices, expandedBranchId, branchStatusFilter, branchDateFilter, branchCustomerFilter, branchSortBy]);
+  }, [historyInvoices, selectedBranchIds, branchStatusFilter, branchDateFilter, branchCustomerFilter, branchSortBy]);
+
+  const toggleBranchSelection = (bid) => {
+    setSelectedBranchIds(prev => {
+      const next = new Set(prev);
+      if (next.has(bid)) next.delete(bid); else next.add(bid);
+      return next;
+    });
+    setBranchDateFilter(""); setBranchCustomerFilter(""); setBranchSortBy("date_desc"); setBranchStatusFilter("all");
+  };
 
   // Invoice number: {BRANCH-PREFIX}-{DDMMYY}-{NNN}
   const branchPrefix = (b) => {
@@ -2051,22 +2060,38 @@ export default function POSPage() {
              )}
            </div>
 
-           {/* Branch cards — click to drill into that branch's invoices */}
-           <div style={{ marginTop: 16, display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 12 }}>
+           {/* Multi-select controls — apply to the branch card grid below */}
+           {branchSummaries.length > 0 && (
+             <div style={{ marginTop: 16, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+               <div style={{ fontSize: 10, color: "var(--text3)", fontWeight: 800, textTransform: "uppercase", letterSpacing: 1.5 }}>
+                 {selectedBranchIds.size === 0 ? "Select branches" : `${selectedBranchIds.size} of ${branchSummaries.length} selected`}
+               </div>
+               <button onClick={() => setSelectedBranchIds(new Set(branchSummaries.map(b => b.branch_id)))}
+                 disabled={selectedBranchIds.size === branchSummaries.length}
+                 style={{ padding: "6px 12px", borderRadius: 999, border: "1px solid var(--border2)", background: selectedBranchIds.size === branchSummaries.length ? "var(--accent)" : "var(--bg3)", color: selectedBranchIds.size === branchSummaries.length ? "#000" : "var(--text2)", fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: 1, cursor: "pointer" }}>
+                 Select All Branches
+               </button>
+               {selectedBranchIds.size > 0 && (
+                 <button onClick={() => setSelectedBranchIds(new Set())}
+                   style={{ padding: "6px 12px", borderRadius: 999, border: "1px solid var(--border2)", background: "transparent", color: "var(--text3)", fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: 1, cursor: "pointer" }}>
+                   Clear
+                 </button>
+               )}
+             </div>
+           )}
+
+           {/* Branch cards — click to toggle selection; supports multi-select */}
+           <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 12 }}>
              {branchSummaries.length === 0 && (
                <div style={{ gridColumn: "1 / -1", padding: 30, textAlign: "center", color: "var(--text3)", fontSize: 13 }}>
                  No invoices in this period yet.
                </div>
              )}
              {branchSummaries.map(bs => {
-               const active = expandedBranchId === bs.branch_id;
+               const active = selectedBranchIds.has(bs.branch_id);
                return (
                  <button key={bs.branch_id}
-                   onClick={() => {
-                     if (active) { setExpandedBranchId(null); return; }
-                     setExpandedBranchId(bs.branch_id);
-                     setBranchDateFilter(""); setBranchCustomerFilter(""); setBranchSortBy("date_desc"); setBranchStatusFilter("all");
-                   }}
+                   onClick={() => toggleBranchSelection(bs.branch_id)}
                    style={{
                      textAlign: "left", cursor: "pointer",
                      background: active ? "linear-gradient(135deg, rgba(var(--accent-rgb),0.12), rgba(var(--accent-rgb),0.03))" : "var(--bg2)",
@@ -2094,15 +2119,22 @@ export default function POSPage() {
              })}
            </div>
 
-           {/* Expanded invoice table for the selected branch */}
-           {expandedBranchId && (
+           {/* Invoice table for the selected branches (multi-select) */}
+           {selectedBranchIds.size > 0 && (() => {
+             const isMulti = selectedBranchIds.size > 1;
+             const isAll = selectedBranchIds.size === branchSummaries.length;
+             const title = isAll
+               ? `All Branches — ${selectedBranchIds.size} branches · Invoices`
+               : isMulti
+                 ? `${selectedBranchIds.size} Branches · Invoices`
+                 : `${branchesById.get([...selectedBranchIds][0])?.name || "Branch"} — Invoices`;
+             const COL_SPAN = isMulti ? 8 : 7;
+             return (
              <div style={{ marginTop: 16 }}>
                <Card>
                  <div style={{ padding: "10px 16px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
-                   <div style={{ fontSize: 12, fontWeight: 800, color: "var(--text)", letterSpacing: 0.5 }}>
-                     {branchesById.get(expandedBranchId)?.name || "Branch"} — Invoices
-                   </div>
-                   <button onClick={() => setExpandedBranchId(null)}
+                   <div style={{ fontSize: 12, fontWeight: 800, color: "var(--text)", letterSpacing: 0.5 }}>{title}</div>
+                   <button onClick={() => setSelectedBranchIds(new Set())}
                      style={{ background: "transparent", border: "1px solid var(--border)", color: "var(--text3)", borderRadius: 8, padding: "4px 10px", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>Collapse</button>
                  </div>
 
@@ -2136,7 +2168,9 @@ export default function POSPage() {
                  <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12.5 }}>
                    <thead>
                      <tr>
-                       <TH>Date</TH><TH>Invoice</TH><TH>Customer</TH>
+                       <TH>Date</TH>
+                       {isMulti && <TH>Branch</TH>}
+                       <TH>Invoice</TH><TH>Customer</TH>
                        <TH right>Online</TH><TH right>Cash</TH>
                        <TH right>Amount</TH>
                        <TH right>Action</TH>
@@ -2144,7 +2178,7 @@ export default function POSPage() {
                    </thead>
                    <tbody>
                      {filteredBranchInvoices.length === 0 && (
-                       <tr><td colSpan={7} style={{ textAlign: "center", padding: 24, color: "var(--text3)", fontSize: 12 }}>
+                       <tr><td colSpan={COL_SPAN} style={{ textAlign: "center", padding: 24, color: "var(--text3)", fontSize: 12 }}>
                          No invoices match the current filters.
                        </td></tr>
                      )}
@@ -2153,6 +2187,11 @@ export default function POSPage() {
                        return (
                          <tr key={inv.id} style={{ opacity: isDraft ? 0.85 : 1 }}>
                            <TD style={{ fontWeight: 600, whiteSpace: "nowrap" }}>{inv.date}</TD>
+                           {isMulti && (
+                             <TD style={{ fontSize: 11, fontWeight: 600, color: "var(--text2)" }}>
+                               {(branchesById.get(inv.branch_id)?.name || inv.branch_name || "").replace("V-CUT ", "")}
+                             </TD>
+                           )}
                            <TD style={{ fontFamily: "var(--font-headline, var(--font-outfit))", fontWeight: 700, color: isDraft ? "var(--orange)" : "var(--accent)" }}>
                              {isDraft ? (
                                <span style={{ display: "inline-block", padding: "2px 6px", borderRadius: 6, background: "rgba(251,146,60,0.12)", border: "1px solid rgba(251,146,60,0.3)", fontSize: 10, letterSpacing: 1 }}>DRAFT</span>
@@ -2182,10 +2221,11 @@ export default function POSPage() {
                  </table>
                </Card>
              </div>
-           )}
+             );
+           })()}
 
            {/* Global search results across all branches (only shown while searching) */}
-           {historySearch && !expandedBranchId && filteredInvoices.length > 0 && (
+           {historySearch && selectedBranchIds.size === 0 && filteredInvoices.length > 0 && (
              <div style={{ marginTop: 16 }}>
                <Card>
                  <div style={{ padding: "10px 16px", borderBottom: "1px solid var(--border)", fontSize: 12, fontWeight: 800, color: "var(--text)" }}>
