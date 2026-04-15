@@ -360,6 +360,12 @@ body {
   }
 }
 
+/* Cart-card entrance animation (matches the menu-card look when an item is added) */
+@keyframes pos-card-in {
+  0%   { opacity: 0; transform: translateY(-6px) scale(0.97); }
+  100% { opacity: 1; transform: translateY(0)    scale(1); }
+}
+
 /* ─── Print: only the bill / menu shows, no app chrome ─── */
 @media print {
   @page { size: A4; margin: 10mm; }

@@ -108,6 +108,8 @@ export default function POSPage() {
   const [clientSearch, setClientSearch] = useState("");
   const [customers, setCustomers] = useState([]);
   const [menus, setMenus] = useState([]);
+  const [invoices, setInvoices] = useState([]); // today's invoices (drafts + settled) for selected branch
+  const [editingDraftId, setEditingDraftId] = useState(null);
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
   const [customerForm, setCustomerForm] = useState(null); // null | { name, phone, email, notes }
@@ -313,6 +315,21 @@ export default function POSPage() {
   useEffect(() => {
     if (!editId) setGstPct(globalGst);
   }, [globalGst, editId]);
+
+  // Today's invoices (drafts + settled) for the selected branch.
+  // Drafts auto-expire at midnight because subscription filters by today's date.
+  useEffect(() => {
+    if (!db || !selBranch || !selDate) { setInvoices([]); return; }
+    const q = query(
+      collection(db, "invoices"),
+      where("branch_id", "==", selBranch),
+      where("date", "==", selDate),
+    );
+    const unsub = onSnapshot(q, (sn) => startTransition(() =>
+      setInvoices(sn.docs.map(d => ({ ...d.data(), id: d.id })))
+    ));
+    return () => unsub();
+  }, [selBranch, selDate]);
 
   // Entries subscription scoped to current filter period (month or year).
   useEffect(() => {
@@ -584,44 +601,9 @@ export default function POSPage() {
         toast({ title: "Bill Saved", message: "Ready for the next bill on this branch.", type: "success" });
       }
 
-      // Per-item service_logs so each stylist's day-working reflects POS bills.
-      // Source = "pos" distinguishes these from manually self-logged services.
-      const logPayloads = cart
-        .filter(it => it.staffId)
-        .map(it => {
-          const sName = staff.find(x => x.id === it.staffId)?.name || "";
-          return {
-            staff_id: it.staffId,
-            staff_name: sName,
-            branch_id: selBranch,
-            date: selDate,
-            service_name: it.name || "",
-            service_group: it.group || "",
-            menu_id: it.menu_id || "",
-            menu_type: it.menu_type || "",
-            amount: Number(it.price) || 0,
-            standard_price: Number(it.price) || 0,
-            custom_price: false,
-            price_note: "",
-            tip: 0,
-            tip_in: "online",
-            material_sale: 0,
-            material_name: "",
-            source: "pos",
-            entry_id: savedEntryId || null,
-            pos_cart_id: String(it.cartId),
-            customer_id: selectedCustomer?.id || null,
-            customer_name: selectedCustomer?.name || null,
-            created_by: currentUser?.id || "unknown",
-            created_at: new Date().toISOString(),
-          };
-        });
-      await Promise.all(
-        logPayloads.map(p => addDoc(collection(db, "service_logs"), p))
-      );
-
       // Clear only the bill-level fields; keep branch/date/staff totals so multiple bills
       // can be entered for the same branch in sequence (subsequent saves update the day entry).
+      // service_logs + invoice docs are written by the settle flow (see confirmPrintAndSave).
       setCart([]);
       setSelectedCustomer(null);
       setClientSearch("");
@@ -1261,7 +1243,170 @@ export default function POSPage() {
     }
   };
 
-  // Build the bill preview data and open the preview modal
+  // Today's drafts + settled-invoice count for the selected branch+date
+  const todaysDrafts = useMemo(
+    () => invoices.filter(i => i.status === "draft").sort((a, b) => (a.created_at || "").localeCompare(b.created_at || "")),
+    [invoices]
+  );
+  const settledCount = useMemo(
+    () => invoices.filter(i => i.status === "settled").length,
+    [invoices]
+  );
+
+  // Invoice number: {BRANCH-PREFIX}-{DDMMYY}-{NNN}
+  const branchPrefix = (b) => {
+    if (!b) return "INV";
+    const raw = (b.code || b.name || "").replace(/V[-\s]*CUT/gi, "").replace(/[^A-Za-z]/g, "");
+    return (raw.slice(0, 3) || "INV").toUpperCase();
+  };
+  const formatInvoiceNo = (branch, date, seq) => {
+    const [y, m, d] = date.split("-");
+    return `${branchPrefix(branch)}-${d}${m}${y.slice(2)}-${String(seq).padStart(3, "0")}`;
+  };
+
+  const buildInvoicePayload = (status, invoice_no = null) => {
+    const branch = branchesById.get(selBranch);
+    const staffMap = new Map(staff.map(s => [s.id, s]));
+    const subtotal = cart.reduce((s, it) => s + (Number(it.price) || 0), 0);
+    const online = Math.max(0, Number(onlineInc) || 0);
+    const cash = Math.max(0, subtotal - online);
+    const gst_amount = Math.round(online * (Number(gstPct) || 0) / 100);
+    const split = new Map();
+    cart.forEach(it => {
+      if (!it.staffId) return;
+      split.set(it.staffId, (split.get(it.staffId) || 0) + (Number(it.price) || 0));
+    });
+    return {
+      branch_id: selBranch,
+      branch_name: branch?.name || "",
+      date: selDate,
+      items: cart.map(it => ({
+        cart_id: String(it.cartId),
+        name: it.name,
+        price: Number(it.price) || 0,
+        staff_id: it.staffId || null,
+        staff_name: staffMap.get(it.staffId)?.name || "",
+        menu_id: it.menu_id || "",
+        menu_type: it.menu_type || "",
+        group: it.group || "",
+        icon: it.icon || "",
+      })),
+      staff_split: [...split.entries()].map(([staff_id, billing]) => ({
+        staff_id, billing, staff_name: staffMap.get(staff_id)?.name || "",
+      })),
+      customer_id: selectedCustomer?.id || null,
+      customer_name: selectedCustomer?.name || null,
+      customer_phone: selectedCustomer?.phone || null,
+      subtotal,
+      gst_pct: Number(gstPct) || 0,
+      gst_amount,
+      cash,
+      online,
+      total: subtotal,
+      status,
+      ...(invoice_no ? { invoice_no } : {}),
+      cashier_name: currentUser?.name || "Staff",
+      created_by: currentUser?.id || "unknown",
+    };
+  };
+
+  // Apply a delta to staffRows.billing for a list of cart items (sign: +1 adds, -1 rolls back).
+  // Mirrors updateStaffRow's incentive recompute so rolling back a draft leaves clean totals.
+  const adjustStaffRowsFromCart = (items, sign) => {
+    const deltas = new Map();
+    items.forEach(it => {
+      if (!it.staffId) return;
+      deltas.set(it.staffId, (deltas.get(it.staffId) || 0) + (Number(it.price) || 0));
+    });
+    if (deltas.size === 0) return;
+    const b = branchesById.get(selBranch);
+    let incRateRaw = 10;
+    if (globalSettings) {
+      if (b?.type === "unisex") incRateRaw = globalSettings.unisex_inc ?? 10;
+      else incRateRaw = globalSettings.mens_inc ?? 10;
+    }
+    const incPct = incRateRaw / 100;
+    const matPct = 0.05;
+    setStaffRows(prev => {
+      const next = { ...prev };
+      deltas.forEach((delta, sid) => {
+        const row = next[sid] || {};
+        const newBilling = Math.max(0, (Number(row.billing) || 0) + sign * delta);
+        const material = Number(row.material) || 0;
+        const tips = Number(row.tips) || 0;
+        const incentive = Math.round(newBilling * incPct);
+        const mat_incentive = Math.round(material * matPct);
+        const staff_total_inc = incentive + mat_incentive + tips;
+        const total = newBilling + material + tips - incentive - mat_incentive;
+        next[sid] = { ...row, billing: newBilling, material, tips, incentive, mat_incentive, staff_total_inc, total };
+      });
+      return next;
+    });
+  };
+
+  const saveDraft = async () => {
+    if (!selBranch) { toast({ title: "Pick a Branch", message: "Select a branch before saving a draft.", type: "warning" }); return; }
+    if (cart.length === 0) { toast({ title: "Empty Cart", message: "Add items before saving a draft.", type: "warning" }); return; }
+    setSaving(true);
+    try {
+      const payload = buildInvoicePayload("draft");
+      if (editingDraftId) {
+        await updateDoc(doc(db, "invoices", editingDraftId), { ...payload, updated_at: new Date().toISOString() });
+      } else {
+        await addDoc(collection(db, "invoices"), { ...payload, created_at: new Date().toISOString() });
+      }
+      // Roll back the staffRows bumps that addToCart applied — draft billing is not counted yet.
+      adjustStaffRowsFromCart(cart, -1);
+      setCart([]);
+      setSelectedCustomer(null);
+      setClientSearch("");
+      setOnlineInc("");
+      setEditingDraftId(null);
+      toast({ title: "Draft Saved", message: "Resume it from the drafts bar. Auto-expires at midnight.", type: "success" });
+    } catch (err) {
+      toast({ title: "Save Failed", message: err.message, type: "error" });
+    }
+    setSaving(false);
+  };
+
+  const resumeDraft = (d) => {
+    if (cart.length > 0) {
+      toast({ title: "Cart Not Empty", message: "Settle or clear the current cart before resuming a draft.", type: "warning" });
+      return;
+    }
+    const items = (d.items || []).map((it, i) => ({
+      id: it.menu_id || `draft-${i}`,
+      cartId: Date.now() + Math.random() + i,
+      name: it.name,
+      price: Number(it.price) || 0,
+      staffId: it.staff_id || "",
+      menu_id: it.menu_id || "",
+      menu_type: it.menu_type || "",
+      group: it.group || "",
+      icon: it.icon || "✨",
+    }));
+    setCart(items);
+    if (d.customer_id) setSelectedCustomer({ id: d.customer_id, name: d.customer_name, phone: d.customer_phone });
+    setOnlineInc(d.online ? String(d.online) : "");
+    setEditingDraftId(d.id);
+    // Re-apply the staff_billing bumps the cart would normally carry.
+    adjustStaffRowsFromCart(items, +1);
+    toast({ title: "Draft Loaded", message: `Resumed ${d.items?.length || 0} item(s). Finish and settle to lock invoice #.`, type: "success" });
+  };
+
+  const discardDraft = async (d) => {
+    confirm({
+      title: "Discard Draft?",
+      message: "This draft will be permanently removed.",
+      confirmText: "Discard", cancelText: "Keep", type: "danger",
+      onConfirm: async () => {
+        try { await deleteDoc(doc(db, "invoices", d.id)); }
+        catch (err) { toast({ title: "Error", message: err.message, type: "error" }); }
+      }
+    });
+  };
+
+  // Build the bill preview data and open the preview modal (invoice_no assigned here).
   const openBillPreview = () => {
     if (cart.length === 0) return;
     if (!selBranch) { toast({ title: "Branch Required", message: "Pick a branch first.", type: "warning" }); return; }
@@ -1279,7 +1424,8 @@ export default function POSPage() {
     let paymentMode = "Cash";
     if (onlineAmt > 0 && cashAmt > 0) paymentMode = "Split (Cash + Online)";
     else if (onlineAmt > 0) paymentMode = "Online";
-    const billNo = `VC-${selDate.replace(/-/g, "")}-${String(Math.floor(Math.random() * 9000) + 1000)}`;
+    const nextSeq = settledCount + 1;
+    const billNo = formatInvoiceNo(branch, selDate, nextSeq);
     setBillPreview({
       billNo,
       branch: branch || { name: "V-Cut Salon" },
@@ -1300,11 +1446,59 @@ export default function POSPage() {
 
   const confirmPrintAndSave = async () => {
     try {
+      if (!billPreview) return;
+      const invoice_no = billPreview.billNo;
+
+      // 1. Write/settle the invoice doc first so the invoice_no is locked in.
+      const payload = buildInvoicePayload("settled", invoice_no);
+      payload.settled_at = new Date().toISOString();
+      let invoiceId;
+      if (editingDraftId) {
+        await updateDoc(doc(db, "invoices", editingDraftId), payload);
+        invoiceId = editingDraftId;
+      } else {
+        payload.created_at = new Date().toISOString();
+        const ref = await addDoc(collection(db, "invoices"), payload);
+        invoiceId = ref.id;
+      }
+
+      // 2. Per-item service_logs tagged source="pos" with invoice linkage.
+      const staffMap = new Map(staff.map(s => [s.id, s]));
+      const logPayloads = cart.filter(it => it.staffId).map(it => ({
+        staff_id: it.staffId,
+        staff_name: staffMap.get(it.staffId)?.name || "",
+        branch_id: selBranch,
+        date: selDate,
+        service_name: it.name || "",
+        service_group: it.group || "",
+        menu_id: it.menu_id || "",
+        menu_type: it.menu_type || "",
+        amount: Number(it.price) || 0,
+        standard_price: Number(it.price) || 0,
+        custom_price: false,
+        price_note: "",
+        tip: 0,
+        tip_in: "online",
+        material_sale: 0,
+        material_name: "",
+        source: "pos",
+        invoice_id: invoiceId,
+        invoice_no,
+        pos_cart_id: String(it.cartId),
+        customer_id: selectedCustomer?.id || null,
+        customer_name: selectedCustomer?.name || null,
+        created_by: currentUser?.id || "unknown",
+        created_at: new Date().toISOString(),
+      }));
+      await Promise.all(logPayloads.map(p => addDoc(collection(db, "service_logs"), p)));
+
+      // 3. Rollup into the daily entries doc so accountant can edit petrol/etc later.
       await handleSave({ preventDefault: () => {} });
-      // Give React a tick to commit, then print
-      setTimeout(() => {
-        window.print();
-      }, 100);
+
+      setEditingDraftId(null);
+
+      // 4. Print receipt.
+      setTimeout(() => { window.print(); }, 100);
     } catch (err) {
       confirm({ title: "Save Failed", message: err.message, confirmText: "OK", cancelText: "Close", type: "danger", onConfirm: () => {} });
     }
@@ -1441,33 +1635,66 @@ export default function POSPage() {
               </div>
             )}
 
-            {/* Service Grid */}
+            {/* Drafts Strip — today's drafts for this branch (auto-expires at midnight) */}
+            {selBranch && todaysDrafts.length > 0 && (
+              <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 2px", overflowX: "auto", scrollbarWidth: "none" }}>
+                <div style={{ fontSize: 10, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.5, flexShrink: 0 }}>Drafts</div>
+                {todaysDrafts.map(d => {
+                  const active = editingDraftId === d.id;
+                  return (
+                    <div key={d.id}
+                      style={{
+                        display: "inline-flex", alignItems: "center", gap: 8, flexShrink: 0,
+                        padding: "6px 10px", borderRadius: 999,
+                        background: active ? "var(--accent)" : "var(--bg3)",
+                        color: active ? "#000" : "var(--text2)",
+                        border: `1px solid ${active ? "var(--accent)" : "var(--border2)"}`,
+                        fontSize: 11, fontWeight: 700,
+                      }}>
+                      <button onClick={() => resumeDraft(d)}
+                        style={{ background: "transparent", border: "none", color: "inherit", fontWeight: 700, cursor: "pointer", padding: 0 }}>
+                        {(d.customer_name || "Walk-in")} · {d.items?.length || 0} item{(d.items?.length || 0) === 1 ? "" : "s"} · {INR(d.subtotal || 0)}
+                      </button>
+                      <button onClick={() => discardDraft(d)} title="Discard draft"
+                        style={{ background: "transparent", border: "none", color: active ? "#000" : "var(--red)", opacity: 0.7, cursor: "pointer", padding: 0, display: "inline-flex", alignItems: "center" }}>
+                        <Icon name="del" size={12} />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Service Grid — credit-card style (compact, fixed aspect) */}
             {selBranch && Object.keys(MENU).length > 0 && (
             <div style={{
-              flex: 1, overflowY: "auto", display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
-              gap: 16, paddingRight: 8, scrollbarWidth: "thin"
+              flex: 1, overflowY: "auto", display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))",
+              gap: 12, paddingRight: 8, scrollbarWidth: "thin", alignContent: "start"
             }}>
               {MENU[activeCategory]?.map(service => (
-                <div 
-                  key={service.id} 
+                <div
+                  key={service.id}
                   onClick={() => addToCart(service)}
                   style={{
-                    background: "var(--bg2)", borderRadius: 20, padding: 20, border: "1px solid var(--border)",
-                    cursor: "pointer", transition: "all .3s", position: "relative", overflow: "hidden",
-                    display: "flex", flexDirection: "column", gap: 12
+                    aspectRatio: "1.6 / 1",
+                    background: "linear-gradient(135deg, var(--bg2), var(--bg3))",
+                    borderRadius: 14, padding: "12px 14px",
+                    border: "1px solid var(--border)",
+                    cursor: "pointer", transition: "transform .18s ease, border-color .18s ease, box-shadow .18s ease",
+                    position: "relative", overflow: "hidden",
+                    display: "flex", flexDirection: "column", justifyContent: "space-between",
                   }}
-                  onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-4px)"; e.currentTarget.style.borderColor = "var(--accent)"; }}
-                  onMouseLeave={e => { e.currentTarget.style.transform = "translateY(0)"; e.currentTarget.style.borderColor = "var(--border)"; }}>
-                  <div style={{ fontSize: 32 }}>{service.icon}</div>
-                  <div>
-                    <div style={{ fontSize: 14, fontWeight: 800, color: "var(--text)", marginBottom: 4 }}>{service.name}</div>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                      <div style={{ fontSize: 16, fontWeight: 900, color: "var(--accent)" }}>{INR(service.price)}</div>
-                      <div style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase" }}>{service.time}</div>
-                    </div>
+                  onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-3px)"; e.currentTarget.style.borderColor = "var(--accent)"; e.currentTarget.style.boxShadow = "0 8px 24px rgba(var(--accent-rgb),0.15)"; }}
+                  onMouseLeave={e => { e.currentTarget.style.transform = "translateY(0)"; e.currentTarget.style.borderColor = "var(--border)"; e.currentTarget.style.boxShadow = "none"; }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                    <div style={{ fontSize: 20, lineHeight: 1 }}>{service.icon}</div>
+                    {service.time && <div style={{ fontSize: 9, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 0.5 }}>{service.time}</div>}
                   </div>
-                  {/* Subtle backlit effect */}
-                  <div style={{ position: "absolute", bottom: -20, right: -20, width: 80, height: 80, background: "var(--accent)", filter: "blur(40px)", opacity: 0.05 }} />
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 800, color: "var(--text)", lineHeight: 1.2, overflow: "hidden", textOverflow: "ellipsis", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{service.name}</div>
+                    <div style={{ fontSize: 15, fontWeight: 900, color: "var(--accent)", marginTop: 4 }}>{INR(service.price)}</div>
+                  </div>
+                  <div style={{ position: "absolute", bottom: -24, right: -24, width: 70, height: 70, background: "var(--accent)", filter: "blur(36px)", opacity: 0.06 }} />
                 </div>
               ))}
             </div>
@@ -1520,29 +1747,38 @@ export default function POSPage() {
                    <div style={{ fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Cart is Empty</div>
                 </div>
               ) : cart.map((item) => (
-                <div key={item.cartId} style={{ background: "var(--bg3)", borderRadius: 16, padding: "16px", display: "flex", flexDirection: "column", gap: 10 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                    <div>
-                      <div style={{ fontSize: 13, fontWeight: 800, color: "var(--text)" }}>{item.name}</div>
-                      <div style={{ fontSize: 12, fontWeight: 900, color: "var(--accent)", marginTop: 2 }}>{INR(item.price)}</div>
+                <div key={item.cartId}
+                  style={{
+                    background: "linear-gradient(135deg, var(--bg3), var(--bg4))",
+                    borderRadius: 14, padding: "10px 12px",
+                    border: "1px solid var(--border2)",
+                    display: "flex", flexDirection: "column", gap: 8,
+                    position: "relative", overflow: "hidden",
+                    animation: "pos-card-in .22s ease-out",
+                  }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 12, fontWeight: 800, color: "var(--text)", lineHeight: 1.2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.name}</div>
+                      <div style={{ fontSize: 14, fontWeight: 900, color: "var(--accent)", marginTop: 2 }}>{INR(item.price)}</div>
                     </div>
-                    <button onClick={() => removeFromCart(item)} style={{ background: "transparent", border: "none", color: "var(--red)", opacity: 0.6, cursor: "pointer" }}>
+                    <button onClick={() => removeFromCart(item)} style={{ background: "transparent", border: "none", color: "var(--red)", opacity: 0.7, cursor: "pointer", padding: 0 }} title="Remove">
                       <Icon name="del" size={14} />
                     </button>
                   </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <div style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase" }}>Assign Staff:</div>
-                    <select 
-                      value={item.staffId} 
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <div style={{ fontSize: 9, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 0.5 }}>Staff:</div>
+                    <select
+                      value={item.staffId}
                       onChange={e => updateCartStaff(item.cartId, e.target.value)}
-                      style={{ 
-                        flex: 1, background: "var(--bg4)", border: "1px solid var(--border2)", borderRadius: 8,
-                        padding: "6px 8px", color: "var(--text2)", fontSize: 11, fontWeight: 600, outline: "none"
+                      style={{
+                        flex: 1, background: "var(--bg2)", border: "1px solid var(--border2)", borderRadius: 8,
+                        padding: "4px 6px", color: "var(--text2)", fontSize: 10, fontWeight: 600, outline: "none"
                       }}>
-                      <option value="">Select Stylist...</option>
+                      <option value="">Select…</option>
                       {branchStaff.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                     </select>
                   </div>
+                  <div style={{ position: "absolute", bottom: -20, right: -20, width: 60, height: 60, background: "var(--accent)", filter: "blur(30px)", opacity: 0.06 }} />
                 </div>
               ))}
             </div>
@@ -1583,20 +1819,37 @@ export default function POSPage() {
                  <div style={{ fontSize: 36, fontWeight: 900, color: "var(--gold)", letterSpacing: -1 }}>{INR(totalBilling + totalMatSale + totalTips)}</div>
               </div>
 
-              <button
-                disabled={saving || cart.length === 0}
-                onClick={openBillPreview}
-                style={{
-                  width: "100%", padding: "18px", borderRadius: 16, border: "none", fontSize: 14, fontWeight: 900,
-                  background: "linear-gradient(135deg, var(--accent), var(--gold2))", color: "#000",
-                  cursor: cart.length === 0 ? "not-allowed" : "pointer", textTransform: "uppercase", letterSpacing: 1.5,
-                  boxShadow: "0 10px 30px rgba(var(--accent-rgb), 0.3)", transition: "all .3s",
-                  opacity: cart.length === 0 ? 0.5 : 1
-                }}
-                onMouseEnter={e => { if (cart.length) e.currentTarget.style.transform = "scale(1.02)"; }}
-                onMouseLeave={e => e.currentTarget.style.transform = "scale(1)"}>
-                {saving ? "SETTLING..." : "PREVIEW & SETTLE"}
-              </button>
+              <div style={{ display: "flex", gap: 10 }}>
+                <button
+                  disabled={saving || cart.length === 0}
+                  onClick={saveDraft}
+                  style={{
+                    flex: 1, padding: "14px", borderRadius: 14, fontSize: 12, fontWeight: 900,
+                    background: "var(--bg4)", color: "var(--text)",
+                    border: "1px solid var(--border2)",
+                    cursor: cart.length === 0 ? "not-allowed" : "pointer", textTransform: "uppercase", letterSpacing: 1.2,
+                    transition: "all .2s",
+                    opacity: cart.length === 0 ? 0.5 : 1,
+                  }}
+                  onMouseEnter={e => { if (cart.length) e.currentTarget.style.borderColor = "var(--accent)"; }}
+                  onMouseLeave={e => e.currentTarget.style.borderColor = "var(--border2)"}>
+                  {saving ? "…" : (editingDraftId ? "Update Draft" : "Save Draft")}
+                </button>
+                <button
+                  disabled={saving || cart.length === 0}
+                  onClick={openBillPreview}
+                  style={{
+                    flex: 1.2, padding: "14px", borderRadius: 14, border: "none", fontSize: 12, fontWeight: 900,
+                    background: "linear-gradient(135deg, var(--accent), var(--gold2))", color: "#000",
+                    cursor: cart.length === 0 ? "not-allowed" : "pointer", textTransform: "uppercase", letterSpacing: 1.2,
+                    boxShadow: "0 8px 24px rgba(var(--accent-rgb), 0.3)", transition: "all .2s",
+                    opacity: cart.length === 0 ? 0.5 : 1
+                  }}
+                  onMouseEnter={e => { if (cart.length) e.currentTarget.style.transform = "scale(1.02)"; }}
+                  onMouseLeave={e => e.currentTarget.style.transform = "scale(1)"}>
+                  {saving ? "Settling…" : "Preview & Settle"}
+                </button>
+              </div>
             </div>
           </div>
         </div>
