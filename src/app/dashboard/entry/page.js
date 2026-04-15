@@ -348,12 +348,14 @@ export default function EntryPage() {
       const incPct = incRateRaw / 100;
       const matPct = 0.05;
       
-      const incentive = field === "billing" ? Math.round(billing * incPct) : Math.round((field === "incentive" ? Number(value) : (row.incentive !== undefined ? row.incentive : Math.round(billing * incPct))));
+      const incentive = field === "billing"
+        ? Math.round(billing * incPct)
+        : Math.round((field === "incentive" ? Number(value) : (row.incentive !== undefined ? Number(row.incentive) || 0 : Math.round(billing * incPct))) || 0);
       const mat_incentive = Math.round(material * matPct);
-      
-      const staffTotalInc = incentive + mat_incentive + tips;
-      
-      const total = billing + material + tips - incentive - mat_incentive;
+
+      const staffTotalInc = Math.round(incentive + mat_incentive + tips);
+
+      const total = Math.round(billing + material + tips - incentive - mat_incentive);
       return { ...prev, [sid]: { ...row, billing, material, tips, incentive, mat_incentive, staff_total_inc: staffTotalInc, total } };
     });
   };
@@ -1283,9 +1285,9 @@ export default function EntryPage() {
                         const isPresent = r.present !== false; // default true
                         const incPct = (s.incentive_pct ?? 10) / 100;
                         const matInc = Math.round((r.material || 0) * 0.05);
-                        const inc = r.incentive !== undefined ? r.incentive : Math.round((r.billing || 0) * incPct);
-                        const staffTInc = inc + matInc + (r.tips || 0);
-                        const total = (r.billing || 0) + (r.material || 0) + (r.tips || 0);
+                        const inc = Math.round(r.incentive !== undefined ? Number(r.incentive) || 0 : (r.billing || 0) * incPct);
+                        const staffTInc = Math.round(inc + matInc + (Number(r.tips) || 0));
+                        const total = Math.round((Number(r.billing) || 0) + (Number(r.material) || 0) + (Number(r.tips) || 0));
                         const tipIn = r.tip_in || "online";
                         const tipPaid = r.tip_paid || "cash";
                         const disabledStyle = !isPresent ? { opacity: 0.4, pointerEvents: "none" } : {};
@@ -1369,7 +1371,15 @@ export default function EntryPage() {
                   <div style={{ padding: "12px 16px", borderRadius: 10, border: `2px solid ${cashInHand >= 0 ? "var(--green)" : "var(--red)"}`, background: "var(--bg3)", fontSize: 18, fontWeight: 700, color: cashInHand >= 0 ? "var(--green)" : "var(--red)" }}>{INR(cashInHand)}</div>
                 </FG>
                 <FG label="Actual Cash Counted (₹)">
-                  <input type="number" placeholder="leave blank to skip" min="0" value={actualCash} onChange={e => setActualCash(e.target.value)}
+                  <input type="number" placeholder="leave blank to skip" min="0" step="1" value={actualCash}
+                    onChange={e => {
+                      const v = e.target.value;
+                      if (v === "") { setActualCash(""); return; }
+                      const n = Number(v);
+                      if (Number.isNaN(n) || n < 0) return;   // reject negatives outright
+                      setActualCash(String(Math.max(0, n)));
+                    }}
+                    onKeyDown={e => { if (e.key === "-" || e.key === "e") e.preventDefault(); }}
                     style={cashDiff === null ? undefined : {
                       borderColor: cashDiff === 0 ? "var(--green)" : cashDiff > 0 ? "var(--green)" : "var(--red)",
                       color: cashDiff === 0 ? "var(--green)" : cashDiff > 0 ? "var(--green)" : "var(--red)",
