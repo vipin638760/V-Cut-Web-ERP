@@ -39,12 +39,16 @@ export default function BillPrintModal({ invoice, onClose }) {
               <div><strong>Bill #</strong> {invoice.invoice_no || "—"}</div>
               <div>{invoice.date} · {time}</div>
             </div>
-            {invoice.customer_name && (
-              <div style={{ textAlign: "right" }}>
-                <div><strong>Guest:</strong> {invoice.customer_name}</div>
-                {invoice.customer_phone && <div style={{ color: "#555" }}>📞 {invoice.customer_phone}</div>}
-              </div>
-            )}
+            <div style={{ textAlign: "right" }}>
+              {invoice.customer_name ? (
+                <>
+                  <div><strong>Customer:</strong> {invoice.customer_name}</div>
+                  {invoice.customer_phone && <div style={{ color: "#555" }}>📞 {invoice.customer_phone}</div>}
+                </>
+              ) : (
+                <div><strong>Customer:</strong> Walk-in{invoice.walkin_no ? ` #${String(invoice.walkin_no).padStart(3, "0")}` : ""}</div>
+              )}
+            </div>
           </div>
 
           {/* Items */}

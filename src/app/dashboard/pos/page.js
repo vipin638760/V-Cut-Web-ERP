@@ -1391,7 +1391,13 @@ export default function POSPage() {
     return `${branchPrefix(branch)}-${d}${m}${y.slice(2)}-${String(seq).padStart(3, "0")}`;
   };
 
-  const buildInvoicePayload = (status, invoice_no = null) => {
+  // Next walk-in number for today's branch (only counts bills with no customer_id).
+  const nextWalkinNo = useMemo(
+    () => invoices.filter(i => i.status === "settled" && !i.customer_id).length + 1,
+    [invoices]
+  );
+
+  const buildInvoicePayload = (status, invoice_no = null, extras = {}) => {
     const branch = branchesById.get(selBranch);
     const staffMap = new Map(staff.map(s => [s.id, s]));
     const subtotal = cart.reduce((s, it) => s + (Number(it.price) || 0), 0);
@@ -1432,6 +1438,7 @@ export default function POSPage() {
       total: subtotal,
       status,
       ...(invoice_no ? { invoice_no } : {}),
+      ...extras,
       cashier_name: currentUser?.name || "Staff",
       created_by: currentUser?.id || "unknown",
     };
@@ -1553,12 +1560,14 @@ export default function POSPage() {
     else if (onlineAmt > 0) paymentMode = "Online";
     const nextSeq = settledCount + 1;
     const billNo = formatInvoiceNo(branch, selDate, nextSeq);
+    const walkinNo = selectedCustomer ? null : nextWalkinNo;
     setBillPreview({
       billNo,
       branch: branch || { name: "V-Cut Salon" },
       date: selDate,
       time: new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }),
       customer: selectedCustomer,
+      walkinNo,
       items,
       subtotal,
       gstPct: Number(gstPct) || 0,
@@ -1594,6 +1603,7 @@ export default function POSPage() {
       date: inv.date,
       time: settledDate ? new Date(settledDate).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "",
       customer: inv.customer_id ? { id: inv.customer_id, name: inv.customer_name, phone: inv.customer_phone } : null,
+      walkinNo: inv.walkin_no || null,
       items,
       subtotal,
       gstPct: Number(inv.gst_pct) || 0,
@@ -1613,7 +1623,8 @@ export default function POSPage() {
       const invoice_no = billPreview.billNo;
 
       // 1. Write/settle the invoice doc first so the invoice_no is locked in.
-      const payload = buildInvoicePayload("settled", invoice_no);
+      const extras = billPreview.walkinNo ? { walkin_no: billPreview.walkinNo } : {};
+      const payload = buildInvoicePayload("settled", invoice_no, extras);
       payload.settled_at = new Date().toISOString();
       let invoiceId;
       if (editingDraftId) {
@@ -1659,6 +1670,19 @@ export default function POSPage() {
       // rollup:true auto-targets any existing entry for this branch+date — each bill
       // just adds to the daily total instead of tripping the duplicate-detection guard.
       await handleSave({ preventDefault: () => {} }, { rollup: true });
+
+      // 4. Update the customer's last-visit pointer so the Order Summary can prompt
+      // the receptionist the next time this customer walks in ("visiting after N days").
+      if (selectedCustomer?.id) {
+        try {
+          await updateDoc(doc(db, "customers", selectedCustomer.id), {
+            last_visit_date: selDate,
+            last_visit_at: new Date().toISOString(),
+            last_visit_invoice: invoice_no,
+            last_visit_branch_id: selBranch,
+          });
+        } catch { /* non-fatal */ }
+      }
 
       setEditingDraftId(null);
 
@@ -1930,6 +1954,48 @@ export default function POSPage() {
               </div>
             </div>
 
+            {/* Customer card — name, phone, and time-since-last-visit prompt */}
+            {(selectedCustomer || cart.length === 0) && (() => {
+              if (!selectedCustomer) {
+                return (
+                  <div style={{ padding: "10px 12px", borderRadius: 10, background: "var(--bg3)", border: "1px dashed var(--border2)", fontSize: 11, color: "var(--text3)", textAlign: "center" }}>
+                    Walk-in customer (identify above to personalise)
+                  </div>
+                );
+              }
+              const full = customers.find(c => c.id === selectedCustomer.id) || selectedCustomer;
+              const lastVisit = full.last_visit_date;
+              let hintLabel = "", hintColor = "var(--text3)";
+              if (lastVisit) {
+                const ms = new Date(selDate).getTime() - new Date(lastVisit).getTime();
+                const days = Math.round(ms / (1000 * 60 * 60 * 24));
+                if (days <= 0)      { hintLabel = "Visiting again today"; hintColor = "var(--green)"; }
+                else if (days <= 7) { hintLabel = `${days} day${days === 1 ? "" : "s"} ago — welcome back`; hintColor = "var(--green)"; }
+                else if (days <= 30){ hintLabel = `${days} days ago`; hintColor = "var(--accent)"; }
+                else if (days <= 90){ hintLabel = `${days} days ago — long time no see`; hintColor = "var(--orange)"; }
+                else                { hintLabel = `${days} days ago — almost forgot us!`; hintColor = "var(--red)"; }
+              } else {
+                hintLabel = "First visit on record 🎉";
+                hintColor = "var(--accent)";
+              }
+              return (
+                <div style={{ padding: "10px 12px", borderRadius: 10, background: "linear-gradient(135deg, rgba(var(--accent-rgb),0.08), rgba(var(--accent-rgb),0.02))", border: "1px solid rgba(var(--accent-rgb),0.25)" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 10, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.2 }}>Customer</div>
+                      <div style={{ fontSize: 14, fontWeight: 800, color: "var(--text)", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{full.name}</div>
+                      {full.phone && <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 2 }}>📞 {full.phone}</div>}
+                    </div>
+                    <button type="button" onClick={() => { setSelectedCustomer(null); setClientSearch(""); }}
+                      title="Clear customer"
+                      style={{ background: "transparent", border: "none", color: "var(--text3)", cursor: "pointer", fontSize: 12, fontWeight: 800, padding: 4 }}>✕</button>
+                  </div>
+                  <div style={{ marginTop: 6, fontSize: 11, fontWeight: 700, color: hintColor }}>
+                    {lastVisit ? `Last visit: ${lastVisit} · ${hintLabel}` : hintLabel}
+                  </div>
+                </div>
+              );
+            })()}
 
             <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: 12, paddingRight: 4 }}>
               {cart.length === 0 ? (
@@ -2385,12 +2451,16 @@ export default function POSPage() {
                 </div>
 
                 {/* Customer */}
-                {billPreview.customer && (
-                  <div style={{ background: "#f6f6f6", borderRadius: 8, padding: "8px 10px", marginBottom: 12, fontSize: 11 }}>
-                    <div><strong>Guest:</strong> {billPreview.customer.name}</div>
-                    {billPreview.customer.phone && <div style={{ color: "#555" }}>📞 {billPreview.customer.phone}</div>}
-                  </div>
-                )}
+                <div style={{ background: "#f6f6f6", borderRadius: 8, padding: "8px 10px", marginBottom: 12, fontSize: 11 }}>
+                  {billPreview.customer ? (
+                    <>
+                      <div><strong>Customer:</strong> {billPreview.customer.name}</div>
+                      {billPreview.customer.phone && <div style={{ color: "#555" }}>📞 {billPreview.customer.phone}</div>}
+                    </>
+                  ) : (
+                    <div><strong>Customer:</strong> Walk-in{billPreview.walkinNo ? ` #${String(billPreview.walkinNo).padStart(3, "0")}` : ""}</div>
+                  )}
+                </div>
 
                 {/* Items */}
                 <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, marginBottom: 12 }}>
