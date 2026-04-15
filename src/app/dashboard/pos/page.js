@@ -1243,15 +1243,18 @@ export default function POSPage() {
     }
   };
 
-  // Today's drafts + settled-invoice count for the selected branch+date
+  // Today's drafts + settled invoices for the selected branch+date
   const todaysDrafts = useMemo(
     () => invoices.filter(i => i.status === "draft").sort((a, b) => (a.created_at || "").localeCompare(b.created_at || "")),
     [invoices]
   );
-  const settledCount = useMemo(
-    () => invoices.filter(i => i.status === "settled").length,
+  const todaysSettled = useMemo(
+    () => invoices
+      .filter(i => i.status === "settled")
+      .sort((a, b) => (a.invoice_no || "").localeCompare(b.invoice_no || "")),
     [invoices]
   );
+  const settledCount = todaysSettled.length;
 
   // Invoice number: {BRANCH-PREFIX}-{DDMMYY}-{NNN}
   const branchPrefix = (b) => {
@@ -1444,7 +1447,43 @@ export default function POSPage() {
     });
   };
 
-  const confirmPrintAndSave = async () => {
+  // Re-open a previously-settled invoice in the preview modal (read-only).
+  // Useful when the user wants to look at or print an earlier bill of the day.
+  const openInvoicePreview = (inv) => {
+    const branch = branchesById.get(inv.branch_id) || { name: inv.branch_name };
+    const staffMap = new Map(staff.map(s => [s.id, s]));
+    const items = (inv.items || []).map(it => ({
+      name: it.name,
+      price: Number(it.price) || 0,
+      stylist: staffMap.get(it.staff_id)?.name || it.staff_name || "—",
+    }));
+    const subtotal = Number(inv.subtotal) || items.reduce((s, it) => s + it.price, 0);
+    const onlineAmt = Number(inv.online) || 0;
+    const cashAmt = Number(inv.cash) || Math.max(0, subtotal - onlineAmt);
+    let paymentMode = "Cash";
+    if (onlineAmt > 0 && cashAmt > 0) paymentMode = "Split (Cash + Online)";
+    else if (onlineAmt > 0) paymentMode = "Online";
+    const settledDate = inv.settled_at || inv.created_at;
+    setBillPreview({
+      billNo: inv.invoice_no || "—",
+      branch,
+      date: inv.date,
+      time: settledDate ? new Date(settledDate).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "",
+      customer: inv.customer_id ? { id: inv.customer_id, name: inv.customer_name, phone: inv.customer_phone } : null,
+      items,
+      subtotal,
+      gstPct: Number(inv.gst_pct) || 0,
+      gstAmt: Number(inv.gst_amount) || 0,
+      total: Number(inv.total) || subtotal,
+      onlineAmt,
+      cashAmt,
+      paymentMode,
+      cashier: inv.cashier_name || "Staff",
+      viewOnly: true,
+    });
+  };
+
+  const confirmPrintAndSave = async ({ print = true } = {}) => {
     try {
       if (!billPreview) return;
       const invoice_no = billPreview.billNo;
@@ -1497,8 +1536,13 @@ export default function POSPage() {
 
       setEditingDraftId(null);
 
-      // 4. Print receipt.
-      setTimeout(() => { window.print(); }, 100);
+      // 4. Print only if the user chose "Settle & Print". Otherwise close the modal.
+      if (print) {
+        setTimeout(() => { window.print(); }, 100);
+      } else {
+        setBillPreview(null);
+        toast({ title: "Bill Settled", message: `${invoice_no} saved. Open it from Today's Bills to print later.`, type: "success" });
+      }
     } catch (err) {
       confirm({ title: "Save Failed", message: err.message, confirmText: "OK", cancelText: "Close", type: "danger", onConfirm: () => {} });
     }
@@ -1632,6 +1676,27 @@ export default function POSPage() {
                 <div style={{ fontSize: 32 }}>📋</div>
                 <div style={{ fontWeight: 700 }}>No menu configured for this branch.</div>
                 <div style={{ fontSize: 12 }}>Ask an admin to set up a menu in <strong>Menu Configuration</strong> and tag it to this branch.</div>
+              </div>
+            )}
+
+            {/* Today's Settled Bills — click to re-open preview and print later */}
+            {selBranch && todaysSettled.length > 0 && (
+              <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 2px", overflowX: "auto", scrollbarWidth: "none" }}>
+                <div style={{ fontSize: 10, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.5, flexShrink: 0 }}>Today&apos;s Bills</div>
+                {todaysSettled.map(inv => (
+                  <button key={inv.id} onClick={() => openInvoicePreview(inv)}
+                    style={{
+                      display: "inline-flex", alignItems: "center", gap: 8, flexShrink: 0,
+                      padding: "6px 10px", borderRadius: 999,
+                      background: "rgba(var(--accent-rgb), 0.08)",
+                      color: "var(--accent)",
+                      border: "1px solid rgba(var(--accent-rgb), 0.25)",
+                      fontSize: 11, fontWeight: 700, cursor: "pointer",
+                    }}>
+                    <span style={{ fontWeight: 900, letterSpacing: 0.5 }}>{inv.invoice_no}</span>
+                    <span style={{ opacity: 0.8 }}>· {inv.customer_name || "Walk-in"} · {INR(inv.total || inv.subtotal || 0)}</span>
+                  </button>
+                ))}
               </div>
             )}
 
@@ -2091,15 +2156,28 @@ export default function POSPage() {
             </div>
 
             {/* Action buttons — hidden in print */}
-            <div className="no-print" style={{ display: "flex", gap: 10 }}>
+            <div className="no-print" style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
               <button onClick={() => setBillPreview(null)}
-                style={{ flex: 1, padding: "12px", borderRadius: 10, background: "var(--bg3)", color: "var(--text)", border: "1px solid var(--border)", cursor: "pointer", fontWeight: 700 }}>
-                Back to Edit
+                style={{ flex: "1 1 120px", padding: "12px", borderRadius: 10, background: "var(--bg3)", color: "var(--text)", border: "1px solid var(--border)", cursor: "pointer", fontWeight: 700 }}>
+                {billPreview.viewOnly ? "Close" : "Back to Edit"}
               </button>
-              <button onClick={confirmPrintAndSave} disabled={saving}
-                style={{ flex: 2, padding: "12px", borderRadius: 10, background: "linear-gradient(135deg, var(--accent), var(--gold2))", color: "#000", border: "none", cursor: "pointer", fontWeight: 900, letterSpacing: 1, textTransform: "uppercase" }}>
-                {saving ? "Saving…" : "Confirm & Print"}
-              </button>
+              {billPreview.viewOnly ? (
+                <button onClick={() => window.print()}
+                  style={{ flex: "2 1 160px", padding: "12px", borderRadius: 10, background: "linear-gradient(135deg, var(--accent), var(--gold2))", color: "#000", border: "none", cursor: "pointer", fontWeight: 900, letterSpacing: 1, textTransform: "uppercase" }}>
+                  Print
+                </button>
+              ) : (
+                <>
+                  <button onClick={() => confirmPrintAndSave({ print: false })} disabled={saving}
+                    style={{ flex: "1 1 140px", padding: "12px", borderRadius: 10, background: "var(--bg4)", color: "var(--text)", border: "1px solid var(--accent)", cursor: "pointer", fontWeight: 800, letterSpacing: 1, textTransform: "uppercase" }}>
+                    {saving ? "Saving…" : "Settle"}
+                  </button>
+                  <button onClick={() => confirmPrintAndSave({ print: true })} disabled={saving}
+                    style={{ flex: "1 1 160px", padding: "12px", borderRadius: 10, background: "linear-gradient(135deg, var(--accent), var(--gold2))", color: "#000", border: "none", cursor: "pointer", fontWeight: 900, letterSpacing: 1, textTransform: "uppercase" }}>
+                    {saving ? "…" : "Settle & Print"}
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </div>
