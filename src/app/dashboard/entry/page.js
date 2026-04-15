@@ -88,6 +88,7 @@ export default function EntryPage() {
   const [rangeFrom, setRangeFrom] = useState("");
   const [rangeTo, setRangeTo] = useState("");
   const [uploadPreview, setUploadPreview] = useState(null); // { rows: [...], errors: [...], valid: [...] }
+  const [serviceLogsByStaff, setServiceLogsByStaff] = useState({}); // { [staff_id]: { billing, tips, material, count, closed } }
   const [templatePicker, setTemplatePicker] = useState(false); // show format choice
   const [generatingTemplate, setGeneratingTemplate] = useState(false);
   
@@ -226,6 +227,31 @@ export default function EntryPage() {
     });
     return () => unsub();
   }, [filterMode, filterPrefix, filterYear]);
+
+  // Service logs for the currently selected branch+date — used to show discrepancies
+  // between what staff logged themselves (day-working page) and what the accountant is entering.
+  useEffect(() => {
+    if (!db || !selBranch || !selDate) { setServiceLogsByStaff({}); return; }
+    const q = query(
+      collection(db, "service_logs"),
+      where("branch_id", "==", selBranch),
+      where("date", "==", selDate),
+    );
+    const unsub = onSnapshot(q, sn => {
+      const byStaff = {};
+      sn.docs.forEach(d => {
+        const l = d.data();
+        const k = l.staff_id;
+        if (!byStaff[k]) byStaff[k] = { billing: 0, tips: 0, material: 0, count: 0 };
+        byStaff[k].billing  += Number(l.amount) || 0;
+        byStaff[k].tips     += Number(l.tip) || 0;
+        byStaff[k].material += Number(l.material_sale) || 0;
+        byStaff[k].count    += 1;
+      });
+      setServiceLogsByStaff(byStaff);
+    });
+    return () => unsub();
+  }, [selBranch, selDate]);
 
   // Branch lookup — memoized so per-row resolution in tables/exports is O(1) instead of O(n).
   const branchesById = useMemo(() => {
@@ -1119,6 +1145,41 @@ export default function EntryPage() {
               {/* Staff Billing Table */}
               <div style={{ height: 1, background: "linear-gradient(90deg,transparent,var(--border2),transparent)", margin: "16px 0" }} />
               <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 12, color: "var(--gold)", textTransform: "uppercase", letterSpacing: 1 }}>Staff Billing & Incentives</div>
+
+              {(() => {
+                const discrepancies = branchStaff
+                  .map(s => {
+                    const logged = serviceLogsByStaff[s.id];
+                    if (!logged || logged.count === 0) return null;
+                    const r = staffRows[s.id] || {};
+                    const bDiff = (Number(r.billing) || 0) - logged.billing;
+                    const tDiff = (Number(r.tips) || 0) - logged.tips;
+                    const mDiff = (Number(r.material) || 0) - logged.material;
+                    if (bDiff === 0 && tDiff === 0 && mDiff === 0) return null;
+                    return { staff: s, logged, bDiff, tDiff, mDiff };
+                  })
+                  .filter(Boolean);
+                if (discrepancies.length === 0) return null;
+                return (
+                  <div style={{ marginBottom: 12, padding: "10px 14px", borderRadius: 10, background: "rgba(255,180,0,0.08)", border: "1px solid rgba(255,180,0,0.3)", fontSize: 12, color: "var(--text2)" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                      <Icon name="alert" size={14} color="var(--gold)" />
+                      <strong style={{ color: "var(--gold)" }}>Staff log discrepancy — {discrepancies.length} mismatch{discrepancies.length === 1 ? "" : "es"}</strong>
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 3, fontSize: 11 }}>
+                      {discrepancies.map(d => (
+                        <div key={d.staff.id}>
+                          <strong>{d.staff.name}</strong> logged{" "}
+                          {INR(d.logged.billing)} billing / {INR(d.logged.tips)} tips / {INR(d.logged.material)} material ({d.logged.count} svc)
+                          {d.bDiff !== 0 && <span style={{ color: "var(--red)" }}> · Billing Δ {INR(d.bDiff)}</span>}
+                          {d.tDiff !== 0 && <span style={{ color: "var(--red)" }}> · Tips Δ {INR(d.tDiff)}</span>}
+                          {d.mDiff !== 0 && <span style={{ color: "var(--red)" }}> · Material Δ {INR(d.mDiff)}</span>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
 
               {branchStaff.length > 0 ? (
                 <div style={{ overflowX: "auto", marginBottom: 16 }}>

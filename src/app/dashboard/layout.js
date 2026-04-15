@@ -37,6 +37,7 @@ const NAV = {
   ],
   employee: [
     { id: "dashboard",      l: "Dashboard",        icon: "home" },
+    { id: "day-working",    l: "Day Working",      icon: "edit" },
     { id: "my-payroll",     l: "My Payroll",       icon: "wallet" },
     { id: "apply-leave",    l: "Apply Leave",      icon: "checkCircle" },
   ],
