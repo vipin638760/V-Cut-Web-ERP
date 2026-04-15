@@ -5,6 +5,8 @@ import { db } from "@/lib/firebase";
 import { useCurrentUser, getCurrentUser } from "@/lib/currentUser";
 import { INR, proRataSalary, makeFilterPrefix, staffStatusForMonth, staffLeavesInMonth } from "@/lib/calculations";
 import { Card, Pill, TH, TD, PeriodWidget, Modal, Icon, useConfirm, useToast } from "@/components/ui";
+import VLoader from "@/components/VLoader";
+
 
 function generatePayslipPDF(employee, branch, earned, advApproved, advPending, net, baseSalary, period, periodAdvances, { daysWorked, leavesTaken, payMode: overrideMode, payDate: overrideDate } = {}) {
   const fmt = (v) => Math.round(v || 0).toLocaleString('en-IN');
@@ -200,7 +202,7 @@ export default function PayrollTab() {
 
   const getRelease = (staffId) => payrollReleases.find(r => r.staff_id === staffId && r.period === filterPrefix);
 
-  if (loading) return <div style={{ padding: 40, textAlign: "center", color: "var(--accent)", fontWeight: 600 }}>Loading...</div>;
+  if (loading) return <VLoader fullscreen label="Loading" />;
 
   const getStaffAdvances = (staffId) => advances.filter(a => {
     if (a.staff_id !== staffId) return false;

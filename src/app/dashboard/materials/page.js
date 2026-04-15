@@ -5,6 +5,8 @@ import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
 import { INR } from "@/lib/calculations";
 import { Icon, IconBtn, Pill, Card, TH, TD, Modal, useConfirm, useToast } from "@/components/ui";
+import VLoader from "@/components/VLoader";
+
 // ExcelJS is ~200KB — load only when Export/Template/Upload is actually used.
 let _excelJSPromise = null;
 const loadExcelJS = () => {
@@ -1312,7 +1314,7 @@ export default function MaterialsPage() {
     });
   };
 
-  if (loading) return <div style={{ padding: 40, textAlign: "center", color: "var(--accent)", fontWeight: 700 }}>Loading materials...</div>;
+  if (loading) return <VLoader fullscreen label="Loading materials" />;
 
   // Summary stats
   const totalValue = materials.reduce((s, m) => s + (Number(m.current_price) || 0), 0);

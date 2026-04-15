@@ -6,6 +6,8 @@ import { useCurrentUser } from "@/lib/currentUser";
 import { INR, branchIncomeInPeriod, makeFilterPrefix, periodLabel, proRataSalary, staffLeavesInMonth, staffStatusForMonth, MASK } from "@/lib/calculations";
 import { Icon, IconBtn, Pill, Card, PeriodWidget, ToggleGroup, TH, TD, useConfirm, useToast } from "@/components/ui";
 import { useRouter } from "next/navigation";
+import VLoader from "@/components/VLoader";
+
 
 const NOW = new Date();
 
@@ -232,7 +234,7 @@ export default function BranchesPage() {
     });
   };
 
-  if (loading) return <div style={{ textAlign: "center", color: "var(--gold)", fontWeight: 700, padding: 40 }}>Loading branches...</div>;
+  if (loading) return <VLoader fullscreen label="Loading branches" />;
 
   // ── Branch Detail View ───────────────────────────────────────────
   if (selectedBranch) {

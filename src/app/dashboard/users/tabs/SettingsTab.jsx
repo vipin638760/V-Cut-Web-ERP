@@ -3,6 +3,8 @@ import { useState, useEffect } from "react";
 import { doc, onSnapshot, setDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { Icon, Card, useConfirm } from "@/components/ui";
+import VLoader from "@/components/VLoader";
+
 
 export default function SettingsTab() {
   const { confirm, ConfirmDialog } = useConfirm();
@@ -58,7 +60,7 @@ export default function SettingsTab() {
     setSaving(false);
   };
 
-  if (loading) return <div style={{ padding: 60, textAlign: "center", color: "var(--accent)", fontWeight: 800 }}>Syncing system protocols...</div>;
+  if (loading) return <VLoader fullscreen label="Syncing system protocols" />;
 
   const inputStyle = { width: "100%", padding: "14px 18px", border: "1px solid var(--border2)", borderRadius: 14, background: "rgba(255,255,255,0.02)", color: "var(--text)", outline: "none", fontSize: 13, transition: "all 0.2s" };
 

@@ -4,6 +4,8 @@ import { collection, onSnapshot, doc, setDoc, deleteDoc } from "firebase/firesto
 import { db } from "@/lib/firebase";
 import { INR, proRataSalary, makeFilterPrefix, staffOverallStatus } from "@/lib/calculations";
 import { Card, IconBtn, TH, TD, PeriodWidget, StatCard, Icon, Pill, useConfirm, useToast } from "@/components/ui";
+import VLoader from "@/components/VLoader";
+
 
 const NOW = new Date();
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -123,7 +125,7 @@ export default function FixedExpTab() {
     });
   };
 
-  if (loading) return <div style={{ padding: 60, textAlign: "center", color: "var(--accent)", fontWeight: 800 }}>Syncing operational data...</div>;
+  if (loading) return <VLoader fullscreen label="Syncing operational data" />;
 
   const inputStyle = { width: 70, textAlign: "right", padding: "6px 8px", border: "1px solid var(--border2)", borderRadius: 8, fontSize: 13, background: "rgba(255,255,255,0.02)", color: "var(--text)", outline: "none", transition: "all 0.2s" };
 

@@ -6,6 +6,8 @@ import { useCurrentUser } from "@/lib/currentUser";
 import { INR } from "@/lib/calculations";
 import { Icon, IconBtn, Card, PeriodWidget, TH, TD, Modal, useConfirm, useToast } from "@/components/ui";
 import { staffStatusForMonth, effectiveBranchOnDate } from "@/lib/calculations";
+import VLoader from "@/components/VLoader";
+
 
 // ExcelJS is ~200KB — load only when Template/Upload/Export is actually used.
 let _excelJSPromise = null;
@@ -1775,7 +1777,7 @@ export default function POSPage() {
     }
   };
 
-  if (loading) return <div className="text-center text-[var(--gold)] p-10">Loading...</div>;
+  if (loading) return <VLoader fullscreen label="Loading" />;
 
   return (
     <div style={{ height: "calc(100vh - 80px)", display: "flex", flexDirection: "column", gap: 16 }}>

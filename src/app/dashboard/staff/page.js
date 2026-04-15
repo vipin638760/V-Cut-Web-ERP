@@ -283,7 +283,7 @@ export default function StaffPage() {
     });
   };
 
-  if (loading) return <div className="text-center text-[var(--gold)] font-bold p-10">Loading Staff...</div>;
+  if (loading) return <VLoader fullscreen label="Loading Staff" />;
 
   // Yearly salary helper — sum pro-rata across all months (honors approved leaves)
   const yearlyStaffSalary = (s) => {
@@ -780,3 +780,5 @@ function FormField({ label, children }) {
 }
 
 import React from "react";
+import VLoader from "@/components/VLoader";
+

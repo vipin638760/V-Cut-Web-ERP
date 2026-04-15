@@ -6,6 +6,7 @@ import { db, storage } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
 import { INR } from "@/lib/calculations";
 import { Icon, IconBtn, Card, Pill, Modal, useConfirm, useToast } from "@/components/ui";
+import VLoader from "@/components/VLoader";
 
 // ── Seed data pulled from the V-Cut PDF menus ──
 // Multi-column rows (Ladies/Gents, INOA/Masirel/Schwarzkoph, S/M/L, etc.) are flattened
@@ -519,7 +520,7 @@ export default function MenuConfigPage() {
     }
   };
 
-  if (loading) return <div style={{ textAlign: "center", color: "var(--gold)", padding: 40, fontWeight: 700 }}>Loading menus...</div>;
+  if (loading) return <VLoader fullscreen label="Loading menus" />;
 
   return (
     <div>

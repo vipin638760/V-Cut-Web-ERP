@@ -5,6 +5,7 @@ import { db } from "@/lib/firebase";
 import { DEFAULTS_USERS } from "@/lib/constants";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/ui";
+import VLoader from "@/components/VLoader";
 
 export default function LoginPage() {
   const [selectedRole, setSelectedRole] = useState(null);
@@ -134,6 +135,7 @@ export default function LoginPage() {
 
   return (
     <div className="login-page min-h-screen flex flex-col md:flex-row" style={{ background: "#0e0e0e", color: "#fff" }}>
+      {loading && <VLoader fullscreen label="Signing in" />}
 
       {/* ═══════════ LEFT: Cinematic Branding ═══════════ */}
       <section className="relative hidden md:flex md:w-1/2 lg:w-[58%] overflow-hidden">

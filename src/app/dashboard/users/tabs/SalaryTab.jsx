@@ -5,6 +5,8 @@ import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
 import { INR } from "@/lib/calculations";
 import { Card, Pill, TH, TD, StatCard, Icon, useConfirm } from "@/components/ui";
+import VLoader from "@/components/VLoader";
+
 
 export default function SalaryTab() {
   const currentUser = useCurrentUser() || {};
@@ -62,7 +64,7 @@ export default function SalaryTab() {
     </div>
   );
 
-  if (loading) return <div style={{ padding: 60, textAlign: "center", color: "var(--accent)", fontWeight: 800 }}>Calibrating payroll infrastructure...</div>;
+  if (loading) return <VLoader fullscreen label="Calibrating payroll infrastructure" />;
 
   let grandTotal = 0;
   staff.forEach(s => {

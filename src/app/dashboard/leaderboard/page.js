@@ -4,6 +4,8 @@ import { collection, onSnapshot, query, orderBy } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { staffBillingInPeriod, makeFilterPrefix, INR } from "@/lib/calculations";
 import { Card, PeriodWidget, TH, TD } from "@/components/ui";
+import VLoader from "@/components/VLoader";
+
 
 const NOW = new Date();
 
@@ -41,7 +43,7 @@ export default function LeaderboardPage() {
     })
     .sort((a, b) => b.sale - a.sale);
 
-  if (loading) return <div style={{ textAlign: "center", color: "var(--gold)", padding: 40 }}>Loading Leaderboard...</div>;
+  if (loading) return <VLoader fullscreen label="Loading Leaderboard" />;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>

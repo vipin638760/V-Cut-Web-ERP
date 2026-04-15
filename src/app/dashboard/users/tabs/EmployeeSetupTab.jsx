@@ -4,6 +4,8 @@ import { collection, onSnapshot, doc, setDoc, deleteDoc, addDoc } from "firebase
 import { db } from "@/lib/firebase";
 import { INR, staffOverallStatus } from "@/lib/calculations";
 import { Card, Pill, TH, TD, IconBtn, StatCard, Icon, Modal, ToggleGroup, useConfirm, useToast } from "@/components/ui";
+import VLoader from "@/components/VLoader";
+
 
 export default function EmployeeSetupTab() {
   const { confirm, ConfirmDialog } = useConfirm();
@@ -117,7 +119,7 @@ export default function EmployeeSetupTab() {
     } catch (e) { confirm({ title: "Error", message: e.message, confirmText: "OK", type: "danger", onConfirm: () => {} }); }
   };
 
-  if (loading) return <div style={{ padding: 60, textAlign: "center", color: "var(--accent)", fontWeight: 800 }}>Loading personnel telemetry...</div>;
+  if (loading) return <VLoader fullscreen label="Loading personnel telemetry" />;
 
   const totalActive = staff.filter(s => staffOverallStatus(s) === "active").length;
   const totalInactive = staff.filter(s => staffOverallStatus(s) === "inactive").length;

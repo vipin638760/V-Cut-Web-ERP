@@ -5,6 +5,8 @@ import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
 import { INR, makeFilterPrefix } from "@/lib/calculations";
 import { Card, TH, TD, Pill, PeriodWidget, Icon, useConfirm } from "@/components/ui";
+import VLoader from "@/components/VLoader";
+
 
 export default function PayrollRequestPage() {
   const { confirm, ConfirmDialog } = useConfirm();
@@ -58,7 +60,7 @@ export default function PayrollRequestPage() {
   const totalApproved = periodAdvances.filter(a => a.status === "approved").reduce((s, a) => s + Number(a.amount), 0);
   const totalPending = periodAdvances.filter(a => a.status === "pending").reduce((s, a) => s + Number(a.amount), 0);
 
-  if (loading) return <div style={{ padding: 40, textAlign: "center", color: "var(--accent)", fontWeight: 600 }}>Loading...</div>;
+  if (loading) return <VLoader fullscreen label="Loading" />;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>

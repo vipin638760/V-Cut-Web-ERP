@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { collection, doc, onSnapshot, addDoc, deleteDoc, setDoc, updateDoc, query, where } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { Card, Icon, IconBtn, Pill, useToast, useConfirm } from "@/components/ui";
+import VLoader from "@/components/VLoader";
 
 const INR = (n) => "₹" + Number(n || 0).toLocaleString("en-IN");
 
@@ -290,7 +291,7 @@ export default function DayWorkingPage() {
     });
   }
 
-  if (loading) return <div style={{ padding: 40, textAlign: "center", color: "var(--text3)" }}>Loading...</div>;
+  if (loading) return <VLoader fullscreen label="Loading" />;
   if (!currentUser?.staff_id) return <div style={{ padding: 40, textAlign: "center", color: "var(--red)" }}>Staff profile not linked to your user. Contact your admin.</div>;
 
   const input = { padding: "12px 14px", border: "1px solid var(--border2)", borderRadius: 10, background: "rgba(255,255,255,0.02)", color: "var(--text)", outline: "none", fontSize: 13, width: "100%" };

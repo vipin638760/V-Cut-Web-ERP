@@ -4,6 +4,8 @@ import { collection, onSnapshot, doc, setDoc, deleteDoc, addDoc } from "firebase
 import { db } from "@/lib/firebase";
 import { INR } from "@/lib/calculations";
 import { Card, Pill, TH, TD, IconBtn, StatCard, Icon, useConfirm, useToast } from "@/components/ui";
+import VLoader from "@/components/VLoader";
+
 
 export default function CostCenterTab() {
   const { confirm, ConfirmDialog } = useConfirm();
@@ -63,7 +65,7 @@ export default function CostCenterTab() {
     });
   };
 
-  if (loading) return <div style={{ padding: 60, textAlign: "center", color: "var(--accent)", fontWeight: 800 }}>Syncing administrative infrastructure...</div>;
+  if (loading) return <VLoader fullscreen label="Syncing administrative infrastructure" />;
 
   const totalCost = costCenters.reduce((s, c) => s + (c.monthly_cost || 0), 0);
   const inputStyle = { width: "100%", padding: "14px 18px", border: "1px solid var(--border2)", borderRadius: 14, background: "rgba(255,255,255,0.02)", color: "var(--text)", outline: "none", fontSize: 13, transition: "all 0.2s" };

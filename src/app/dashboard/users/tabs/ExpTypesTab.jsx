@@ -3,6 +3,8 @@ import { useEffect, useRef, useState } from "react";
 import { collection, onSnapshot, doc, setDoc, deleteDoc, addDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { Card, Pill, TH, TD, IconBtn, Modal, Icon, useConfirm, useToast } from "@/components/ui";
+import VLoader from "@/components/VLoader";
+
 
 export default function ExpTypesTab() {
   const { confirm, ConfirmDialog } = useConfirm();
@@ -126,7 +128,7 @@ export default function ExpTypesTab() {
     setSaving(false);
   };
 
-  if (loading) return <div style={{ padding: 60, textAlign: "center", color: "var(--accent)", fontWeight: 800 }}>Loading category registry...</div>;
+  if (loading) return <VLoader fullscreen label="Loading category registry" />;
 
   const IS = { width: "100%", padding: "14px 18px", border: "1px solid var(--border2)", borderRadius: 14, background: "rgba(255,255,255,0.02)", color: "var(--text)", outline: "none", fontSize: 13, transition: "all 0.2s" };
   const chevronSvg = `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>")`;

@@ -6,6 +6,8 @@ import { useCurrentUser } from "@/lib/currentUser";
 import { INR } from "@/lib/calculations";
 import { Icon, IconBtn, Card, PeriodWidget, TH, TD, Modal, useConfirm, useToast } from "@/components/ui";
 import { staffStatusForMonth, effectiveBranchOnDate } from "@/lib/calculations";
+import VLoader from "@/components/VLoader";
+
 
 // ExcelJS is ~200KB — load only when Template/Upload/Export is actually used.
 let _excelJSPromise = null;
@@ -1145,7 +1147,7 @@ export default function EntryPage() {
 
   const inp = { padding: "8px 10px", border: "2px solid var(--input-border)", borderRadius: 8, fontSize: 14, background: "var(--bg3)", color: "var(--text)", fontFamily: "var(--font-outfit)", width: 90, textAlign: "right", transition: "border .2s", outline: "none" };
 
-  if (loading) return <div className="text-center text-[var(--gold)] p-10">Loading...</div>;
+  if (loading) return <VLoader fullscreen label="Loading" />;
 
   return (
     <div>

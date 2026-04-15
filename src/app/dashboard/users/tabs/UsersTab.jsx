@@ -4,6 +4,8 @@ import { collection, onSnapshot, doc, setDoc, deleteDoc } from "firebase/firesto
 import { db } from "@/lib/firebase";
 import { DEFAULTS_USERS } from "@/lib/constants";
 import { Card, Pill, TH, TD, IconBtn, Icon, useConfirm, useToast } from "@/components/ui";
+import VLoader from "@/components/VLoader";
+
 
 export default function UsersTab() {
   const { confirm, ConfirmDialog } = useConfirm();
@@ -73,7 +75,7 @@ export default function UsersTab() {
     });
   };
 
-  if (loading) return <div style={{ padding: 60, textAlign: "center", color: "var(--accent)", fontWeight: 800 }}>Syncing identity registry...</div>;
+  if (loading) return <VLoader fullscreen label="Syncing identity registry" />;
 
   const inputStyle = { width: "100%", padding: "14px 18px", border: "1px solid var(--border2)", borderRadius: 14, background: "rgba(255,255,255,0.02)", color: "var(--text)", outline: "none", fontSize: 13, transition: "all 0.2s" };
 

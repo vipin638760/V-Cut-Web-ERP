@@ -5,6 +5,8 @@ import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
 import { INR } from "@/lib/calculations";
 import { Icon, IconBtn, Pill, Card, PeriodWidget, TH, TD, Modal, useConfirm, useToast } from "@/components/ui";
+import VLoader from "@/components/VLoader";
+
 
 const NOW = new Date();
 
@@ -278,7 +280,7 @@ export default function LeavesPage() {
 
   const statusColor = { pending: "orange", approved: "green", rejected: "red" };
 
-  if (loading) return <div style={{ textAlign: "center", color: "var(--gold)", fontWeight: 700, padding: 40 }}>Loading Leaves...</div>;
+  if (loading) return <VLoader fullscreen label="Loading Leaves" />;
 
   return (
     <div>

@@ -5,6 +5,8 @@ import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
 import { INR, proRataSalary } from "@/lib/calculations";
 import { Icon, IconBtn, Pill, Card, PeriodWidget, TH, TD, Modal, useConfirm, useToast } from "@/components/ui";
+import VLoader from "@/components/VLoader";
+
 // ExcelJS is ~200KB — load only when Template/Upload/Export is actually used.
 let _excelJSPromise = null;
 const loadExcelJS = () => {
@@ -808,7 +810,7 @@ export default function ExpensesPage() {
     ? (viewType === "fixed" ? networkFixed : (networkFixed + networkSalary + networkVar)) 
     : networkAnnualTotal;
 
-  if (loading) return <div style={{ textAlign: "center", color: "var(--accent)", fontWeight: 600, padding: 40, fontFamily: "var(--font-headline, var(--font-outfit))" }}>Loading Expenses...</div>;
+  if (loading) return <VLoader fullscreen label="Loading Expenses" />;
 
   const TS = { padding: "6px 12px", borderRadius: 8, fontSize: 11, fontWeight: 700, border: "none", cursor: "pointer", transition: "all .2s", textTransform: "uppercase", letterSpacing: 0.5 };
 

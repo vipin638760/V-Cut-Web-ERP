@@ -4,6 +4,8 @@ import { collection, onSnapshot, doc, deleteDoc, addDoc } from "firebase/firesto
 import { db } from "@/lib/firebase";
 import { INR } from "@/lib/calculations";
 import { Card, Pill, TH, TD, IconBtn, PeriodWidget, StatCard, Icon, useConfirm, useToast } from "@/components/ui";
+import VLoader from "@/components/VLoader";
+
 
 const NOW = new Date();
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -69,7 +71,7 @@ export default function TxnSetupTab() {
     });
   };
 
-  if (loading) return <div style={{ padding: 60, textAlign: "center", color: "var(--accent)", fontWeight: 800 }}>Synchronizing transactional data...</div>;
+  if (loading) return <VLoader fullscreen label="Synchronizing transactional data" />;
 
   const inputStyle = { width: "100%", padding: "14px 18px", border: "1px solid var(--border2)", borderRadius: 14, background: "rgba(255,255,255,0.02)", color: "var(--text)", outline: "none", fontSize: 13, transition: "all 0.2s" };
 

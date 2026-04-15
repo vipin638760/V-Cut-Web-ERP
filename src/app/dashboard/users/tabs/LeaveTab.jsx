@@ -3,6 +3,8 @@ import { useEffect, useState } from "react";
 import { collection, onSnapshot, query, orderBy, addDoc, deleteDoc, doc, updateDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { Icon, IconBtn, Pill, Card, PeriodWidget, TH, TD, Modal, ToggleGroup, StatCard, useConfirm, useToast } from "@/components/ui";
+import VLoader from "@/components/VLoader";
+
 
 const NOW = new Date();
 
@@ -87,7 +89,7 @@ export default function LeaveTab({ view = "admin" }) {
     });
   };
 
-  if (loading) return <div style={{ padding: 60, textAlign: "center", color: "var(--accent)", fontWeight: 800 }}>Syncing attendance logs...</div>;
+  if (loading) return <VLoader fullscreen label="Syncing attendance logs" />;
 
   let filtered = leaves.filter(l => l.date && l.date.startsWith(filterPrefix))
     .filter(l => statusFilter === "all" || l.status === statusFilter);

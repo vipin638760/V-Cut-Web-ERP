@@ -3,6 +3,8 @@ import { useEffect, useState } from "react";
 import { collection, onSnapshot, query, orderBy, addDoc, deleteDoc, doc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { Icon, IconBtn, Card, PeriodWidget, TH, TD, Modal, Pill, StatCard, useConfirm, useToast } from "@/components/ui";
+import VLoader from "@/components/VLoader";
+
 
 const NOW = new Date();
 
@@ -65,7 +67,7 @@ export default function ReviewsTab() {
     });
   };
 
-  if (loading) return <div style={{ padding: 60, textAlign: "center", color: "var(--accent)", fontWeight: 800 }}>Syncing performance feedback...</div>;
+  if (loading) return <VLoader fullscreen label="Syncing performance feedback" />;
 
   const filtered = reviews.filter(r => r.date && r.date.startsWith(filterPrefix));
   const avgRating = filtered.length > 0 ? (filtered.reduce((s, r) => s + (r.rating || 0), 0) / filtered.length).toFixed(1) : "0.0";

@@ -6,6 +6,7 @@ import { useCurrentUser } from "@/lib/currentUser";
 import { Icon, IconBtn, Card, TH, TD, Modal, useConfirm, useToast } from "@/components/ui";
 import { INR } from "@/lib/calculations";
 import BillPrintModal from "@/components/BillPrintModal";
+import VLoader from "@/components/VLoader";
 
 const emptyForm = { name: "", phone: "", email: "", address: "", birthdate: "", marriage_date: "", notes: "" };
 
@@ -145,7 +146,7 @@ export default function CustomersPage() {
     });
   };
 
-  if (loading) return <div style={{ textAlign: "center", color: "var(--gold)", padding: 40, fontWeight: 700 }}>Loading customers...</div>;
+  if (loading) return <VLoader fullscreen label="Loading customers" />;
 
   return (
     <div>

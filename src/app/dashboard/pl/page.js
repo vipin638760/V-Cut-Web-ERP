@@ -4,6 +4,8 @@ import { db } from "@/lib/firebase";
 import { collection, onSnapshot, query, orderBy } from "firebase/firestore";
 import { INR, MASK, MONTHS, proRataSalary, staffStatusForMonth } from "@/lib/calculations";
 import { PeriodWidget, ToggleGroup, Card, Icon, TH, TD, Pill } from "@/components/ui";
+import VLoader from "@/components/VLoader";
+
 
 const CompactStat = ({ label, val, col, bold }) => (
   <div style={{ textAlign: "center" }}>
@@ -133,7 +135,7 @@ export default function PLReportPage() {
     };
   };
 
-  if (loading) return <div style={{ textAlign: "center", color: "var(--gold)", fontWeight: 700, padding: 60, fontSize: 18, letterSpacing: 2 }}>GENESTATING P&L REPORT...</div>;
+  if (loading) return <VLoader fullscreen label="GENESTATING P&L REPORT" />;
 
   const targetMonths = filterMode === "month" ? [filterPrefix] : getActiveMonths(filterYear);
   
