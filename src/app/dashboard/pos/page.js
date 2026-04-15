@@ -110,9 +110,14 @@ export default function POSPage() {
   const [menus, setMenus] = useState([]);
   const [invoices, setInvoices] = useState([]); // today's invoices (drafts + settled) for selected branch
   const [editingDraftId, setEditingDraftId] = useState(null);
-  const [historyInvoices, setHistoryInvoices] = useState([]); // all settled invoices in current filter period
+  const [historyInvoices, setHistoryInvoices] = useState([]); // all invoices (settled + draft) in current filter period
   const [historySearch, setHistorySearch] = useState("");
   const [expandedBranchId, setExpandedBranchId] = useState(null);
+  // Drill-down filters for the expanded branch
+  const [branchSortBy, setBranchSortBy] = useState("date_desc"); // date_desc | date_asc | amount_desc | amount_asc
+  const [branchDateFilter, setBranchDateFilter] = useState("");
+  const [branchCustomerFilter, setBranchCustomerFilter] = useState("");
+  const [branchStatusFilter, setBranchStatusFilter] = useState("all"); // all | settled | draft
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
   const [customerForm, setCustomerForm] = useState(null); // null | { name, phone, email, notes }
@@ -373,7 +378,7 @@ export default function POSPage() {
       where("date", "<=", to),
     );
     const unsub = onSnapshot(q, (sn) => startTransition(() =>
-      setHistoryInvoices(sn.docs.map(d => ({ ...d.data(), id: d.id })).filter(i => i.status === "settled"))
+      setHistoryInvoices(sn.docs.map(d => ({ ...d.data(), id: d.id })))
     ));
     return () => unsub();
   }, [filterMode, filterPrefix, filterYear]);
@@ -1290,12 +1295,18 @@ export default function POSPage() {
   );
   const settledCount = todaysSettled.length;
 
+  // Settled-only set — global search + branch cards operate on this.
+  const settledInvoices = useMemo(
+    () => historyInvoices.filter(i => i.status === "settled"),
+    [historyInvoices]
+  );
+
   // History search — match by invoice no, customer name/phone, amount, or date substring.
   const filteredInvoices = useMemo(() => {
     const q = historySearch.trim().toLowerCase();
-    if (!q) return historyInvoices;
+    if (!q) return settledInvoices;
     const qNum = Number(q.replace(/[^\d.]/g, ""));
-    return historyInvoices.filter(inv => {
+    return settledInvoices.filter(inv => {
       if ((inv.invoice_no || "").toLowerCase().includes(q)) return true;
       if ((inv.customer_name || "").toLowerCase().includes(q)) return true;
       if ((inv.customer_phone || "").toLowerCase().includes(q)) return true;
@@ -1306,7 +1317,7 @@ export default function POSPage() {
       }
       return false;
     });
-  }, [historyInvoices, historySearch]);
+  }, [settledInvoices, historySearch]);
 
   // Branch summary cards — grouped counts + totals. Search narrows the underlying set.
   const branchSummaries = useMemo(() => {
@@ -1319,22 +1330,46 @@ export default function POSPage() {
           branch_name: (branchesById.get(key)?.name || inv.branch_name || "Branch").replace("V-CUT ", ""),
           count: 0,
           total: 0,
+          drafts: 0,
         });
       }
       const s = map.get(key);
       s.count += 1;
       s.total += Number(inv.total) || Number(inv.subtotal) || 0;
     });
+    // Include draft counts for the same branches so the card can hint "+N drafts"
+    historyInvoices.filter(i => i.status === "draft").forEach(inv => {
+      if (map.has(inv.branch_id)) map.get(inv.branch_id).drafts += 1;
+    });
     return [...map.values()].sort((a, b) => b.total - a.total);
-  }, [filteredInvoices, branchesById]);
+  }, [filteredInvoices, historyInvoices, branchesById]);
 
-  // Invoices for the expanded branch card, sorted newest first.
+  // Invoices for the expanded branch card — applies filter controls + sort.
+  // Includes drafts when status filter is "all" or "draft".
   const filteredBranchInvoices = useMemo(() => {
     if (!expandedBranchId) return [];
-    return filteredInvoices
-      .filter(inv => inv.branch_id === expandedBranchId)
-      .sort((a, b) => (b.date || "").localeCompare(a.date || "") || (b.invoice_no || "").localeCompare(a.invoice_no || ""));
-  }, [filteredInvoices, expandedBranchId]);
+    const custQ = branchCustomerFilter.trim().toLowerCase();
+    const list = historyInvoices.filter(inv => {
+      if (inv.branch_id !== expandedBranchId) return false;
+      if (branchStatusFilter !== "all" && inv.status !== branchStatusFilter) return false;
+      if (branchDateFilter && inv.date !== branchDateFilter) return false;
+      if (custQ) {
+        const hit = (inv.customer_name || "").toLowerCase().includes(custQ)
+                 || (inv.customer_phone || "").toLowerCase().includes(custQ);
+        if (!hit) return false;
+      }
+      return true;
+    });
+    const amt = (inv) => Number(inv.total) || Number(inv.subtotal) || 0;
+    switch (branchSortBy) {
+      case "date_asc":    list.sort((a, b) => (a.date || "").localeCompare(b.date || "") || (a.invoice_no || "").localeCompare(b.invoice_no || "")); break;
+      case "amount_desc": list.sort((a, b) => amt(b) - amt(a)); break;
+      case "amount_asc":  list.sort((a, b) => amt(a) - amt(b)); break;
+      case "date_desc":
+      default:            list.sort((a, b) => (b.date || "").localeCompare(a.date || "") || (b.invoice_no || "").localeCompare(a.invoice_no || "")); break;
+    }
+    return list;
+  }, [historyInvoices, expandedBranchId, branchStatusFilter, branchDateFilter, branchCustomerFilter, branchSortBy]);
 
   // Invoice number: {BRANCH-PREFIX}-{DDMMYY}-{NNN}
   const branchPrefix = (b) => {
@@ -2027,7 +2062,11 @@ export default function POSPage() {
                const active = expandedBranchId === bs.branch_id;
                return (
                  <button key={bs.branch_id}
-                   onClick={() => setExpandedBranchId(active ? null : bs.branch_id)}
+                   onClick={() => {
+                     if (active) { setExpandedBranchId(null); return; }
+                     setExpandedBranchId(bs.branch_id);
+                     setBranchDateFilter(""); setBranchCustomerFilter(""); setBranchSortBy("date_desc"); setBranchStatusFilter("all");
+                   }}
                    style={{
                      textAlign: "left", cursor: "pointer",
                      background: active ? "linear-gradient(135deg, rgba(var(--accent-rgb),0.12), rgba(var(--accent-rgb),0.03))" : "var(--bg2)",
@@ -2041,6 +2080,9 @@ export default function POSPage() {
                      <div>
                        <div style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase" }}>Bills</div>
                        <div style={{ fontSize: 22, fontWeight: 900, color: "var(--accent)" }}>{bs.count}</div>
+                       {bs.drafts > 0 && (
+                         <div style={{ fontSize: 10, color: "var(--orange)", fontWeight: 700, marginTop: 2 }}>+{bs.drafts} draft{bs.drafts === 1 ? "" : "s"}</div>
+                       )}
                      </div>
                      <div style={{ textAlign: "right" }}>
                        <div style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase" }}>Total</div>
@@ -2063,40 +2105,79 @@ export default function POSPage() {
                    <button onClick={() => setExpandedBranchId(null)}
                      style={{ background: "transparent", border: "1px solid var(--border)", color: "var(--text3)", borderRadius: 8, padding: "4px 10px", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>Collapse</button>
                  </div>
+
+                 {/* Filter bar — sort, date, customer, status */}
+                 <div style={{ padding: "10px 16px", borderBottom: "1px solid var(--border)", display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+                   <select value={branchSortBy} onChange={e => setBranchSortBy(e.target.value)}
+                     style={{ padding: "8px 10px", borderRadius: 8, background: "var(--bg3)", border: "1px solid var(--border2)", color: "var(--text)", fontSize: 11, fontWeight: 700, outline: "none" }}>
+                     <option value="date_desc">Newest first</option>
+                     <option value="date_asc">Oldest first</option>
+                     <option value="amount_desc">Amount: high → low</option>
+                     <option value="amount_asc">Amount: low → high</option>
+                   </select>
+                   <input type="date" value={branchDateFilter} onChange={e => setBranchDateFilter(e.target.value)}
+                     placeholder="Any date"
+                     style={{ padding: "8px 10px", borderRadius: 8, background: "var(--bg3)", border: "1px solid var(--border2)", color: "var(--text)", fontSize: 11, fontWeight: 700, outline: "none", colorScheme: "dark" }} />
+                   <input type="text" value={branchCustomerFilter} onChange={e => setBranchCustomerFilter(e.target.value)}
+                     placeholder="Filter by customer / phone…"
+                     style={{ flex: "1 1 180px", padding: "8px 10px", borderRadius: 8, background: "var(--bg3)", border: "1px solid var(--border2)", color: "var(--text)", fontSize: 11, fontWeight: 600, outline: "none" }} />
+                   <div style={{ display: "inline-flex", borderRadius: 8, overflow: "hidden", border: "1px solid var(--border2)" }}>
+                     {[["all", "All"], ["settled", "Settled"], ["draft", "Drafts"]].map(([v, l]) => (
+                       <button key={v} onClick={() => setBranchStatusFilter(v)}
+                         style={{ padding: "8px 12px", background: branchStatusFilter === v ? "var(--accent)" : "var(--bg3)", color: branchStatusFilter === v ? "#000" : "var(--text2)", border: "none", fontSize: 10, fontWeight: 800, letterSpacing: 1, textTransform: "uppercase", cursor: "pointer" }}>{l}</button>
+                     ))}
+                   </div>
+                   {(branchDateFilter || branchCustomerFilter || branchSortBy !== "date_desc" || branchStatusFilter !== "all") && (
+                     <button onClick={() => { setBranchDateFilter(""); setBranchCustomerFilter(""); setBranchSortBy("date_desc"); setBranchStatusFilter("all"); }}
+                       style={{ background: "transparent", border: "1px solid var(--border)", color: "var(--text3)", borderRadius: 8, padding: "6px 10px", fontSize: 10, fontWeight: 700, cursor: "pointer", textTransform: "uppercase", letterSpacing: 1 }}>Reset</button>
+                   )}
+                 </div>
+
                  <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12.5 }}>
                    <thead>
                      <tr>
-                       <TH>Date</TH><TH>Invoice No</TH><TH>Customer</TH>
+                       <TH>Date</TH><TH>Invoice</TH><TH>Customer</TH>
                        <TH right>Online</TH><TH right>Cash</TH>
                        <TH right>Amount</TH>
-                       <TH right>PDF</TH>
+                       <TH right>Action</TH>
                      </tr>
                    </thead>
                    <tbody>
                      {filteredBranchInvoices.length === 0 && (
                        <tr><td colSpan={7} style={{ textAlign: "center", padding: 24, color: "var(--text3)", fontSize: 12 }}>
-                         {historySearch ? "No invoices match your search." : "No invoices for this branch in the selected period."}
+                         No invoices match the current filters.
                        </td></tr>
                      )}
-                     {filteredBranchInvoices.map(inv => (
-                       <tr key={inv.id}>
-                         <TD style={{ fontWeight: 600, whiteSpace: "nowrap" }}>{inv.date}</TD>
-                         <TD style={{ fontFamily: "var(--font-headline, var(--font-outfit))", fontWeight: 700, color: "var(--accent)" }}>{inv.invoice_no}</TD>
-                         <TD>
-                           <div style={{ fontWeight: 600 }}>{inv.customer_name || "Walk-in"}</div>
-                           {inv.customer_phone && <div style={{ fontSize: 10, color: "var(--text3)" }}>{inv.customer_phone}</div>}
-                         </TD>
-                         <TD right style={{ color: "var(--green)" }}>{INR(inv.online || 0)}</TD>
-                         <TD right style={{ color: "var(--green)" }}>{INR(inv.cash || 0)}</TD>
-                         <TD right style={{ fontWeight: 800, color: "var(--gold)" }}>{INR(inv.total || inv.subtotal || 0)}</TD>
-                         <TD right>
-                           <button onClick={() => openInvoicePreview(inv)} title="Open bill (print / save as PDF)"
-                             style={{ background: "rgba(var(--accent-rgb),0.1)", border: "1px solid rgba(var(--accent-rgb),0.3)", color: "var(--accent)", padding: "6px 10px", borderRadius: 8, fontWeight: 700, fontSize: 11, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 }}>
-                             <Icon name="log" size={12} /> PDF
-                           </button>
-                         </TD>
-                       </tr>
-                     ))}
+                     {filteredBranchInvoices.map(inv => {
+                       const isDraft = inv.status === "draft";
+                       return (
+                         <tr key={inv.id} style={{ opacity: isDraft ? 0.85 : 1 }}>
+                           <TD style={{ fontWeight: 600, whiteSpace: "nowrap" }}>{inv.date}</TD>
+                           <TD style={{ fontFamily: "var(--font-headline, var(--font-outfit))", fontWeight: 700, color: isDraft ? "var(--orange)" : "var(--accent)" }}>
+                             {isDraft ? (
+                               <span style={{ display: "inline-block", padding: "2px 6px", borderRadius: 6, background: "rgba(251,146,60,0.12)", border: "1px solid rgba(251,146,60,0.3)", fontSize: 10, letterSpacing: 1 }}>DRAFT</span>
+                             ) : inv.invoice_no}
+                           </TD>
+                           <TD>
+                             <div style={{ fontWeight: 600 }}>{inv.customer_name || "Walk-in"}</div>
+                             {inv.customer_phone && <div style={{ fontSize: 10, color: "var(--text3)" }}>{inv.customer_phone}</div>}
+                           </TD>
+                           <TD right style={{ color: "var(--green)" }}>{INR(inv.online || 0)}</TD>
+                           <TD right style={{ color: "var(--green)" }}>{INR(inv.cash || 0)}</TD>
+                           <TD right style={{ fontWeight: 800, color: isDraft ? "var(--orange)" : "var(--gold)" }}>{INR(inv.total || inv.subtotal || 0)}</TD>
+                           <TD right>
+                             {isDraft ? (
+                               <span style={{ fontSize: 10, color: "var(--text3)", fontStyle: "italic" }}>Pending settle</span>
+                             ) : (
+                               <button onClick={() => openInvoicePreview(inv)} title="Open bill (print / save as PDF)"
+                                 style={{ background: "rgba(var(--accent-rgb),0.1)", border: "1px solid rgba(var(--accent-rgb),0.3)", color: "var(--accent)", padding: "6px 10px", borderRadius: 8, fontWeight: 700, fontSize: 11, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 }}>
+                                 <Icon name="log" size={12} /> PDF
+                               </button>
+                             )}
+                           </TD>
+                         </tr>
+                       );
+                     })}
                    </tbody>
                  </table>
                </Card>
@@ -2137,62 +2218,6 @@ export default function POSPage() {
              </div>
            )}
 
-           {/* Existing Daily Entries table (accountant view) */}
-           <div style={{ marginTop: 24, marginBottom: 8, fontSize: 11, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 2 }}>Daily Entries (rollup)</div>
-           <div>
-             <Card>
-                <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12.5 }}>
-                  <thead>
-                    <tr>
-                      <TH>Date</TH><TH>Branch</TH>
-                      <TH right>Online</TH><TH right>Cash</TH>
-                      <TH right>GST</TH>
-                      <TH right>Mat Sale</TH><TH right>Total Billing</TH><TH right>Incentive</TH>
-                      <TH right>Tips</TH>
-                      <TH right>Staff T.Inc</TH><TH right>Staff T.Sale</TH>
-                      <TH right>Other Out</TH>
-                      <TH right>Cash in Hand</TH>
-                      <TH right>Def / Exc</TH>
-                      <TH right>Actions</TH>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {visibleEntries.slice(0, 30).map(e => {
-                      const b = branchesById.get(e.branch_id);
-                      const agg = sumStaffBilling(e.staff_billing);
-                      const cih = e.cash_in_hand !== undefined ? e.cash_in_hand : (e.cash || 0) - agg.incentive - agg.tips - (e.others || 0);
-                      return (
-                        <tr key={e.id}>
-                          <TD style={{ fontWeight: 600, whiteSpace: "nowrap" }}>{e.date}</TD>
-                          <TD style={{ fontWeight: 500, fontSize: 12 }}>{b ? b.name.replace("V-CUT ", "") : "?"}</TD>
-                          <TD right style={{ color: "var(--green)" }}>{INR(e.online || 0)}</TD>
-                          <TD right style={{ color: "var(--green)" }}>{INR(e.cash || 0)}</TD>
-                          <TD right style={{ color: "var(--red)" }}>{INR(e.total_gst || 0)}</TD>
-                          <TD right style={{ color: "var(--green)" }}>{INR(agg.material)}</TD>
-                          <TD right style={{ fontWeight: 600, color: "var(--green)" }}>{INR(agg.billing)}</TD>
-                          <TD right style={{ color: "var(--red)" }}>{INR(agg.incentive)}</TD>
-                          <TD right style={{ color: "var(--red)" }}>{INR(agg.tips)}</TD>
-                          <TD right style={{ color: "var(--gold)", fontWeight: 700 }}>{INR(agg.staffTotalInc)}</TD>
-                          <TD right style={{ color: "var(--text2)", fontWeight: 700 }}>{INR(agg.billing + agg.material + agg.tips)}</TD>
-                          <TD right style={{ color: "var(--red)" }}>{INR((e.others || 0) + (e.petrol || 0))}</TD>
-                          <TD right style={{ fontWeight: 700, color: cih >= 0 ? "var(--green)" : "var(--red)" }}>{INR(cih)}</TD>
-                          <TD right style={{ fontWeight: 700, color: e.cash_diff == null ? "var(--text3)" : e.cash_diff === 0 ? "var(--green)" : e.cash_diff > 0 ? "var(--green)" : "var(--red)", whiteSpace: "nowrap" }}>
-                            {e.cash_diff == null ? "—" : e.cash_diff === 0 ? "✓ Match" : e.cash_diff > 0 ? `▲ ${INR(e.cash_diff)}` : `▼ ${INR(Math.abs(e.cash_diff))}`}
-                          </TD>
-                          <TD right>
-                            <div style={{ display: "flex", gap: 6, alignItems: "center", justifyContent: "flex-end" }}>
-                              <IconBtn name="log" title="View log" variant="secondary" onClick={() => setLogView(e)} />
-                              {canEdit && <IconBtn name="edit" title="Edit entry" variant="secondary" onClick={() => { handleEdit(e); setViewMode("pos"); }} />}
-                              {isAdminUser && <IconBtn name="del" title="Delete entry" variant="danger" onClick={() => handleDelete(e.id)} />}
-                            </div>
-                          </TD>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-             </Card>
-           </div>
         </div>
       )}
 
