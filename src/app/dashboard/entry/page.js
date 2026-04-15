@@ -81,6 +81,9 @@ export default function EntryPage() {
   const [globalGst, setGlobalGst] = useState("5");
   const [gstPct, setGstPct] = useState("5"); // Form's active GST %
   const [staffRows, setStaffRows] = useState({}); // { [sid]: { billing, material, incentive, tips, gst, staff_total_inc } }
+  const [loanStaffIds, setLoanStaffIds] = useState(() => new Set()); // staff added as loan resources for this entry
+  const [loanPickerOpen, setLoanPickerOpen] = useState(false);
+  const [loanSearch, setLoanSearch] = useState("");
   const [editId, setEditId] = useState(null);
   const [logView, setLogView] = useState(null);
   const [recentView, setRecentView] = useState("branch"); // "branch" | "all" | "date" | "range"
@@ -120,6 +123,7 @@ export default function EntryPage() {
     setGstPct(e.global_gst_pct?.toString() || "18");
 
     const rows = {};
+    const loans = new Set();
     if (e.staff_billing) {
       e.staff_billing.forEach(sb => {
         rows[sb.staff_id] = {
@@ -134,9 +138,11 @@ export default function EntryPage() {
            present: sb.present !== false,
            staff_total_inc: sb.staff_total_inc || 0,
         };
+        if (sb.loan_flag) loans.add(sb.staff_id);
       });
     }
     setStaffRows(rows);
+    setLoanStaffIds(loans);
     if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -275,6 +281,47 @@ export default function EntryPage() {
         return staffStatusForMonth(s, mon).status !== "inactive";
       })
     : [];
+
+  // Cross-branch active staff — used by the loan-resource picker.
+  const allActiveStaffOnDate = selDate
+    ? staff.filter(s => {
+        if (s.join && selDate < s.join) return false;
+        if (s.exit_date && selDate > s.exit_date) return false;
+        const mon = selDate.slice(0, 7);
+        return staffStatusForMonth(s, mon).status !== "inactive";
+      })
+    : [];
+
+  const homeBranchOf = (s) => effectiveBranchOnDate(s, selDate, transfers) || s?.branch_id || null;
+
+  // Loan rows = staff added ad-hoc whose home is another branch today.
+  const loanStaffList = selBranch
+    ? allActiveStaffOnDate.filter(s => loanStaffIds.has(s.id) && homeBranchOf(s) !== selBranch)
+    : [];
+
+  // Combined list the table iterates over.
+  const tableStaff = [...branchStaff, ...loanStaffList];
+
+  // Staff eligible for the picker: active today AND home is a different branch AND not already added.
+  const loanPickerResults = selBranch
+    ? allActiveStaffOnDate.filter(s => {
+        if (homeBranchOf(s) === selBranch) return false;
+        if (loanStaffIds.has(s.id)) return false;
+        const q = loanSearch.trim().toLowerCase();
+        if (!q) return true;
+        const homeName = (branchesById.get(homeBranchOf(s))?.name || "").toLowerCase();
+        return (s.name || "").toLowerCase().includes(q) || homeName.includes(q);
+      })
+    : [];
+
+  const addLoanStaff = (sid) => {
+    setLoanStaffIds(prev => { const n = new Set(prev); n.add(sid); return n; });
+    setLoanSearch("");
+  };
+  const removeLoanStaff = (sid) => {
+    setLoanStaffIds(prev => { const n = new Set(prev); n.delete(sid); return n; });
+    setStaffRows(prev => { const { [sid]: _omit, ...rest } = prev; return rest; });
+  };
 
   const updateStaffRow = (sid, field, value) => {
     setStaffRows(prev => {
@@ -424,18 +471,36 @@ export default function EntryPage() {
         others: Number(otherExp) || 0,
         petrol: Number(petrol) || 0,
         cash_in_hand: cashInHand,
-        staff_billing: branchStaff.map(s => ({
-          staff_id: s.id,
-          billing: staffRows[s.id]?.billing || 0,
-          material: staffRows[s.id]?.material || 0,
-          incentive: staffRows[s.id]?.incentive || 0,
-          mat_incentive: staffRows[s.id]?.mat_incentive || 0,
-          tips: staffRows[s.id]?.tips || 0,
-          tip_in: staffRows[s.id]?.tip_in || "online",
-          tip_paid: staffRows[s.id]?.tip_paid || "cash",
-          present: staffRows[s.id]?.present !== false,
-          staff_total_inc: staffRows[s.id]?.staff_total_inc || 0
-        })),
+        staff_billing: [
+          ...branchStaff.map(s => ({
+            staff_id: s.id,
+            billing: staffRows[s.id]?.billing || 0,
+            material: staffRows[s.id]?.material || 0,
+            incentive: staffRows[s.id]?.incentive || 0,
+            mat_incentive: staffRows[s.id]?.mat_incentive || 0,
+            tips: staffRows[s.id]?.tips || 0,
+            tip_in: staffRows[s.id]?.tip_in || "online",
+            tip_paid: staffRows[s.id]?.tip_paid || "cash",
+            present: staffRows[s.id]?.present !== false,
+            staff_total_inc: staffRows[s.id]?.staff_total_inc || 0,
+            home_branch_id: selBranch,
+            loan_flag: false,
+          })),
+          ...loanStaffList.map(s => ({
+            staff_id: s.id,
+            billing: staffRows[s.id]?.billing || 0,
+            material: staffRows[s.id]?.material || 0,
+            incentive: staffRows[s.id]?.incentive || 0,
+            mat_incentive: staffRows[s.id]?.mat_incentive || 0,
+            tips: staffRows[s.id]?.tips || 0,
+            tip_in: staffRows[s.id]?.tip_in || "online",
+            tip_paid: staffRows[s.id]?.tip_paid || "cash",
+            present: staffRows[s.id]?.present !== false,
+            staff_total_inc: staffRows[s.id]?.staff_total_inc || 0,
+            home_branch_id: homeBranchOf(s),
+            loan_flag: true,
+          })),
+        ],
         actual_cash: actualCashNum,
         cash_diff: cashDiff,
         tips_in_cash: tipsInCash,
@@ -500,6 +565,7 @@ export default function EntryPage() {
       // Clear form
       setSelBranch(""); setOnlineInc(""); setMatExp(""); setOtherExp(""); setPetrol(""); setActualCash("");
       setStaffRows({});
+      setLoanStaffIds(new Set());
       setEditId(null);
       setGstPct(globalGst);
     } catch (err) {
@@ -1110,7 +1176,7 @@ export default function EntryPage() {
           {/* Branch + Date */}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(200px,1fr))", gap: 12, marginBottom: 16 }}>
             <FG label="Branch">
-              <select value={selBranch} onChange={e => { setSelBranch(e.target.value); setStaffRows({}); setOnlineInc(""); setMatExp(""); setOtherExp(""); setPetrol(""); setEditId(null); if(!editId) setGstPct(globalGst); }}>
+              <select value={selBranch} onChange={e => { setSelBranch(e.target.value); setStaffRows({}); setLoanStaffIds(new Set()); setOnlineInc(""); setMatExp(""); setOtherExp(""); setPetrol(""); setEditId(null); if(!editId) setGstPct(globalGst); }}>
                 <option value="">Select branch...</option>
                 {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
               </select>
@@ -1181,7 +1247,25 @@ export default function EntryPage() {
                 );
               })()}
 
-              {branchStaff.length > 0 ? (
+              {(tableStaff.length > 0 || canEdit) && (
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
+                  <div style={{ fontSize: 11, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 2 }}>
+                    Staff Billing &amp; Incentives
+                    {loanStaffList.length > 0 && (
+                      <span style={{ marginLeft: 10, padding: "2px 8px", borderRadius: 6, background: "rgba(251,146,60,0.12)", border: "1px solid rgba(251,146,60,0.35)", color: "var(--orange)", fontSize: 10, letterSpacing: 1 }}>
+                        {loanStaffList.length} LOAN
+                      </span>
+                    )}
+                  </div>
+                  {canEdit && selBranch && (
+                    <button type="button" onClick={() => { setLoanPickerOpen(true); setLoanSearch(""); }}
+                      style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: 10, border: "1px solid var(--orange)", background: "rgba(251,146,60,0.08)", color: "var(--orange)", fontSize: 11, fontWeight: 800, letterSpacing: 1, textTransform: "uppercase", cursor: "pointer" }}>
+                      <Icon name="plus" size={12} /> Loan Resource
+                    </button>
+                  )}
+                </div>
+              )}
+              {tableStaff.length > 0 ? (
                 <div style={{ overflowX: "auto", marginBottom: 16 }}>
                   <table style={{ width: "100%", minWidth: 900, borderCollapse: "collapse" }}>
                     <thead>
@@ -1192,7 +1276,9 @@ export default function EntryPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {branchStaff.map(s => {
+                      {tableStaff.map(s => {
+                        const isLoan = loanStaffIds.has(s.id);
+                        const loanHome = isLoan ? (branchesById.get(homeBranchOf(s))?.name || "").replace("V-CUT ", "") : "";
                         const r = staffRows[s.id] || {};
                         const isPresent = r.present !== false; // default true
                         const incPct = (s.incentive_pct ?? 10) / 100;
@@ -1204,14 +1290,23 @@ export default function EntryPage() {
                         const tipPaid = r.tip_paid || "cash";
                         const disabledStyle = !isPresent ? { opacity: 0.4, pointerEvents: "none" } : {};
                         return (
-                          <tr key={s.id} style={{ borderBottom: "1px solid var(--border)", transition: "background .15s", background: !isPresent ? "rgba(248,113,113,0.05)" : undefined }}>
+                          <tr key={s.id} style={{ borderBottom: "1px solid var(--border)", transition: "background .15s", background: !isPresent ? "rgba(248,113,113,0.05)" : isLoan ? "rgba(251,146,60,0.04)" : undefined }}>
                             <td style={{ padding: "10px 14px", textAlign: "center" }}>
                               <input type="checkbox" checked={isPresent} onChange={e => handleAttendanceToggle(s, e.target.checked)} title={isPresent ? "Present (uncheck to record leave)" : "On leave"} style={{ width: 18, height: 18, accentColor: isPresent ? "var(--green)" : "var(--red)", cursor: "pointer" }} />
                             </td>
                             <td style={{ padding: "10px 14px", fontWeight: 600, fontSize: 13 }}>
-                              {s.name}
+                              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                <span>{s.name}</span>
+                                {isLoan && (
+                                  <span title={`Loaned from ${loanHome}`} style={{ padding: "1px 6px", borderRadius: 6, background: "rgba(251,146,60,0.15)", border: "1px solid rgba(251,146,60,0.4)", color: "var(--orange)", fontSize: 9, fontWeight: 800, letterSpacing: 1, textTransform: "uppercase" }}>LOAN</span>
+                                )}
+                                {isLoan && canEdit && (
+                                  <button type="button" onClick={() => removeLoanStaff(s.id)} title="Remove loan resource"
+                                    style={{ background: "transparent", border: "none", color: "var(--text3)", cursor: "pointer", padding: 0, fontSize: 12, fontWeight: 800 }}>✕</button>
+                                )}
+                              </div>
                               <div style={{ fontSize: 10, color: "var(--text3)", fontWeight: 400, marginTop: 2 }}>
-                                {!isPresent ? <span style={{ color: "var(--red)", fontWeight: 700 }}>ON LEAVE ({r.leave_type || "Paid"}){r.leave_reason ? ` — ${r.leave_reason}` : ""}</span> : (s.role || "")}
+                                {!isPresent ? <span style={{ color: "var(--red)", fontWeight: 700 }}>ON LEAVE ({r.leave_type || "Paid"}){r.leave_reason ? ` — ${r.leave_reason}` : ""}</span> : isLoan ? <span style={{ color: "var(--orange)" }}>Home: {loanHome}</span> : (s.role || "")}
                               </div>
                             </td>
                             <td style={{ padding: "6px 14px", textAlign: "right", ...disabledStyle }}>
@@ -1311,7 +1406,7 @@ export default function EntryPage() {
                   <Icon name="save" size={16} />
                   {saving ? "Saving..." : editId ? "Update Entry" : "Save to Database"}
                 </button>
-                <button type="button" onClick={() => { setSelBranch(""); setOnlineInc(""); setMatExp(""); setOtherExp(""); setPetrol(""); setStaffRows({}); setSaveStatus(""); setEditId(null); }}
+                <button type="button" onClick={() => { setSelBranch(""); setOnlineInc(""); setMatExp(""); setOtherExp(""); setPetrol(""); setStaffRows({}); setLoanStaffIds(new Set()); setSaveStatus(""); setEditId(null); }}
                   style={{ padding: "10px 18px", borderRadius: 10, fontSize: 13, background: "var(--bg4)", color: "var(--text2)", border: "1px solid var(--border2)", cursor: "pointer", fontWeight: 600 }}>
                   {editId ? "Cancel Edit" : "Clear"}
                 </button>
@@ -1634,6 +1729,65 @@ export default function EntryPage() {
             </div>
           </form>
         )}
+      </Modal>
+
+      {/* Loan Resource Picker — add active staff from other branches to this entry */}
+      <Modal isOpen={loanPickerOpen} onClose={() => setLoanPickerOpen(false)} title="Add Loan Resource" width={520}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <div style={{ fontSize: 12, color: "var(--text3)", lineHeight: 1.5 }}>
+            Pick a stylist from another branch who worked here on {selDate}. Their billing, incentive, and tips will be credited to this branch, while their salary stays with their home branch.
+          </div>
+          <div style={{ position: "relative" }}>
+            <div style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", color: "var(--text3)" }}>
+              <Icon name="search" size={14} />
+            </div>
+            <input autoFocus value={loanSearch} onChange={e => setLoanSearch(e.target.value)}
+              placeholder="Search by staff name or branch…"
+              style={{ width: "100%", padding: "10px 12px 10px 38px", borderRadius: 10, background: "var(--bg3)", border: "1px solid var(--border2)", color: "var(--text)", fontSize: 13, outline: "none", boxSizing: "border-box" }} />
+          </div>
+
+          {loanStaffList.length > 0 && (
+            <div>
+              <div style={{ fontSize: 10, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.5, marginBottom: 6 }}>Already loaned ({loanStaffList.length})</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {loanStaffList.map(s => (
+                  <span key={s.id} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 8px", borderRadius: 999, background: "rgba(251,146,60,0.1)", border: "1px solid rgba(251,146,60,0.3)", color: "var(--orange)", fontSize: 11, fontWeight: 700 }}>
+                    {s.name}
+                    <button type="button" onClick={() => removeLoanStaff(s.id)}
+                      style={{ background: "transparent", border: "none", color: "var(--orange)", cursor: "pointer", padding: 0, fontSize: 12, fontWeight: 800 }}>✕</button>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div style={{ maxHeight: 320, overflowY: "auto", display: "flex", flexDirection: "column", gap: 6, border: "1px solid var(--border)", borderRadius: 10, padding: 6 }}>
+            {loanPickerResults.length === 0 ? (
+              <div style={{ padding: 16, textAlign: "center", color: "var(--text3)", fontSize: 12 }}>
+                {loanSearch ? "No match." : "No other-branch staff available for this date."}
+              </div>
+            ) : (
+              loanPickerResults.map(s => {
+                const homeName = (branchesById.get(homeBranchOf(s))?.name || "").replace("V-CUT ", "");
+                return (
+                  <button type="button" key={s.id} onClick={() => addLoanStaff(s.id)}
+                    style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 12px", background: "var(--bg3)", border: "1px solid var(--border2)", borderRadius: 8, color: "var(--text)", cursor: "pointer", textAlign: "left" }}>
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 700 }}>{s.name}</div>
+                      <div style={{ fontSize: 10, color: "var(--text3)", marginTop: 2 }}>{s.role || "Stylist"} · Home: <span style={{ color: "var(--orange)", fontWeight: 700 }}>{homeName}</span></div>
+                    </div>
+                    <span style={{ fontSize: 10, fontWeight: 800, color: "var(--accent)", textTransform: "uppercase", letterSpacing: 1 }}>Add</span>
+                  </button>
+                );
+              })
+            )}
+          </div>
+
+          <div style={{ display: "flex", gap: 10 }}>
+            <button type="button" onClick={() => setLoanPickerOpen(false)}
+              style={{ flex: 1, padding: "10px", borderRadius: 10, background: "var(--bg3)", color: "var(--text2)", border: "1px solid var(--border)", cursor: "pointer", fontWeight: 700 }}>Done</button>
+          </div>
+        </div>
       </Modal>
 
       {ConfirmDialog}

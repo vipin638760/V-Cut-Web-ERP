@@ -66,7 +66,7 @@ export default function BillPrintModal({ invoice, onClose }) {
                   <td style={{ padding: "8px 4px", fontWeight: 600 }}>{it.name}</td>
                   <td style={{ padding: "8px 4px", color: "#555" }}>
                     {it.staff_name || "—"}
-                    {it.loan_flag && <span style={{ marginLeft: 6, padding: "1px 5px", background: "#fef3c7", color: "#b45309", border: "1px solid #fde68a", borderRadius: 4, fontSize: 9, fontWeight: 700, letterSpacing: 0.5 }}>LOAN</span>}
+                    {it.loan_flag && <span className="no-print" style={{ marginLeft: 6, padding: "1px 5px", background: "#fef3c7", color: "#b45309", border: "1px solid #fde68a", borderRadius: 4, fontSize: 9, fontWeight: 700, letterSpacing: 0.5 }}>LOAN</span>}
                   </td>
                   <td style={{ padding: "8px 4px", textAlign: "right", fontWeight: 700 }}>{INR(it.price || 0)}</td>
                 </tr>
