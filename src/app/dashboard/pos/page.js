@@ -1817,8 +1817,21 @@ export default function POSPage() {
 
             {/* Empty states */}
             {!selBranch && (
-              <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text3)", fontSize: 13, fontWeight: 700, letterSpacing: 1, textAlign: "center", padding: 20 }}>
-                ⚠ Select a branch to load its menu.
+              <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 14, padding: 24, textAlign: "center" }}>
+                <div style={{ fontFamily: "var(--font-vibes)", fontSize: 72, lineHeight: 1 }}>
+                  <span style={{ color: "var(--red)" }}>V</span>
+                  <span style={{ color: "var(--text)" }}>-Cut</span>
+                </div>
+                <div style={{ fontFamily: "var(--font-headline, var(--font-outfit))", fontSize: 20, fontWeight: 800, color: "var(--text)", letterSpacing: 0.5, maxWidth: 520 }}>
+                  Welcome to styling — where precision lives in every snip.
+                </div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text3)", letterSpacing: 2, textTransform: "uppercase" }}>
+                  Pick a branch to unlock the menu and start the shift
+                </div>
+                <div style={{ display: "inline-flex", alignItems: "center", gap: 8, marginTop: 4, fontSize: 11, fontWeight: 700, color: "var(--accent)", textTransform: "uppercase", letterSpacing: 2 }}>
+                  <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--accent)", boxShadow: "0 0 12px var(--accent)" }} />
+                  Ready when you are
+                </div>
               </div>
             )}
             {selBranch && Object.keys(MENU).length === 0 && (
