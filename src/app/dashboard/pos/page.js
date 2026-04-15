@@ -145,6 +145,9 @@ export default function POSPage() {
             price: Number(it.price) || 0,
             time: it.time || "",
             icon: it.icon || "✨",
+            menu_id: m.id,
+            menu_type: m.type || "",
+            group: g.name,
           });
         });
       });
@@ -528,6 +531,7 @@ export default function POSPage() {
         created_by: currentUser?.id || "unknown",
       };
       
+      let savedEntryId = editId;
       if (editId) {
         // DETAILED LOGGING LOGIC
         const old = entries.find(x => x.id === editId);
@@ -538,7 +542,7 @@ export default function POSPage() {
           if (old.mat_expense !== payload.mat_expense) changes.push(`Material Expense changed: ${INR(old.mat_expense)} -> ${INR(payload.mat_expense)}`);
           if (old.others !== payload.others) changes.push(`Other Exp changed: ${INR(old.others)} -> ${INR(payload.others)}`);
           if (old.petrol !== payload.petrol) changes.push(`Petrol updated: ${INR(old.petrol)} -> ${INR(payload.petrol)}`);
-          
+
           payload.staff_billing.forEach(ns => {
             const os = (old.staff_billing || []).find(x => x.staff_id === ns.staff_id);
             const sName = staff.find(x => x.id === ns.staff_id)?.name || "Staff";
@@ -556,17 +560,17 @@ export default function POSPage() {
           time: new Date().toISOString(),
           user: currentUser?.name || "User",
           action: "Update",
-          notes: changes.length > 0 ? changes.join(", ") : "Manual update (no values changed)"
+          notes: changes.length > 0 ? changes.join(", ") : "Bill added via POS"
         };
 
-        await updateDoc(doc(db, "entries", editId), { 
-          ...payload, 
+        await updateDoc(doc(db, "entries", editId), {
+          ...payload,
           updated_at: new Date().toISOString(),
           updated_by: currentUser?.id || "unknown",
           activity_log: [...(old?.activity_log || []), historyItem]
         });
-        setSaveStatus("✅ Entry Updated!");
-        toast({ title: "Updated", message: "Entry has been updated successfully.", type: "success" });
+        setSaveStatus("✅ Bill Added!");
+        toast({ title: "Bill Saved", message: "Added to today's entry. Ready for the next bill.", type: "success" });
       } else {
         const historyItem = {
           time: new Date().toISOString(),
@@ -574,17 +578,56 @@ export default function POSPage() {
           action: "Create",
           notes: "Initial record created"
         };
-        await addDoc(collection(db, "entries"), { ...payload, activity_log: [historyItem] });
+        const created = await addDoc(collection(db, "entries"), { ...payload, activity_log: [historyItem] });
+        savedEntryId = created.id;
         setSaveStatus("✅ Saved to Firebase!");
-        toast({ title: "Saved", message: "Entry saved successfully.", type: "success" });
+        toast({ title: "Bill Saved", message: "Ready for the next bill on this branch.", type: "success" });
       }
 
-      // Clear form
-      setSelBranch(""); setOnlineInc(""); setMatExp(""); setOtherExp(""); setPetrol(""); setActualCash("");
-      setCart([]); setSelectedCustomer(null); setClientSearch("");
-      setStaffRows({});
-      setEditId(null);
-      setGstPct(globalGst);
+      // Per-item service_logs so each stylist's day-working reflects POS bills.
+      // Source = "pos" distinguishes these from manually self-logged services.
+      const logPayloads = cart
+        .filter(it => it.staffId)
+        .map(it => {
+          const sName = staff.find(x => x.id === it.staffId)?.name || "";
+          return {
+            staff_id: it.staffId,
+            staff_name: sName,
+            branch_id: selBranch,
+            date: selDate,
+            service_name: it.name || "",
+            service_group: it.group || "",
+            menu_id: it.menu_id || "",
+            menu_type: it.menu_type || "",
+            amount: Number(it.price) || 0,
+            standard_price: Number(it.price) || 0,
+            custom_price: false,
+            price_note: "",
+            tip: 0,
+            tip_in: "online",
+            material_sale: 0,
+            material_name: "",
+            source: "pos",
+            entry_id: savedEntryId || null,
+            pos_cart_id: String(it.cartId),
+            customer_id: selectedCustomer?.id || null,
+            customer_name: selectedCustomer?.name || null,
+            created_by: currentUser?.id || "unknown",
+            created_at: new Date().toISOString(),
+          };
+        });
+      await Promise.all(
+        logPayloads.map(p => addDoc(collection(db, "service_logs"), p))
+      );
+
+      // Clear only the bill-level fields; keep branch/date/staff totals so multiple bills
+      // can be entered for the same branch in sequence (subsequent saves update the day entry).
+      setCart([]);
+      setSelectedCustomer(null);
+      setClientSearch("");
+      if (savedEntryId) setEditId(savedEntryId);
+      setOrigBranch(selBranch);
+      setOrigDate(selDate);
     } catch (err) {
       setSaveStatus("❌ Error: " + err.message);
     }

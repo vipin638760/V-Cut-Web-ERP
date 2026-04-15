@@ -194,6 +194,8 @@ export default function DayWorkingPage() {
         tip_in: tipIn,
         material_sale: Number(matSale) || 0,
         material_name: matName.trim() || "",
+        source: "manual",
+        created_by: currentUser?.id || currentUser?.staff_id || "unknown",
         created_at: new Date().toISOString(),
       });
       setSearch(""); setTip(""); setMatSale(""); setMatName(""); setCustomPrice("");
