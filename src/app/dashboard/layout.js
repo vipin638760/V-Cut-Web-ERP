@@ -1,8 +1,9 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { Sidebar, SidebarItem, SidebarToggle, SidebarPin, Icon, IconBtn, ThemeToggle, useConfirm } from "@/components/ui";
 import SearchPalette from "@/components/SearchPalette";
+import VLoader from "@/components/VLoader";
 import { collection, onSnapshot } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 
@@ -43,20 +44,22 @@ const NAV = {
   ],
 };
 
+const hrefFor = (id) => (id === "dashboard" ? "/dashboard" : `/dashboard/${id}`);
+
 export default function DashboardLayout({ children }) {
   const [user, setUser] = useState(null);
   const [showSearch, setShowSearch] = useState(false);
   const [context, setContext] = useState({ branches: [], staff: [] });
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarPinned, setSidebarPinned] = useState(false);
-  const [isMobile, setIsMobile] = useState(false); // phone (<600px): sidebar always overlays, no pin
-  const [isTablet, setIsTablet] = useState(false); // phone + tablet (<900px): sidebar overlays by default
+  const [isMobile, setIsMobile] = useState(false);
+  const [isTablet, setIsTablet] = useState(false);
   const { confirm, ConfirmDialog } = useConfirm();
 
   const router   = useRouter();
   const pathname = usePathname();
+  const prefetched = useRef(new Set());
 
-  // Track viewport width for responsive layout
   useEffect(() => {
     const phoneMq = window.matchMedia("(max-width: 600px)");
     const tabletMq = window.matchMedia("(max-width: 900px)");
@@ -73,36 +76,24 @@ export default function DashboardLayout({ children }) {
     };
   }, []);
 
-  // Restore pin preference; default open on desktop only when pinned
   useEffect(() => {
     const pinned = localStorage.getItem("vcut_sidebar_pinned") === "1";
     setSidebarPinned(pinned);
   }, []);
 
-  const togglePin = () => {
+  const togglePin = useCallback(() => {
     setSidebarPinned(p => {
       const next = !p;
       localStorage.setItem("vcut_sidebar_pinned", next ? "1" : "0");
       return next;
     });
-  };
+  }, []);
 
-  // Auto-close on route change when not pinned (or when on phone — pin doesn't apply there)
   useEffect(() => {
     if (!sidebarPinned || isMobile) setSidebarOpen(false);
   }, [pathname, sidebarPinned, isMobile]);
 
-  const effectivelyPinned = sidebarPinned && !isMobile; // phones never stay pinned
-
-  // Prefetch the role's routes so clicking a nav item is instant
-  useEffect(() => {
-    if (!user) return;
-    const items = NAV[user.role] || [];
-    items.forEach(n => {
-      const href = n.id === "dashboard" ? "/dashboard" : `/dashboard/${n.id}`;
-      try { router.prefetch(href); } catch {}
-    });
-  }, [user, router]);
+  const effectivelyPinned = sidebarPinned && !isMobile;
 
   useEffect(() => {
     const saved = sessionStorage.getItem("vcut_user") || localStorage.getItem("vcut_user");
@@ -110,18 +101,33 @@ export default function DashboardLayout({ children }) {
     setUser(JSON.parse(saved));
   }, [router]);
 
+  // Lazy Firestore subscriptions — only attach when the search palette is opened.
+  // Keeps the dashboard from re-rendering on every branch/staff write.
   useEffect(() => {
-    if (!db) return;
+    if (!showSearch || !db) return;
     const unsubB = onSnapshot(collection(db, "branches"), sn =>
       setContext(prev => ({ ...prev, branches: sn.docs.map(d => ({ name: d.data().name, id: d.id })) })));
     const unsubS = onSnapshot(collection(db, "staff"), sn =>
       setContext(prev => ({ ...prev, staff: sn.docs.map(d => ({ name: d.data().name, id: d.id })) })));
     return () => { unsubB(); unsubS(); };
-  }, []);
+  }, [showSearch]);
 
-  if (!user) return <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", color: "var(--accent)", fontWeight: 700, background: "var(--bg1)", fontFamily: "var(--font-headline, var(--font-outfit))" }}>Connecting...</div>;
+  const roleNav = useMemo(() => (user ? NAV[user.role] || [] : []), [user]);
 
-  const roleNav = NAV[user.role] || [];
+  // Prefetch on hover/focus rather than all at mount — avoids a boot-time bundle storm.
+  const handlePrefetch = useCallback((id) => {
+    if (prefetched.current.has(id)) return;
+    prefetched.current.add(id);
+    try { router.prefetch(hrefFor(id)); } catch {}
+  }, [router]);
+
+  const handleNav = useCallback((id) => {
+    router.push(hrefFor(id));
+    if (!sidebarPinned || isMobile) setSidebarOpen(false);
+  }, [router, sidebarPinned, isMobile]);
+
+  if (!user) return <VLoader fullscreen label="Connecting" />;
+
   const parts = pathname.split("/").filter(Boolean);
   const currentTab = parts.length >= 2 ? parts[1] : "dashboard";
   const activeTab  = currentTab || "dashboard";
@@ -148,7 +154,6 @@ export default function DashboardLayout({ children }) {
       onConfirm: () => {
         localStorage.removeItem("vcut_user");
         sessionStorage.removeItem("vcut_user");
-        // Intentionally keep vcut_remember so the login screen can prefill the role + uid next time.
         router.push("/");
       },
     });
@@ -174,11 +179,16 @@ export default function DashboardLayout({ children }) {
           {roleNav.map((n) => {
             const isActive = activeTab === n.id || (n.id === "dashboard" && (activeTab === "" || activeTab === "dashboard"));
             return (
-              <SidebarItem key={n.id} icon={n.icon} label={n.l} isActive={isActive}
-                onClick={() => {
-                  router.push(n.id === "dashboard" ? "/dashboard" : `/dashboard/${n.id}`);
-                  if (!sidebarPinned || isMobile) setSidebarOpen(false);
-                }} />
+              <SidebarItem
+                key={n.id}
+                id={n.id}
+                icon={n.icon}
+                label={n.l}
+                isActive={isActive}
+                onClick={handleNav}
+                onMouseEnter={handlePrefetch}
+                onFocus={handlePrefetch}
+              />
             );
           })}
         </div>

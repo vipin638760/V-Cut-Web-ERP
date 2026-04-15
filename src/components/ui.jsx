@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, memo } from "react";
 
 // ── Toast Notification Hook ──
 export function useToast() {
@@ -471,9 +471,12 @@ export function SidebarPin({ pinned, onClick }) {
   );
 }
 
-export function SidebarItem({ icon, label, isActive, onClick, neon }) {
+export const SidebarItem = memo(function SidebarItem({ id, icon, label, isActive, onClick, onMouseEnter, onFocus, neon }) {
+  const handleClick = useCallback(() => onClick?.(id), [onClick, id]);
+  const handleEnter = useCallback(() => onMouseEnter?.(id), [onMouseEnter, id]);
+  const handleFocus = useCallback(() => onFocus?.(id), [onFocus, id]);
   return (
-    <button onClick={onClick}
+    <button onClick={handleClick} onMouseEnter={handleEnter} onFocus={handleFocus}
       style={{
         width: "100%", display: "flex", alignItems: "center", gap: 14, padding: "12px 20px", border: "none",
         background: isActive ? "rgba(var(--accent-rgb), 0.06)" : "transparent",
@@ -490,7 +493,7 @@ export function SidebarItem({ icon, label, isActive, onClick, neon }) {
       {neon && <div style={{ marginLeft: "auto", width: 6, height: 6, borderRadius: "50%", background: "var(--accent)" }} />}
     </button>
   );
-}
+});
 
 // Avatar
 export function Avatar({ src, name, size = 40, online }) {
