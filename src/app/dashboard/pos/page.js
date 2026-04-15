@@ -110,6 +110,9 @@ export default function POSPage() {
   const [menus, setMenus] = useState([]);
   const [invoices, setInvoices] = useState([]); // today's invoices (drafts + settled) for selected branch
   const [editingDraftId, setEditingDraftId] = useState(null);
+  const [historyInvoices, setHistoryInvoices] = useState([]); // all settled invoices in current filter period
+  const [historySearch, setHistorySearch] = useState("");
+  const [expandedBranchId, setExpandedBranchId] = useState(null);
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
   const [customerForm, setCustomerForm] = useState(null); // null | { name, phone, email, notes }
@@ -349,6 +352,29 @@ export default function POSPage() {
       orderBy("date", "desc"),
     );
     const unsub = onSnapshot(q, (sn) => startTransition(() => handleEntriesSn(sn)));
+    return () => unsub();
+  }, [filterMode, filterPrefix, filterYear]);
+
+  // Invoices subscription scoped to current filter period — powers the History tab
+  // branch cards, drill-downs, and search-by-invoice. Settled invoices are permanent.
+  useEffect(() => {
+    if (!db) return;
+    let from, to;
+    if (filterMode === "month") {
+      from = `${filterPrefix}-01`;
+      to   = `${filterPrefix}-31`;
+    } else {
+      from = `${filterYear}-01-01`;
+      to   = `${filterYear}-12-31`;
+    }
+    const q = query(
+      collection(db, "invoices"),
+      where("date", ">=", from),
+      where("date", "<=", to),
+    );
+    const unsub = onSnapshot(q, (sn) => startTransition(() =>
+      setHistoryInvoices(sn.docs.map(d => ({ ...d.data(), id: d.id })).filter(i => i.status === "settled"))
+    ));
     return () => unsub();
   }, [filterMode, filterPrefix, filterYear]);
 
@@ -1264,6 +1290,52 @@ export default function POSPage() {
   );
   const settledCount = todaysSettled.length;
 
+  // History search — match by invoice no, customer name/phone, amount, or date substring.
+  const filteredInvoices = useMemo(() => {
+    const q = historySearch.trim().toLowerCase();
+    if (!q) return historyInvoices;
+    const qNum = Number(q.replace(/[^\d.]/g, ""));
+    return historyInvoices.filter(inv => {
+      if ((inv.invoice_no || "").toLowerCase().includes(q)) return true;
+      if ((inv.customer_name || "").toLowerCase().includes(q)) return true;
+      if ((inv.customer_phone || "").toLowerCase().includes(q)) return true;
+      if ((inv.date || "").includes(q)) return true;
+      if (!Number.isNaN(qNum) && qNum > 0) {
+        const tot = Number(inv.total) || Number(inv.subtotal) || 0;
+        if (tot === qNum) return true;
+      }
+      return false;
+    });
+  }, [historyInvoices, historySearch]);
+
+  // Branch summary cards — grouped counts + totals. Search narrows the underlying set.
+  const branchSummaries = useMemo(() => {
+    const map = new Map();
+    filteredInvoices.forEach(inv => {
+      const key = inv.branch_id;
+      if (!map.has(key)) {
+        map.set(key, {
+          branch_id: key,
+          branch_name: (branchesById.get(key)?.name || inv.branch_name || "Branch").replace("V-CUT ", ""),
+          count: 0,
+          total: 0,
+        });
+      }
+      const s = map.get(key);
+      s.count += 1;
+      s.total += Number(inv.total) || Number(inv.subtotal) || 0;
+    });
+    return [...map.values()].sort((a, b) => b.total - a.total);
+  }, [filteredInvoices, branchesById]);
+
+  // Invoices for the expanded branch card, sorted newest first.
+  const filteredBranchInvoices = useMemo(() => {
+    if (!expandedBranchId) return [];
+    return filteredInvoices
+      .filter(inv => inv.branch_id === expandedBranchId)
+      .sort((a, b) => (b.date || "").localeCompare(a.date || "") || (b.invoice_no || "").localeCompare(a.invoice_no || ""));
+  }, [filteredInvoices, expandedBranchId]);
+
   // Invoice number: {BRANCH-PREFIX}-{DDMMYY}-{NNN}
   const branchPrefix = (b) => {
     if (!b) return "INV";
@@ -1931,7 +2003,143 @@ export default function POSPage() {
       ) : (
         <div style={{ flex: 1, overflowY: "auto" }}>
            <PeriodWidget filterMode={filterMode} setFilterMode={setFilterMode} filterYear={filterYear} setFilterYear={setFilterYear} filterMonth={filterMonth} setFilterMonth={setFilterMonth} />
-           <div style={{ marginTop: 16 }}>
+
+           {/* Search bar — filters invoices across branches by inv-no / customer / amount / date */}
+           <div style={{ marginTop: 16, display: "flex", alignItems: "center", gap: 10, background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 12, padding: 10, position: "relative" }}>
+             <div style={{ position: "absolute", left: 22, color: "var(--text3)" }}><Icon name="search" size={14} /></div>
+             <input value={historySearch} onChange={e => setHistorySearch(e.target.value)}
+               placeholder="Search bills by invoice no, customer, amount, or date (YYYY-MM-DD)…"
+               style={{ flex: 1, padding: "10px 12px 10px 34px", background: "var(--bg3)", border: "1px solid var(--border2)", borderRadius: 8, color: "var(--text)", fontSize: 13, outline: "none" }} />
+             {historySearch && (
+               <button onClick={() => setHistorySearch("")}
+                 style={{ background: "transparent", border: "none", color: "var(--text3)", cursor: "pointer", fontSize: 18, fontWeight: 700 }}>✕</button>
+             )}
+           </div>
+
+           {/* Branch cards — click to drill into that branch's invoices */}
+           <div style={{ marginTop: 16, display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 12 }}>
+             {branchSummaries.length === 0 && (
+               <div style={{ gridColumn: "1 / -1", padding: 30, textAlign: "center", color: "var(--text3)", fontSize: 13 }}>
+                 No invoices in this period yet.
+               </div>
+             )}
+             {branchSummaries.map(bs => {
+               const active = expandedBranchId === bs.branch_id;
+               return (
+                 <button key={bs.branch_id}
+                   onClick={() => setExpandedBranchId(active ? null : bs.branch_id)}
+                   style={{
+                     textAlign: "left", cursor: "pointer",
+                     background: active ? "linear-gradient(135deg, rgba(var(--accent-rgb),0.12), rgba(var(--accent-rgb),0.03))" : "var(--bg2)",
+                     border: `1px solid ${active ? "var(--accent)" : "var(--border)"}`,
+                     borderRadius: 16, padding: 16, display: "flex", flexDirection: "column", gap: 8,
+                     transition: "all .2s",
+                   }}>
+                   <div style={{ fontSize: 10, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.5 }}>Branch</div>
+                   <div style={{ fontSize: 16, fontWeight: 800, color: "var(--text)", letterSpacing: 0.2 }}>{bs.branch_name}</div>
+                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginTop: 6 }}>
+                     <div>
+                       <div style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase" }}>Bills</div>
+                       <div style={{ fontSize: 22, fontWeight: 900, color: "var(--accent)" }}>{bs.count}</div>
+                     </div>
+                     <div style={{ textAlign: "right" }}>
+                       <div style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase" }}>Total</div>
+                       <div style={{ fontSize: 18, fontWeight: 900, color: "var(--gold)" }}>{INR(bs.total)}</div>
+                     </div>
+                   </div>
+                 </button>
+               );
+             })}
+           </div>
+
+           {/* Expanded invoice table for the selected branch */}
+           {expandedBranchId && (
+             <div style={{ marginTop: 16 }}>
+               <Card>
+                 <div style={{ padding: "10px 16px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+                   <div style={{ fontSize: 12, fontWeight: 800, color: "var(--text)", letterSpacing: 0.5 }}>
+                     {branchesById.get(expandedBranchId)?.name || "Branch"} — Invoices
+                   </div>
+                   <button onClick={() => setExpandedBranchId(null)}
+                     style={{ background: "transparent", border: "1px solid var(--border)", color: "var(--text3)", borderRadius: 8, padding: "4px 10px", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>Collapse</button>
+                 </div>
+                 <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12.5 }}>
+                   <thead>
+                     <tr>
+                       <TH>Date</TH><TH>Invoice No</TH><TH>Customer</TH>
+                       <TH right>Online</TH><TH right>Cash</TH>
+                       <TH right>Amount</TH>
+                       <TH right>PDF</TH>
+                     </tr>
+                   </thead>
+                   <tbody>
+                     {filteredBranchInvoices.length === 0 && (
+                       <tr><td colSpan={7} style={{ textAlign: "center", padding: 24, color: "var(--text3)", fontSize: 12 }}>
+                         {historySearch ? "No invoices match your search." : "No invoices for this branch in the selected period."}
+                       </td></tr>
+                     )}
+                     {filteredBranchInvoices.map(inv => (
+                       <tr key={inv.id}>
+                         <TD style={{ fontWeight: 600, whiteSpace: "nowrap" }}>{inv.date}</TD>
+                         <TD style={{ fontFamily: "var(--font-headline, var(--font-outfit))", fontWeight: 700, color: "var(--accent)" }}>{inv.invoice_no}</TD>
+                         <TD>
+                           <div style={{ fontWeight: 600 }}>{inv.customer_name || "Walk-in"}</div>
+                           {inv.customer_phone && <div style={{ fontSize: 10, color: "var(--text3)" }}>{inv.customer_phone}</div>}
+                         </TD>
+                         <TD right style={{ color: "var(--green)" }}>{INR(inv.online || 0)}</TD>
+                         <TD right style={{ color: "var(--green)" }}>{INR(inv.cash || 0)}</TD>
+                         <TD right style={{ fontWeight: 800, color: "var(--gold)" }}>{INR(inv.total || inv.subtotal || 0)}</TD>
+                         <TD right>
+                           <button onClick={() => openInvoicePreview(inv)} title="Open bill (print / save as PDF)"
+                             style={{ background: "rgba(var(--accent-rgb),0.1)", border: "1px solid rgba(var(--accent-rgb),0.3)", color: "var(--accent)", padding: "6px 10px", borderRadius: 8, fontWeight: 700, fontSize: 11, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 }}>
+                             <Icon name="log" size={12} /> PDF
+                           </button>
+                         </TD>
+                       </tr>
+                     ))}
+                   </tbody>
+                 </table>
+               </Card>
+             </div>
+           )}
+
+           {/* Global search results across all branches (only shown while searching) */}
+           {historySearch && !expandedBranchId && filteredInvoices.length > 0 && (
+             <div style={{ marginTop: 16 }}>
+               <Card>
+                 <div style={{ padding: "10px 16px", borderBottom: "1px solid var(--border)", fontSize: 12, fontWeight: 800, color: "var(--text)" }}>
+                   Search Results ({filteredInvoices.length})
+                 </div>
+                 <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12.5 }}>
+                   <thead>
+                     <tr>
+                       <TH>Date</TH><TH>Invoice No</TH><TH>Branch</TH><TH>Customer</TH>
+                       <TH right>Amount</TH><TH right>PDF</TH>
+                     </tr>
+                   </thead>
+                   <tbody>
+                     {filteredInvoices.slice(0, 100).map(inv => (
+                       <tr key={inv.id}>
+                         <TD style={{ fontWeight: 600, whiteSpace: "nowrap" }}>{inv.date}</TD>
+                         <TD style={{ fontWeight: 700, color: "var(--accent)" }}>{inv.invoice_no}</TD>
+                         <TD style={{ fontSize: 11 }}>{(branchesById.get(inv.branch_id)?.name || inv.branch_name || "").replace("V-CUT ", "")}</TD>
+                         <TD>{inv.customer_name || "Walk-in"}</TD>
+                         <TD right style={{ fontWeight: 800, color: "var(--gold)" }}>{INR(inv.total || inv.subtotal || 0)}</TD>
+                         <TD right>
+                           <button onClick={() => openInvoicePreview(inv)} title="Open bill (print / save as PDF)"
+                             style={{ background: "rgba(var(--accent-rgb),0.1)", border: "1px solid rgba(var(--accent-rgb),0.3)", color: "var(--accent)", padding: "6px 10px", borderRadius: 8, fontWeight: 700, fontSize: 11, cursor: "pointer" }}>PDF</button>
+                         </TD>
+                       </tr>
+                     ))}
+                   </tbody>
+                 </table>
+               </Card>
+             </div>
+           )}
+
+           {/* Existing Daily Entries table (accountant view) */}
+           <div style={{ marginTop: 24, marginBottom: 8, fontSize: 11, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 2 }}>Daily Entries (rollup)</div>
+           <div>
              <Card>
                 <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12.5 }}>
                   <thead>

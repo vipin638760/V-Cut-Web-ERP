@@ -1,19 +1,23 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
-import { collection, onSnapshot, query, orderBy, addDoc, updateDoc, deleteDoc, doc } from "firebase/firestore";
+import { collection, onSnapshot, query, orderBy, where, addDoc, updateDoc, deleteDoc, doc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
 import { Icon, IconBtn, Card, TH, TD, Modal, useConfirm, useToast } from "@/components/ui";
+import { INR } from "@/lib/calculations";
+import BillPrintModal from "@/components/BillPrintModal";
 
 const emptyForm = { name: "", phone: "", email: "", address: "", birthdate: "", marriage_date: "", notes: "" };
 
 export default function CustomersPage() {
   const [customers, setCustomers] = useState([]);
   const [entries, setEntries] = useState([]);
+  const [customerInvoices, setCustomerInvoices] = useState([]); // invoices for the customer currently inspected
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [editing, setEditing] = useState(null); // null | { id?, ...form }
   const [detailOf, setDetailOf] = useState(null); // customer being inspected
+  const [invoicePreview, setInvoicePreview] = useState(null); // bill to re-open/print
   const { confirm, ConfirmDialog } = useConfirm();
   const { toast, ToastContainer } = useToast();
   const currentUser = useCurrentUser() || {};
@@ -31,6 +35,19 @@ export default function CustomersPage() {
     ];
     return () => unsubs.forEach(u => u());
   }, []);
+
+  // Load the selected customer's invoices on demand (avoids pulling every invoice at list view).
+  useEffect(() => {
+    if (!db || !detailOf?.id) return;
+    const q = query(
+      collection(db, "invoices"),
+      where("customer_id", "==", detailOf.id),
+    );
+    const unsub = onSnapshot(q, sn =>
+      setCustomerInvoices(sn.docs.map(d => ({ ...d.data(), id: d.id })).filter(i => i.status === "settled"))
+    );
+    return () => { unsub(); setCustomerInvoices([]); };
+  }, [detailOf?.id]);
 
   // Build a visits index by customer_id from entries so we can show visit count + last visit
   const visitsByCustomer = useMemo(() => {
@@ -218,10 +235,11 @@ export default function CustomersPage() {
       </Card>
 
       {/* Detail Drawer/Modal */}
-      <Modal isOpen={!!detailOf} onClose={() => setDetailOf(null)} title={detailOf?.name || "Customer"} width={560}>
+      <Modal isOpen={!!detailOf} onClose={() => setDetailOf(null)} title={detailOf?.name || "Customer"} width={720}>
         {detailOf && (() => {
           const v = visitsByCustomer.get(detailOf.id);
-          const customerEntries = entries.filter(e => e.customer_id === detailOf.id).slice(0, 20);
+          const bills = customerInvoices.slice().sort((a, b) => (b.date || "").localeCompare(a.date || "") || (b.invoice_no || "").localeCompare(a.invoice_no || ""));
+          const lifetime = bills.reduce((s, inv) => s + (Number(inv.total) || Number(inv.subtotal) || 0), 0);
           return (
             <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, background: "var(--bg4)", padding: 14, borderRadius: 10, fontSize: 12 }}>
@@ -230,34 +248,48 @@ export default function CustomersPage() {
                 <div style={{ gridColumn: "1 / span 2" }}><span style={{ color: "var(--text3)" }}>Address:</span> <strong>{detailOf.address || "—"}</strong></div>
                 <div><span style={{ color: "var(--text3)" }}>🎂 Birthday:</span> <strong>{detailOf.birthdate || "—"}</strong></div>
                 <div><span style={{ color: "var(--text3)" }}>💍 Anniversary:</span> <strong>{detailOf.marriage_date || "—"}</strong></div>
-                <div><span style={{ color: "var(--text3)" }}>Visits:</span> <strong style={{ color: "var(--accent)" }}>{v?.visits || 0}</strong></div>
-                <div><span style={{ color: "var(--text3)" }}>Last Visit:</span> <strong>{v?.last || "—"}</strong></div>
+                <div><span style={{ color: "var(--text3)" }}>Visits:</span> <strong style={{ color: "var(--accent)" }}>{bills.length || v?.visits || 0}</strong></div>
+                <div><span style={{ color: "var(--text3)" }}>Last Visit:</span> <strong>{bills[0]?.date || v?.last || "—"}</strong></div>
+                <div style={{ gridColumn: "1 / span 2" }}><span style={{ color: "var(--text3)" }}>Lifetime Spend:</span> <strong style={{ color: "var(--gold)" }}>{INR(lifetime)}</strong></div>
                 {detailOf.notes && (
                   <div style={{ gridColumn: "1 / span 2" }}><span style={{ color: "var(--text3)" }}>Notes:</span> <strong>{detailOf.notes}</strong></div>
                 )}
               </div>
               <div>
-                <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 }}>Recent Visits</div>
-                {customerEntries.length > 0 ? (
-                  <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
-                    <thead>
-                      <tr style={{ borderBottom: "1px solid var(--border)", color: "var(--text3)", fontSize: 10, textTransform: "uppercase", letterSpacing: 1 }}>
-                        <th style={{ padding: "6px 8px", textAlign: "left" }}>Date</th>
-                        <th style={{ padding: "6px 8px", textAlign: "right" }}>Online</th>
-                        <th style={{ padding: "6px 8px", textAlign: "right" }}>Cash</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {customerEntries.map(e => (
-                        <tr key={e.id} style={{ borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
-                          <td style={{ padding: "6px 8px" }}>{e.date}</td>
-                          <td style={{ padding: "6px 8px", textAlign: "right", color: "var(--green)" }}>₹{(e.online || 0).toLocaleString("en-IN")}</td>
-                          <td style={{ padding: "6px 8px", textAlign: "right", color: "var(--green)" }}>₹{(e.cash || 0).toLocaleString("en-IN")}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                ) : <div style={{ fontSize: 12, color: "var(--text3)" }}>No visits recorded yet.</div>}
+                <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 }}>Billing History</div>
+                {bills.length > 0 ? (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10, maxHeight: 360, overflowY: "auto", paddingRight: 6 }}>
+                    {bills.map(inv => {
+                      const stylists = [...new Set((inv.items || []).map(it => it.staff_name).filter(Boolean))].join(", ");
+                      return (
+                        <div key={inv.id} style={{ background: "var(--bg3)", border: "1px solid var(--border)", borderRadius: 10, padding: "10px 12px" }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                              <div style={{ fontSize: 11, color: "var(--text3)", fontWeight: 700 }}>{inv.date}</div>
+                              <div style={{ fontSize: 12, fontWeight: 800, color: "var(--accent)", letterSpacing: 0.3 }}>{inv.invoice_no}</div>
+                            </div>
+                            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                              <div style={{ fontSize: 14, fontWeight: 900, color: "var(--gold)" }}>{INR(inv.total || inv.subtotal || 0)}</div>
+                              <button onClick={() => setInvoicePreview(inv)} title="Open bill (print / save as PDF)"
+                                style={{ background: "rgba(var(--accent-rgb),0.1)", border: "1px solid rgba(var(--accent-rgb),0.3)", color: "var(--accent)", padding: "4px 10px", borderRadius: 8, fontWeight: 700, fontSize: 11, cursor: "pointer" }}>PDF</button>
+                            </div>
+                          </div>
+                          <div style={{ marginTop: 6, fontSize: 11, color: "var(--text2)", lineHeight: 1.5 }}>
+                            {(inv.items || []).map((it, i) => (
+                              <div key={i} style={{ display: "flex", justifyContent: "space-between", gap: 6 }}>
+                                <span style={{ color: "var(--text2)" }}>· {it.name} {it.staff_name && <span style={{ color: "var(--text3)" }}>— {it.staff_name}</span>}</span>
+                                <span style={{ color: "var(--text3)" }}>{INR(it.price || 0)}</span>
+                              </div>
+                            ))}
+                          </div>
+                          {stylists && (
+                            <div style={{ marginTop: 6, fontSize: 10, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1 }}>Stylist: <span style={{ color: "var(--text2)" }}>{stylists}</span></div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : <div style={{ fontSize: 12, color: "var(--text3)" }}>No bills recorded yet.</div>}
               </div>
               {canEdit && (
                 <div style={{ display: "flex", gap: 10 }}>
@@ -311,6 +343,10 @@ export default function CustomersPage() {
           </form>
         )}
       </Modal>
+
+      {invoicePreview && (
+        <BillPrintModal invoice={invoicePreview} onClose={() => setInvoicePreview(null)} />
+      )}
 
       {ConfirmDialog}
       {ToastContainer}
