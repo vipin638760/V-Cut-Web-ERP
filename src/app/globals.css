@@ -363,22 +363,28 @@ body {
      staff selector beneath the next card). */
   .pos-cart-items {
     max-height: 45vh !important;
-    min-height: 180px !important;
+    min-height: 200px !important;
   }
 }
 
-/* Visible accent scrollbar so users know the list is scrollable */
+/* Cart-items scroll area — hard-bound max-height on every screen so the
+   list always scrolls, no matter how many chrome sections sit above or
+   below inside the cart panel. Without this, a fragile flex parent can
+   let the inner list grow and hide staff rows under the next card. */
 .pos-cart-items {
+  max-height: 55vh;
+  min-height: 180px;
   scrollbar-width: thin;
   scrollbar-color: rgba(var(--accent-rgb), 0.4) transparent;
 }
-.pos-cart-items::-webkit-scrollbar { width: 6px; }
+.pos-cart-items::-webkit-scrollbar { width: 8px; }
+.pos-cart-items::-webkit-scrollbar-track { background: transparent; }
 .pos-cart-items::-webkit-scrollbar-thumb {
-  background: rgba(var(--accent-rgb), 0.35);
-  border-radius: 3px;
+  background: rgba(var(--accent-rgb), 0.4);
+  border-radius: 4px;
 }
 .pos-cart-items::-webkit-scrollbar-thumb:hover {
-  background: rgba(var(--accent-rgb), 0.6);
+  background: rgba(var(--accent-rgb), 0.7);
 }
 
 /* Cart-card entrance animation (matches the menu-card look when an item is added) */
