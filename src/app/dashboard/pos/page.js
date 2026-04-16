@@ -3553,11 +3553,14 @@ export default function POSPage() {
             {/* Customer: search + pick existing, OR switch to the inline new-customer form */}
             <label style={{ display: "block", fontSize: 10, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, marginTop: 14, marginBottom: 6 }}>Customer</label>
             {!bookingModal.newCustomer ? (
-              bookingModal.customer?.id ? (
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "10px 12px", borderRadius: 10, background: "rgba(74,222,128,0.08)", border: "1px solid rgba(74,222,128,0.3)" }}>
+              bookingModal.customer ? (
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "10px 12px", borderRadius: 10, background: bookingModal.customer.id ? "rgba(74,222,128,0.08)" : "rgba(148,163,184,0.08)", border: bookingModal.customer.id ? "1px solid rgba(74,222,128,0.3)" : "1px solid rgba(148,163,184,0.25)" }}>
                   <div>
                     <div style={{ fontSize: 13, fontWeight: 800, color: "var(--text)" }}>{bookingModal.customer.name}</div>
                     {bookingModal.customer.phone && <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 2 }}>📞 {bookingModal.customer.phone}</div>}
+                    {!bookingModal.customer.id && !bookingModal.customer.phone && (
+                      <div style={{ fontSize: 10, color: "var(--text3)", marginTop: 2, fontStyle: "italic" }}>Anonymous visitor</div>
+                    )}
                   </div>
                   <button onClick={() => setBookingModal({ ...bookingModal, customer: null, customerSearch: "" })}
                     style={{ background: "transparent", border: "none", color: "var(--text3)", cursor: "pointer", fontSize: 16 }}>✕</button>
@@ -3636,43 +3639,65 @@ export default function POSPage() {
               </div>
             )}
 
-            {/* Services picker */}
+            {/* Services picker (searchable) */}
             <label style={{ display: "block", fontSize: 10, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, marginTop: 14, marginBottom: 6 }}>
-              Services {(bookingModal.services || []).length > 0 && <span style={{ color: "var(--accent)" }}>· {bookingModal.services.length} picked · {INR(servicesTotalPrice)}</span>}
+              Services {(bookingModal.services || []).length > 0 && <span style={{ color: "var(--accent)" }}>· {bookingModal.services.length} picked · {INR(servicesTotalPrice)} · {servicesTotalMin}m</span>}
             </label>
             {Object.keys(MENU).length === 0 ? (
               <div style={{ padding: 10, fontSize: 11, color: "var(--text3)", fontStyle: "italic" }}>No menu configured for this branch.</div>
-            ) : (
-              <div style={{ maxHeight: 180, overflowY: "auto", background: "var(--bg3)", border: "1px solid var(--border2)", borderRadius: 8, padding: 8 }}>
-                {Object.entries(MENU).map(([group, items]) => (
-                  <div key={group} style={{ marginBottom: 8 }}>
-                    <div style={{ fontSize: 9, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, padding: "4px 6px" }}>{group}</div>
-                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 4 }}>
-                      {items.map(item => {
-                        const picked = (bookingModal.services || []).some(s => s.id === item.id);
-                        return (
-                          <button key={item.id} type="button"
-                            onClick={() => toggleService(item)}
-                            style={{
-                              textAlign: "left", padding: "6px 8px",
-                              background: picked ? "rgba(74,222,128,0.12)" : "var(--bg2)",
-                              border: `1px solid ${picked ? "rgba(74,222,128,0.4)" : "var(--border)"}`,
-                              borderRadius: 6, cursor: "pointer",
-                            }}>
-                            <div style={{ fontSize: 11, fontWeight: 700, color: picked ? "var(--green)" : "var(--text)" }}>
-                              {picked ? "✓ " : ""}{item.name}
-                            </div>
-                            <div style={{ fontSize: 10, color: "var(--text3)", fontWeight: 600, marginTop: 1 }}>
-                              {INR(item.price)}{item.time ? ` · ${item.time}` : ""}
-                            </div>
-                          </button>
-                        );
-                      })}
-                    </div>
+            ) : (() => {
+              const sq = (bookingModal.serviceSearch || "").trim().toLowerCase();
+              const sqNum = Number(sq.replace(/[^\d.]/g, ""));
+              const hasNumericQuery = !Number.isNaN(sqNum) && sqNum > 0 && /\d/.test(sq);
+              const filterItem = (it) => {
+                if (!sq) return true;
+                if ((it.name || "").toLowerCase().includes(sq)) return true;
+                if (hasNumericQuery && Number(it.price) === sqNum) return true;
+                return false;
+              };
+              const filteredGroups = Object.entries(MENU)
+                .map(([g, items]) => [g, items.filter(filterItem)])
+                .filter(([, items]) => items.length > 0);
+              return (
+                <>
+                  <input type="text" value={bookingModal.serviceSearch || ""}
+                    onChange={e => setBookingModal(prev => ({ ...prev, serviceSearch: e.target.value }))}
+                    placeholder="Search services by name or price (e.g. 'hair' or '500')"
+                    style={{ width: "100%", padding: "8px 10px", background: "var(--bg3)", border: "1px solid var(--border2)", borderRadius: 8, color: "var(--text)", fontSize: 12, outline: "none", boxSizing: "border-box", marginBottom: 6 }} />
+                  <div style={{ maxHeight: 200, overflowY: "auto", background: "var(--bg3)", border: "1px solid var(--border2)", borderRadius: 8, padding: 8 }}>
+                    {filteredGroups.length === 0 ? (
+                      <div style={{ padding: 14, textAlign: "center", fontSize: 11, color: "var(--text3)" }}>No services match &ldquo;{sq}&rdquo;.</div>
+                    ) : filteredGroups.map(([group, items]) => (
+                      <div key={group} style={{ marginBottom: 8 }}>
+                        <div style={{ fontSize: 9, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, padding: "4px 6px" }}>{group}</div>
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 4 }}>
+                          {items.map(item => {
+                            const picked = (bookingModal.services || []).some(s => s.id === item.id);
+                            return (
+                              <button key={item.id} type="button"
+                                onClick={() => toggleService(item)}
+                                style={{
+                                  textAlign: "left", padding: "6px 8px",
+                                  background: picked ? "rgba(74,222,128,0.12)" : "var(--bg2)",
+                                  border: `1px solid ${picked ? "rgba(74,222,128,0.4)" : "var(--border)"}`,
+                                  borderRadius: 6, cursor: "pointer",
+                                }}>
+                                <div style={{ fontSize: 11, fontWeight: 700, color: picked ? "var(--green)" : "var(--text)" }}>
+                                  {picked ? "✓ " : ""}{item.name}
+                                </div>
+                                <div style={{ fontSize: 10, color: "var(--text3)", fontWeight: 600, marginTop: 1 }}>
+                                  {INR(item.price)}{item.time ? ` · ${item.time}` : ""}
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
-            )}
+                </>
+              );
+            })()}
 
             <label style={{ display: "block", fontSize: 10, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, marginTop: 14, marginBottom: 6 }}>
               Duration
