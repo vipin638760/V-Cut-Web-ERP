@@ -841,24 +841,9 @@ export default function StaffPage() {
                         {overall === 'active' ? <Pill label="Active" color="green" /> : <Pill label="Inactive" color="red" />}
                       </div>
                       {(monthSt.status === 'partial' || monthSt.status === 'active') && (
-                        <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                          <button type="button"
-                            onClick={() => setAttendanceModal({ staff: s, month: filterMode === "month" ? filterPrefix : `${filterYear}-${String(NOW.getMonth() + 1).padStart(2, "0")}` })}
-                            title="Open attendance calendar"
-                            style={{
-                              background: "rgba(var(--accent-rgb),0.1)",
-                              border: "1px solid rgba(var(--accent-rgb),0.35)",
-                              color: "var(--accent)",
-                              borderRadius: 6,
-                              padding: "2px 8px",
-                              cursor: "pointer",
-                              fontSize: 13,
-                              lineHeight: 1,
-                            }}>📅</button>
-                          <span style={{ fontSize: 10, color: monthSt.status === 'partial' ? "var(--orange)" : "var(--text3)", fontWeight: 700 }}>
-                            {monthSt.status === 'partial' ? "Partial · " : ""}{monthSt.daysWorked} working day{monthSt.daysWorked === 1 ? "" : "s"}{monthSt.toDate ? " · to date" : ""}
-                          </span>
-                        </div>
+                        <span style={{ fontSize: 10, color: monthSt.status === 'partial' ? "var(--orange)" : "var(--text3)", fontWeight: 700 }}>
+                          {monthSt.status === 'partial' ? "Partial · " : ""}{monthSt.daysWorked} working day{monthSt.daysWorked === 1 ? "" : "s"}{monthSt.toDate ? " · to date" : ""}
+                        </span>
                       )}
                     </div>
                   </TD>
@@ -884,6 +869,12 @@ export default function StaffPage() {
                   {canEdit && (
                     <TD sticky right>
                       <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "flex-end" }}>
+                        {(monthSt.status === 'partial' || monthSt.status === 'active') && (
+                          <button type="button"
+                            onClick={() => setAttendanceModal({ staff: s, month: filterMode === "month" ? filterPrefix : `${filterYear}-${String(NOW.getMonth() + 1).padStart(2, "0")}` })}
+                            title="Attendance calendar"
+                            style={{ width: 32, height: 32, borderRadius: 10, background: "rgba(var(--accent-rgb),0.1)", border: "1px solid rgba(var(--accent-rgb),0.35)", color: "var(--accent)", cursor: "pointer", fontSize: 14, lineHeight: 1, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>📅</button>
+                        )}
                         {!isAccountant && <IconBtn name="log" onClick={() => setHistoryModal(s)} variant="secondary" title="History Log" />}
                         {overall === 'active' && (
                           activeTransfer ? (
