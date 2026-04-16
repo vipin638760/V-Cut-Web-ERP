@@ -60,6 +60,7 @@ export default function EntryPage() {
   const [staff, setStaff] = useState([]);
   const [transfers, setTransfers] = useState([]);
   const [entries, setEntries] = useState([]);
+  const [leaves, setLeaves] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState("");
@@ -193,6 +194,7 @@ export default function EntryPage() {
       onSnapshot(collection(db, "branches"), wrap(setBranches)),
       onSnapshot(collection(db, "staff"), wrap(setStaff)),
       onSnapshot(collection(db, "staff_transfers"), wrap(setTransfers)),
+      onSnapshot(collection(db, "leaves"), wrap(setLeaves)),
       onSnapshot(doc(db, "settings", "global"), sn => {
         if (!sn.exists()) return;
         const data = sn.data();
