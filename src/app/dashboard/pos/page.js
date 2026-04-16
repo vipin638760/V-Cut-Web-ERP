@@ -1407,13 +1407,26 @@ export default function POSPage() {
     setShowCustomerDropdown(false);
   };
 
-  // Auto-apply the default member discount whenever the selected customer changes.
+  // Whether this bill should be treated as a member bill — either the customer
+  // already holds a valid membership, OR a membership tier has been added to
+  // this bill's cart (about to upgrade at checkout). Treating both as "member"
+  // means the discount row appears and the default 5% applies immediately.
+  const hasMembershipInCart = useMemo(() => cart.some(i => i.is_membership), [cart]);
+  const customerIsMember = !!(selectedCustomer && isActiveMember(selectedCustomer, selDate));
+  const effectiveMember = customerIsMember || hasMembershipInCart;
+
+  // Auto-apply the default member discount whenever member status changes.
   // Clearing the customer resets the discount to 0.
   useEffect(() => {
     if (!selectedCustomer) { setDiscountPct(0); return; }
-    setDiscountPct(isActiveMember(selectedCustomer, selDate) ? DEFAULT_MEMBER_DISCOUNT_PCT : 0);
+    setDiscountPct(effectiveMember ? DEFAULT_MEMBER_DISCOUNT_PCT : 0);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedCustomer?.id, selDate]);
+  }, [selectedCustomer?.id, selDate, effectiveMember]);
+
+  // Remove the membership line from the cart (cashier changed mind).
+  const removeMembershipFromCart = () => {
+    setCart(prev => prev.filter(i => !i.is_membership));
+  };
 
   const openNewCustomerForm = () => {
     const q = clientSearch.trim();
@@ -1426,6 +1439,7 @@ export default function POSPage() {
       birthdate: "",
       marriage_date: "",
       notes: "",
+      membership_tier: "",
     });
     setShowCustomerDropdown(false);
   };
@@ -1453,6 +1467,26 @@ export default function POSPage() {
       const saved = { id: docRef.id, name, phone: customerForm.phone.trim() || null };
       setSelectedCustomer(saved);
       setClientSearch(name);
+      // If the cashier picked a membership tier during registration, drop it
+      // into the cart now so the bill auto-includes the plan fee + enables
+      // the 5% member discount.
+      if (customerForm.membership_tier) {
+        const tier = tierByKey(customerForm.membership_tier);
+        if (tier) {
+          setCart(prev => [
+            ...prev.filter(i => !i.is_membership),
+            {
+              cartId: Date.now() + Math.random(),
+              name: `Membership · ${tier.label}`,
+              price: tier.price,
+              staffId: "",
+              home_branch_id: selBranch || null,
+              is_membership: true,
+              membership_tier: tier.key,
+            },
+          ]);
+        }
+      }
       setCustomerForm(null);
       toast({ title: "Customer Added", message: `${name} saved.`, type: "success" });
     } catch (err) {
@@ -2262,13 +2296,16 @@ export default function POSPage() {
                     {lastVisit ? `Last visit: ${lastVisit} · ${hintLabel}` : hintLabel}
                   </div>
 
-                  {/* Membership strip — badge if active, CTA if not */}
+                  {/* Membership strip — badge if active, CTA if not. Green 'Member Selected · ✕'
+                      when a tier has been added to the cart for this bill. */}
                   {(() => {
                     const active = isActiveMember(full, selDate);
                     const daysLeft = active ? daysUntilExpiry(full, selDate) : 0;
                     const tierLabel = tierByKey(full.member_tier)?.label || "";
+                    const cartTier = cart.find(i => i.is_membership);
+                    const cartTierLabel = cartTier ? tierByKey(cartTier.membership_tier)?.label : "";
                     return (
-                      <div style={{ marginTop: 8, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                      <div style={{ marginTop: 8, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
                         {active ? (
                           <div style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 8px", borderRadius: 6, background: "rgba(74,222,128,0.1)", border: "1px solid rgba(74,222,128,0.3)" }}>
                             <Icon name="star" size={11} />
@@ -2284,10 +2321,21 @@ export default function POSPage() {
                             {full.is_member ? "Membership expired" : "Not a member"}
                           </span>
                         )}
-                        <button type="button" onClick={() => setShowMembershipModal(true)}
-                          style={{ padding: "4px 10px", borderRadius: 6, background: "rgba(var(--accent-rgb),0.1)", border: "1px solid rgba(var(--accent-rgb),0.35)", color: "var(--accent)", fontSize: 10, fontWeight: 800, letterSpacing: 1, textTransform: "uppercase", cursor: "pointer" }}>
-                          {active ? "Renew" : "+ Become Member"}
-                        </button>
+                        {cartTier ? (
+                          <div style={{ display: "inline-flex", alignItems: "center", gap: 0, borderRadius: 6, overflow: "hidden", border: "1px solid rgba(74,222,128,0.4)" }}>
+                            <span style={{ padding: "4px 10px", background: "rgba(74,222,128,0.12)", color: "var(--green)", fontSize: 10, fontWeight: 800, letterSpacing: 1, textTransform: "uppercase" }}>
+                              ✓ Member Selected{cartTierLabel ? ` · ${cartTierLabel}` : ""}
+                            </span>
+                            <button type="button" onClick={removeMembershipFromCart}
+                              title="Remove membership from this bill"
+                              style={{ padding: "4px 8px", background: "rgba(74,222,128,0.08)", border: "none", borderLeft: "1px solid rgba(74,222,128,0.3)", color: "var(--green)", fontSize: 11, fontWeight: 900, cursor: "pointer", lineHeight: 1 }}>✕</button>
+                          </div>
+                        ) : (
+                          <button type="button" onClick={() => setShowMembershipModal(true)}
+                            style={{ padding: "4px 10px", borderRadius: 6, background: "rgba(var(--accent-rgb),0.1)", border: "1px solid rgba(var(--accent-rgb),0.35)", color: "var(--accent)", fontSize: 10, fontWeight: 800, letterSpacing: 1, textTransform: "uppercase", cursor: "pointer" }}>
+                            {active ? "Renew" : "+ Become Member"}
+                          </button>
+                        )}
                       </div>
                     );
                   })()}
@@ -2391,8 +2439,9 @@ export default function POSPage() {
                  <span style={{ color: "var(--text)" }}>{INR(totalBilling + totalMatSale)}</span>
               </div>
 
-              {/* Member discount row — only shown for customers with an active membership */}
-              {selectedCustomer && isActiveMember(selectedCustomer, selDate) && (
+              {/* Member discount row — shown when customer is already a member
+                   OR a membership tier is in the cart for this bill. */}
+              {selectedCustomer && effectiveMember && (
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "8px 10px", borderRadius: 10, background: "rgba(var(--accent-rgb),0.06)", border: "1px solid rgba(var(--accent-rgb),0.25)" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
                     <span style={{ fontSize: 10, fontWeight: 800, color: "var(--accent)", textTransform: "uppercase", letterSpacing: 1 }}>Discount</span>
@@ -2821,6 +2870,40 @@ export default function POSPage() {
               <textarea rows={2} value={customerForm.notes} onChange={e => setCustomerForm({ ...customerForm, notes: e.target.value })}
                 placeholder="Preferences, allergies, etc."
                 style={{ padding: "12px 14px", borderRadius: 10, background: "var(--bg3)", border: "1px solid var(--border2)", color: "var(--text)", fontSize: 14, outline: "none", resize: "vertical" }} />
+            </div>
+
+            {/* Optional: start the customer as a member right at registration */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: 12, background: "rgba(var(--accent-rgb),0.05)", border: "1px solid rgba(var(--accent-rgb),0.2)", borderRadius: 10 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                <div>
+                  <div style={{ fontSize: 11, color: "var(--accent)", fontWeight: 800, textTransform: "uppercase", letterSpacing: 1 }}>Start as Member (optional)</div>
+                  <div style={{ fontSize: 10, color: "var(--text3)", marginTop: 2 }}>Tier price is added to the current bill.</div>
+                </div>
+                {customerForm.membership_tier && (
+                  <button type="button" onClick={() => setCustomerForm({ ...customerForm, membership_tier: "" })}
+                    style={{ background: "rgba(74,222,128,0.08)", border: "1px solid rgba(74,222,128,0.3)", color: "var(--green)", borderRadius: 6, padding: "2px 8px", fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: 1, cursor: "pointer" }}>
+                    ✕ Clear
+                  </button>
+                )}
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))", gap: 6 }}>
+                {MEMBERSHIP_TIERS.map(t => {
+                  const picked = customerForm.membership_tier === t.key;
+                  return (
+                    <button key={t.key} type="button"
+                      onClick={() => setCustomerForm({ ...customerForm, membership_tier: picked ? "" : t.key })}
+                      style={{
+                        padding: "8px 10px", textAlign: "left",
+                        background: picked ? "rgba(74,222,128,0.12)" : "var(--bg3)",
+                        border: `1px solid ${picked ? "rgba(74,222,128,0.4)" : "var(--border2)"}`,
+                        borderRadius: 8, cursor: "pointer", transition: "all .15s",
+                      }}>
+                      <div style={{ fontSize: 11, fontWeight: 800, color: picked ? "var(--green)" : "var(--text)" }}>{t.label}</div>
+                      <div style={{ fontSize: 11, fontWeight: 900, color: picked ? "var(--green)" : "var(--accent)", marginTop: 2 }}>{INR(t.price)}</div>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
             <div style={{ display: "flex", gap: 10, marginTop: 6 }}>
