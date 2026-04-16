@@ -91,13 +91,13 @@
   --gold3: var(--color-gold3-light);
   --gold-dim: rgba(2, 132, 199, 0.1);
 
-  --border: rgba(0, 0, 0, 0.08);
-  --border2: rgba(0, 0, 0, 0.12);
-  --input-border: rgba(0, 0, 0, 0.2);
+  --border: rgba(15, 23, 42, 0.10);
+  --border2: rgba(15, 23, 42, 0.16);
+  --input-border: rgba(15, 23, 42, 0.22);
 
-  --text: #0f172a;
-  --text2: #1e293b;
-  --text3: #475569;
+  --text: #0f172a;      /* near-black for primary copy */
+  --text2: #1e293b;     /* darker secondary — sidebar labels, row text */
+  --text3: #334155;     /* tertiary — was #475569; bumped darker for better contrast */
   --text-inv: #ffffff;
 
   --red: #dc2626;
@@ -113,6 +113,24 @@
   --glass: rgba(255, 255, 255, 0.85);
   --card-shadow: 0 4px 15px rgba(0, 0, 0, 0.06);
   --scrollbar-thumb: rgba(0, 0, 0, 0.2);
+}
+
+/* ─── Light-mode polish ─── */
+.light-mode aside {
+  /* Give the sidebar visible separation from the main content */
+  box-shadow: 1px 0 0 rgba(15, 23, 42, 0.06), 4px 0 18px rgba(15, 23, 42, 0.05) !important;
+}
+.light-mode .vcut-sidebar-item:hover[data-active="false"] {
+  background: rgba(15, 23, 42, 0.04) !important;
+  color: var(--text) !important;
+}
+.light-mode .vcut-sidebar-item[data-active="true"] {
+  background: rgba(var(--accent-rgb), 0.12) !important;
+}
+/* Dark-mode gets a subtle hover too, matching the sidebar label fix */
+.vcut-sidebar-item:hover[data-active="false"] {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
 }
 
 body {

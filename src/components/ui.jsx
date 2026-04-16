@@ -521,17 +521,19 @@ export const SidebarItem = memo(function SidebarItem({ id, icon, label, isActive
   const handleFocus = useCallback(() => onFocus?.(id), [onFocus, id]);
   return (
     <button onClick={handleClick} onMouseEnter={handleEnter} onFocus={handleFocus}
+      className="vcut-sidebar-item"
+      data-active={isActive ? "true" : "false"}
       style={{
         width: "100%", display: "flex", alignItems: "center", gap: 14, padding: "12px 20px", border: "none",
-        background: isActive ? "rgba(var(--accent-rgb), 0.06)" : "transparent",
-        color: isActive ? "var(--text)" : "var(--text3)", cursor: "pointer", transition: "all 0.2s",
+        background: isActive ? "rgba(var(--accent-rgb), 0.10)" : "transparent",
+        color: isActive ? "var(--text)" : "var(--text2)", cursor: "pointer", transition: "all 0.2s",
         position: "relative", textAlign: "left", borderRadius: 10, margin: "1px 0",
       }}>
       {isActive && <div style={{ position: "absolute", left: 0, top: "25%", bottom: "25%", width: 3, background: "var(--accent)", borderRadius: "0 3px 3px 0" }} />}
-      <div style={{ color: isActive ? "var(--accent)" : "var(--text3)", transition: "all 0.2s" }}>
+      <div style={{ color: isActive ? "var(--accent)" : "var(--text2)", transition: "all 0.2s", opacity: isActive ? 1 : 0.85 }}>
         <Icon name={icon} size={18} />
       </div>
-      <span style={{ fontSize: 13, fontWeight: isActive ? 700 : 500, letterSpacing: "0.3px", textTransform: "uppercase", opacity: isActive ? 1 : 0.6, fontFamily: "var(--font-body, var(--font-outfit))" }}>
+      <span style={{ fontSize: 13, fontWeight: isActive ? 800 : 600, letterSpacing: "0.3px", textTransform: "uppercase", fontFamily: "var(--font-body, var(--font-outfit))" }}>
         {label}
       </span>
       {neon && <div style={{ marginLeft: "auto", width: 6, height: 6, borderRadius: "50%", background: "var(--accent)" }} />}
