@@ -2114,47 +2114,71 @@ export default function POSPage() {
               ) : cart.map((item) => {
                 const loan = isLoanStaff(item.staffId);
                 const loanHomeName = loan ? (branchesById.get(item.home_branch_id)?.name || "").replace("V-CUT ", "") : "";
+                const hasStaff = !!item.staffId;
                 return (
                 <div key={item.cartId}
                   style={{
                     background: loan
                       ? "linear-gradient(135deg, rgba(251,146,60,0.08), rgba(251,146,60,0.02))"
                       : "linear-gradient(135deg, var(--bg3), var(--bg4))",
-                    borderRadius: 14, padding: "10px 12px",
-                    border: `1px solid ${loan ? "rgba(251,146,60,0.35)" : "var(--border2)"}`,
-                    display: "flex", flexDirection: "column", gap: 8,
-                    position: "relative", overflow: "hidden",
+                    borderRadius: 14, padding: "12px",
+                    border: `1px solid ${!hasStaff ? "rgba(248,113,113,0.40)" : loan ? "rgba(251,146,60,0.35)" : "rgba(var(--accent-rgb),0.25)"}`,
+                    display: "flex", flexDirection: "column", gap: 10,
+                    position: "relative",
                     animation: "pos-card-in .22s ease-out",
+                    flexShrink: 0,
                   }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        <div style={{ fontSize: 12, fontWeight: 800, color: "var(--text)", lineHeight: 1.2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.name}</div>
+                  {/* Row 1 — name + price + delete */}
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8, flexShrink: 0 }}>
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                        <div style={{ fontSize: 13, fontWeight: 800, color: "var(--text)", lineHeight: 1.2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "100%" }}>{item.name}</div>
                         {loan && (
                           <span style={{ padding: "1px 6px", borderRadius: 6, background: "rgba(251,146,60,0.15)", border: "1px solid rgba(251,146,60,0.4)", color: "var(--orange)", fontSize: 9, fontWeight: 800, letterSpacing: 1, textTransform: "uppercase" }}>
                             LOAN
                           </span>
                         )}
                       </div>
-                      <div style={{ fontSize: 14, fontWeight: 900, color: "var(--accent)", marginTop: 2 }}>{INR(item.price)}</div>
+                      <div style={{ fontSize: 15, fontWeight: 900, color: "var(--accent)", marginTop: 2 }}>{INR(item.price)}</div>
                       {loan && loanHomeName && (
                         <div style={{ fontSize: 10, color: "var(--orange)", fontWeight: 700, marginTop: 2 }}>Home: {loanHomeName}</div>
                       )}
                     </div>
-                    <button onClick={() => removeFromCart(item)} style={{ background: "transparent", border: "none", color: "var(--red)", opacity: 0.7, cursor: "pointer", padding: 0 }} title="Remove">
+                    <button onClick={() => removeFromCart(item)}
+                      style={{ background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.25)", borderRadius: 8, color: "var(--red)", cursor: "pointer", padding: "6px 8px", display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}
+                      title="Remove">
                       <Icon name="del" size={14} />
                     </button>
                   </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <div style={{ fontSize: 10, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1 }}>Staff</div>
+
+                  {/* Row 2 — stylist selector (always rendered, always tappable) */}
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0, minHeight: 42 }}>
+                    <span style={{
+                      fontSize: 9, fontWeight: 800, color: hasStaff ? "var(--accent)" : "var(--red)",
+                      textTransform: "uppercase", letterSpacing: 1,
+                      padding: "4px 8px", borderRadius: 6,
+                      background: hasStaff ? "rgba(var(--accent-rgb),0.1)" : "rgba(248,113,113,0.1)",
+                      border: `1px solid ${hasStaff ? "rgba(var(--accent-rgb),0.25)" : "rgba(248,113,113,0.25)"}`,
+                      flexShrink: 0,
+                    }}>
+                      {hasStaff ? "Stylist" : "Pick"}
+                    </span>
                     <select
                       value={item.staffId}
                       onChange={e => updateCartStaff(item.cartId, e.target.value)}
                       style={{
-                        flex: 1, background: "var(--bg2)", border: `1px solid ${item.staffId ? "rgba(var(--accent-rgb),0.35)" : "var(--border2)"}`, borderRadius: 8,
-                        padding: "8px 10px", color: item.staffId ? "var(--accent)" : "var(--text3)", fontSize: 12, fontWeight: 700, outline: "none", cursor: "pointer", minHeight: 36
+                        flex: 1, minWidth: 0,
+                        background: "var(--bg2)",
+                        border: `1px solid ${hasStaff ? "rgba(var(--accent-rgb),0.35)" : "rgba(248,113,113,0.35)"}`,
+                        borderRadius: 8,
+                        padding: "10px 12px",
+                        color: hasStaff ? "var(--accent)" : "var(--text3)",
+                        fontSize: 13, fontWeight: 700,
+                        outline: "none", cursor: "pointer",
+                        height: 42, boxSizing: "border-box",
+                        WebkitAppearance: "menulist", appearance: "menulist",
                       }}>
-                      <option value="">Select stylist…</option>
+                      <option value="">— Select stylist —</option>
                       <optgroup label="This branch">
                         {branchStaff.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                       </optgroup>
@@ -2165,7 +2189,6 @@ export default function POSPage() {
                       ))}
                     </select>
                   </div>
-                  <div style={{ position: "absolute", bottom: -20, right: -20, width: 60, height: 60, background: loan ? "var(--orange)" : "var(--accent)", filter: "blur(30px)", opacity: 0.06 }} />
                 </div>
               );
               })}
