@@ -14,6 +14,72 @@ const loadExcelJS = () => {
   return _excelJSPromise;
 };
 
+// ── PDF text extraction ──
+const linesFromPDF = async (file) => {
+  const pdfjsLib = await import("pdfjs-dist");
+  pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
+  const buffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
+  const lines = [];
+  for (let p = 1; p <= pdf.numPages; p++) {
+    const page = await pdf.getPage(p);
+    const content = await page.getTextContent();
+    const rowsByY = {};
+    content.items.forEach(it => {
+      const y = Math.round(it.transform[5]);
+      if (!rowsByY[y]) rowsByY[y] = [];
+      rowsByY[y].push({ x: it.transform[4], str: it.str });
+    });
+    Object.keys(rowsByY).sort((a, b) => Number(b) - Number(a)).forEach(y => {
+      const row = rowsByY[y].sort((a, b) => a.x - b.x).map(i => i.str).filter(s => s && s.trim()).join(" | ");
+      if (row) lines.push(row);
+    });
+  }
+  return lines;
+};
+
+// ── Image pre-processing for OCR ──
+const preprocessImage = async (file) => {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const longEdge = Math.max(img.width, img.height);
+      const scale = longEdge < 2400 ? Math.min(3, 2400 / longEdge) : 1;
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(img.width * scale);
+      canvas.height = Math.round(img.height * scale);
+      const ctx = canvas.getContext("2d");
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = "high";
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      try {
+        const id = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const d = id.data;
+        const histo = new Array(256).fill(0);
+        for (let i = 0; i < d.length; i += 4) {
+          const gray = (0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]) | 0;
+          histo[gray]++;
+        }
+        const total = canvas.width * canvas.height;
+        let cum = 0, lo = 0, hi = 255;
+        for (let g = 0; g < 256; g++) { cum += histo[g]; if (cum >= total * 0.02) { lo = g; break; } }
+        cum = 0;
+        for (let g = 255; g >= 0; g--) { cum += histo[g]; if (cum >= total * 0.02) { hi = g; break; } }
+        const range = Math.max(1, hi - lo);
+        for (let i = 0; i < d.length; i += 4) {
+          const gray = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+          const v = Math.max(0, Math.min(255, ((gray - lo) / range) * 255));
+          d[i] = d[i + 1] = d[i + 2] = v;
+        }
+        ctx.putImageData(id, 0, 0);
+      } catch { /* ignore */ }
+      canvas.toBlob(b => resolve(b || file), "image/png");
+    };
+    img.onerror = () => resolve(file);
+    img.src = URL.createObjectURL(file);
+  });
+};
+
 const MATERIAL_GROUPS = [
   "SHAMPOO", "HAIR SPA", "HAIR COLOUR", "WAX", "HAIR ITEAM", "FACIAL",
   "USE AND THROW", "TOOLS", "SHAVING ITEAM", "OTHERS", "MACHIN", "M&P",
@@ -60,6 +126,8 @@ export default function MaterialMasterPage() {
 
   const currentUser = useCurrentUser() || {};
   const [ioBusy, setIoBusy] = useState(false);
+  const [parsing, setParsing] = useState(false);
+  const [ocrProgress, setOcrProgress] = useState(0);
   const [uploadPreview, setUploadPreview] = useState(null); // { items: [{ name, unit, group, gst_pct, price_inc_gst, qty, existing }] }
 
   // ── Download Excel Template ─────────────────────────────────────────
@@ -175,11 +243,15 @@ export default function MaterialMasterPage() {
     }
   };
 
-  // ── Upload filled Excel → preview modal ─────────────────────────────
+  // ── Upload filled Excel / PDF / Image → preview modal ───────────────
   const handleUploadMaster = async (ev) => {
     const file = ev.target.files?.[0];
     ev.target.value = "";
     if (!file) return;
+    const isExcel = /\.(xlsx|xls)$/i.test(file.name) ||
+      file.type === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
+      file.type === "application/vnd.ms-excel";
+    if (!isExcel) { parseMasterInvoice(file); return; }
     setIoBusy(true);
     try {
       const ExcelJS = await loadExcelJS();
@@ -333,6 +405,206 @@ export default function MaterialMasterPage() {
       confirm({ title: "Save Error", message: err.message, confirmText: "OK", cancelText: "Close", type: "danger", onConfirm: () => {} });
     } finally {
       setIoBusy(false);
+    }
+  };
+
+  // ── OCR text extraction from image ──
+  const linesFromImage = async (file) => {
+    const Tesseract = (await import("tesseract.js")).default;
+    setOcrProgress(0);
+    const preprocessed = await preprocessImage(file);
+    const { data } = await Tesseract.recognize(preprocessed, "eng", {
+      logger: m => { if (m.status === "recognizing text") setOcrProgress(Math.round((m.progress || 0) * 100)); },
+      tessedit_pageseg_mode: 6,
+      preserve_interword_spaces: "1",
+    });
+    setOcrProgress(100);
+    const words = data?.words || [];
+    if (words.length > 0) {
+      const sorted = [...words].sort((a, b) => a.bbox.y0 - b.bbox.y0);
+      const heights = sorted.map(w => w.bbox.y1 - w.bbox.y0).sort((a, b) => a - b);
+      const medianHeight = heights[Math.floor(heights.length / 2)] || 12;
+      const tol = Math.max(6, medianHeight * 0.5);
+      const groups = [];
+      sorted.forEach(w => {
+        const y = (w.bbox.y0 + w.bbox.y1) / 2;
+        const g = groups.find(gg => Math.abs(gg.y - y) <= tol);
+        if (g) { g.words.push(w); g.y = (g.y * g.words.length + y) / (g.words.length + 1); }
+        else groups.push({ y, words: [w] });
+      });
+      const lines = groups.map(g => {
+        const sortedByX = g.words.sort((a, b) => a.bbox.x0 - b.bbox.x0);
+        let out = sortedByX[0].text;
+        for (let i = 1; i < sortedByX.length; i++) {
+          const gap = sortedByX[i].bbox.x0 - sortedByX[i - 1].bbox.x1;
+          out += (gap > 18 ? " | " : " ") + sortedByX[i].text;
+        }
+        return out.trim();
+      }).filter(Boolean);
+      if (lines.length > 0) return lines;
+    }
+    return (data.text || "").split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  };
+
+  // ── Parse PDF/Image invoice → master upload preview ──
+  const parseMasterInvoice = async (file) => {
+    setParsing(true);
+    try {
+      const isPDF = file.type === "application/pdf" || /\.pdf$/i.test(file.name);
+      const lines = isPDF ? await linesFromPDF(file) : await linesFromImage(file);
+
+      const toNum = (s) => Number(String(s).replace(/[,\s₹]/g, ""));
+      const HSN_RX = /^\d{4,8}$/;
+
+      // Build per-HSN GST map from tax summary
+      const hsnGstMap = {};
+      lines.forEach(raw => {
+        const parts = raw.replace(/\|/g, " ").split(/\s+/).map(x => x.trim()).filter(Boolean);
+        if (parts.length < 4) return;
+        if (!HSN_RX.test(parts[0])) return;
+        const pctMatch = parts.find(p => /^\d+(?:\.\d+)?\s*%$/.test(p));
+        if (pctMatch) hsnGstMap[parts[0]] = toNum(pctMatch.replace("%", "")) * 2;
+      });
+
+      // Detect overall GST from CGST/SGST totals
+      let overallGstPct = null;
+      if (Object.keys(hsnGstMap).length === 0) {
+        let cgst = 0, sgst = 0, subtotal = 0;
+        lines.forEach(raw => {
+          const flat = raw.replace(/\|/g, " ");
+          const cgstM = flat.match(/CGST[^0-9]*([\d,]+\.\d{2})/i);
+          const sgstM = flat.match(/SGST[^0-9]*([\d,]+\.\d{2})/i);
+          const subM = flat.match(/(?:Sub[\s-]?Total|Taxable(?:\s+Value)?)[^0-9]*([\d,]+\.\d{2})/i);
+          if (cgstM) cgst = toNum(cgstM[1]);
+          if (sgstM) sgst = toNum(sgstM[1]);
+          if (subM) subtotal = toNum(subM[1]);
+        });
+        if (subtotal > 0 && (cgst + sgst) > 0) {
+          overallGstPct = +(((cgst + sgst) / subtotal) * 100).toFixed(2);
+          [5, 12, 18, 28].forEach(s => { if (Math.abs(overallGstPct - s) < 1.5) overallGstPct = s; });
+        }
+      }
+
+      const isHeaderLine = (s) => /description/i.test(s) && /(hsn|sac|quantity|qty|rate|amount)/i.test(s);
+      const isEndLine = (s) => /^(\s*)?(c\s*gst|s\s*gst|i\s*gst|cs?gt|sgt|round\s*off|total|grand\s*total|sub[\s-]?total|amount\s+chargeable|tax\s+amount|taxable\s+value|less\s*:?|declaration|e\s*&\s*o\s*e|company['\u2019]s|bank|authorised|subject\s+to)\b/i.test(s);
+
+      let startIdx = lines.findIndex(l => isHeaderLine(l.replace(/\|/g, " ")));
+      if (startIdx < 0) startIdx = lines.findIndex(l => /^\s*\d+\.?\s+[A-Za-z]/.test(l.replace(/\|/g, " ")));
+      if (startIdx < 0) startIdx = 0;
+      let endIdx = lines.length;
+      for (let i = startIdx + 1; i < lines.length; i++) {
+        const flat = lines[i].replace(/\|/g, " ").replace(/\s+/g, " ").trim();
+        if (isEndLine(flat)) { endIdx = i; break; }
+      }
+      const itemLines = lines.slice(startIdx + 1, endIdx);
+
+      const UNIT = "(?:p[ce]s?|n[eo]s?|units?|kgs?|ltrs?|ml|box|pkt|pack|pair|set|btls?|bottles?)";
+      const rowRx = [
+        new RegExp(`^\\s*(\\d+)\\s+(.+?)\\s+(\\d{4,10})\\s+(\\d+(?:\\.\\d+)?)\\s+(${UNIT})\\s+([\\d,]+(?:\\.\\d+)?)\\s+([\\d,]+(?:\\.\\d+)?)\\s+(?:${UNIT})?\\s*([\\d,]+(?:\\.\\d+)?)\\s*$`, "i"),
+        new RegExp(`^\\s*(\\d+)\\s+(.+?)\\s+(\\d{4,10})\\s+(\\d+(?:\\.\\d+)?)\\s+(${UNIT})\\s+([\\d,]+(?:\\.\\d+)?)\\s+(?:${UNIT})?\\s*([\\d,]+(?:\\.\\d+)?)\\s*$`, "i"),
+        new RegExp(`^\\s*(\\d+)\\s+(.+?)\\s+(\\d+(?:\\.\\d+)?)\\s+(${UNIT})\\s+([\\d,]+(?:\\.\\d+)?)\\s+([\\d,]+(?:\\.\\d+)?)\\s+(?:${UNIT})?\\s*([\\d,]+(?:\\.\\d+)?)\\s*$`, "i"),
+        new RegExp(`^\\s*(\\d+)\\s+(.+?)\\s+(\\d+(?:\\.\\d+)?)\\s+(${UNIT})\\s+([\\d,]+(?:\\.\\d+)?)\\s+(?:${UNIT})?\\s*([\\d,]+(?:\\.\\d+)?)\\s*$`, "i"),
+      ];
+
+      const items = [];
+      const scanLines = (linesArr) => {
+        linesArr.forEach(raw => {
+          const flat = raw.replace(/\|/g, " ").replace(/\s+/g, " ").trim();
+          if (flat.length < 8) return;
+          if (isHeaderLine(flat) || isEndLine(flat)) return;
+          if (/^(sl\s*no|s\.?\s*no|#|description|hsn|sac|qty|quantity|rate|per|amount)\b/i.test(flat)) return;
+
+          let parsed = null;
+          for (const rx of rowRx) {
+            const m = flat.match(rx);
+            if (!m) continue;
+            if (m.length === 9) {
+              parsed = { name: m[2].trim(), hsn: m[3], qty: Number(m[4]), unit: m[5].toLowerCase(), rate_incl: toNum(m[6]), rate_excl: toNum(m[7]), amount: toNum(m[8]) };
+            } else if (m.length === 8) {
+              parsed = { name: m[2].trim(), hsn: m[3], qty: Number(m[4]), unit: m[5].toLowerCase(), rate_excl: toNum(m[6]), amount: toNum(m[7]) };
+            }
+            if (parsed) break;
+          }
+
+          if (!parsed) {
+            if (/^(sl|s\.?\s*no|#|description|hsn|sac|rate|qty|quantity|per|amount|total|the\s+beauty|lucky\s+store|tax\s+invoice|company|bank|state|gstin|buyer|dispatch|consignee|signatory)\b/i.test(flat)) return;
+            let looseM = flat.match(/^(.+?)\s+(\d+(?:\.\d+)?)\s+(pcs?|nos?|units?|kgs?|ltrs?|ml|box|pkt|pack|pair|set|btls?|bottles?)\s+.*?([\d,]+(?:\.\d+)?)\s*$/i);
+            if (looseM) {
+              const hsnInLine = flat.match(/\b(\d{4,8})\b/);
+              parsed = { name: looseM[1].replace(/^\d+\.?\s+/, "").trim(), hsn: hsnInLine ? hsnInLine[1] : "", qty: Number(looseM[2]) || 1, unit: looseM[3].toLowerCase(), amount: toNum(looseM[4]) };
+            } else {
+              const nums = flat.match(/(\d+(?:,\d+)*(?:\.\d+)?)/g);
+              if (!nums || nums.length < 2) return;
+              const lastPrice = toNum(nums[nums.length - 1]);
+              const qtyGuess = Number(nums[0]) || 1;
+              if (!(lastPrice > 0) || lastPrice < 5) return;
+              const firstNumIdx = flat.search(/\d/);
+              const namePart = flat.slice(0, firstNumIdx).replace(/^\d+\.?\s+/, "").trim();
+              if (namePart.length < 3) return;
+              parsed = { name: namePart, hsn: (flat.match(/\b(\d{4,8})\b/) || [])[1] || "", qty: qtyGuess > 0 && qtyGuess < 1000 ? qtyGuess : 1, unit: "pcs", amount: lastPrice };
+            }
+            if (!parsed || !parsed.name || parsed.name.length < 2) return;
+            if (!(parsed.amount > 0)) return;
+          }
+
+          if (!parsed.name || parsed.name.length < 2) return;
+          if (!(parsed.amount > 0)) return;
+
+          let gstPct = hsnGstMap[parsed.hsn];
+          if (gstPct == null) gstPct = overallGstPct;
+          if (gstPct == null) gstPct = 18;
+
+          let priceInc;
+          if (parsed.rate_incl != null) {
+            priceInc = parsed.rate_incl;
+          } else {
+            const perUnitExcl = parsed.qty > 0 ? parsed.amount / parsed.qty : (parsed.rate_excl || 0);
+            priceInc = +(perUnitExcl * (1 + gstPct / 100)).toFixed(2);
+          }
+          const basePrice = +(priceInc / (1 + gstPct / 100)).toFixed(2);
+
+          items.push({
+            name: parsed.name.replace(/\s+/g, " ").trim(),
+            qty: parsed.qty, unit: parsed.unit,
+            price_inc_gst: priceInc, gst_pct: gstPct, base_price: basePrice,
+            group: "", // PDF/Image can't reliably detect group
+          });
+        });
+      };
+
+      scanLines(itemLines);
+      if (items.length === 0) scanLines(lines);
+
+      // Dedup by name
+      const byName = new Map();
+      items.forEach(i => byName.set(i.name.toLowerCase(), i));
+      const unique = Array.from(byName.values());
+
+      const enriched = unique.map(i => {
+        const existing = materials.find(m => m.name?.toLowerCase() === i.name.toLowerCase()) || null;
+        return {
+          ...i,
+          existing: existing ? { id: existing.id, old_price: existing.current_price || 0 } : null,
+          include: true,
+        };
+      });
+
+      if (enriched.length === 0) {
+        setUploadPreview({
+          fileName: file.name, rawLines: lines.slice(0, 120), manual: true,
+          items: [{ name: "", unit: "pcs", group: "", gst_pct: 18, price_inc_gst: 0, base_price: 0, qty: 1, existing: null, include: true }],
+        });
+        toast({ title: "Auto-detect failed", message: "Add rows manually — raw text from the invoice is shown for reference.", type: "warning" });
+        return;
+      }
+
+      setUploadPreview({ fileName: file.name, items: enriched, rawLines: lines.slice(0, 120) });
+    } catch (err) {
+      console.error("Invoice parse error:", err);
+      confirm({ title: "Parse Error", message: err.message || "Failed to read invoice.", confirmText: "OK", cancelText: "Close", type: "danger", onConfirm: () => {} });
+    } finally {
+      setParsing(false);
+      setOcrProgress(0);
     }
   };
 
@@ -744,10 +1016,10 @@ export default function MaterialMasterPage() {
             style={{ padding: "10px 14px", borderRadius: 10, background: "var(--bg3)", color: "var(--orange)", border: "1px solid rgba(72,72,71,0.15)", cursor: ioBusy ? "wait" : "pointer", fontWeight: 800, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, display: "inline-flex", alignItems: "center", gap: 6, opacity: ioBusy ? 0.6 : 1 }}>
             <Icon name="save" size={12} /> Template
           </button>
-          <label title="Upload a filled Excel to bulk add/update materials"
-            style={{ padding: "10px 14px", borderRadius: 10, background: "var(--bg3)", color: "var(--accent)", border: "1px solid rgba(72,72,71,0.15)", cursor: ioBusy ? "wait" : "pointer", fontWeight: 800, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, display: "inline-flex", alignItems: "center", gap: 6, opacity: ioBusy ? 0.6 : 1 }}>
-            <Icon name="plus" size={12} /> Upload
-            <input type="file" accept=".xlsx,.xls" onChange={handleUploadMaster} disabled={ioBusy} style={{ display: "none" }} />
+          <label title="Upload Excel, PDF, or Image to bulk add/update materials"
+            style={{ padding: "10px 14px", borderRadius: 10, background: "linear-gradient(135deg,var(--accent),var(--gold2))", color: "#000", border: "1px solid rgba(72,72,71,0.15)", cursor: (ioBusy || parsing) ? "wait" : "pointer", fontWeight: 800, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, display: "inline-flex", alignItems: "center", gap: 6, opacity: (ioBusy || parsing) ? 0.6 : 1 }}>
+            <Icon name="plus" size={12} /> {parsing ? (ocrProgress > 0 && ocrProgress < 100 ? `Scanning ${ocrProgress}%` : "Reading…") : "Upload"}
+            <input type="file" accept=".xlsx,.xls,application/pdf,image/*" onChange={handleUploadMaster} disabled={ioBusy || parsing} style={{ display: "none" }} />
           </label>
           <button onClick={exportMaster} disabled={ioBusy || materials.length === 0} title="Export the full master catalog to Excel"
             style={{ padding: "10px 14px", borderRadius: 10, background: "var(--bg3)", color: "var(--green)", border: "1px solid rgba(72,72,71,0.15)", cursor: (ioBusy || materials.length === 0) ? "not-allowed" : "pointer", fontWeight: 800, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, display: "inline-flex", alignItems: "center", gap: 6, opacity: (ioBusy || materials.length === 0) ? 0.6 : 1 }}>
@@ -1374,9 +1646,19 @@ export default function MaterialMasterPage() {
           return (
             <div>
               <div style={{ fontSize: 12, color: "var(--text3)", marginBottom: 10 }}>
-                Review the {uploadPreview.items.length} rows from <strong>{uploadPreview.fileName}</strong>. Uncheck any row to skip. Existing materials get price-history logs when the price changes.
+                {uploadPreview.manual
+                  ? <>Auto-detection found no rows. Add materials manually below — raw text from the file is shown for reference.</>
+                  : <>Review the {uploadPreview.items.length} rows from <strong>{uploadPreview.fileName}</strong>. Uncheck any row to skip. Existing materials get price-history logs when the price changes.</>}
                 {uploadPreview.skippedSheets?.length > 0 && <div style={{ marginTop: 4, fontSize: 11 }}>Ignored sheets: <strong>{uploadPreview.skippedSheets.join(", ")}</strong></div>}
               </div>
+              {uploadPreview.rawLines?.length > 0 && (
+                <details style={{ marginBottom: 12, fontSize: 11, color: "var(--text3)" }}>
+                  <summary style={{ cursor: "pointer", fontWeight: 700 }}>Raw extracted text ({uploadPreview.rawLines.length} lines)</summary>
+                  <pre style={{ maxHeight: 160, overflowY: "auto", background: "var(--bg2)", padding: 10, borderRadius: 8, marginTop: 6, whiteSpace: "pre-wrap", wordBreak: "break-all", fontSize: 10, lineHeight: 1.5 }}>
+                    {uploadPreview.rawLines.join("\n")}
+                  </pre>
+                </details>
+              )}
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(140px,1fr))", gap: 8, marginBottom: 12 }}>
                 {[
                   ["To Import", included.length, "var(--accent)"],
@@ -1434,13 +1716,19 @@ export default function MaterialMasterPage() {
                   </tbody>
                 </table>
               </div>
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 16 }}>
-                <button onClick={() => setUploadPreview(null)} disabled={ioBusy}
-                  style={{ padding: "10px 18px", borderRadius: 10, background: "var(--bg4)", color: "var(--text2)", border: "1px solid var(--border2)", fontWeight: 600, fontSize: 12, cursor: ioBusy ? "wait" : "pointer" }}>Cancel</button>
-                <button onClick={commitMasterUpload} disabled={ioBusy || included.length === 0}
-                  style={{ padding: "10px 20px", borderRadius: 10, background: "linear-gradient(135deg,var(--accent),var(--gold2))", color: "#000", border: "none", fontWeight: 800, fontSize: 12, cursor: (ioBusy || included.length === 0) ? "not-allowed" : "pointer", opacity: (ioBusy || included.length === 0) ? 0.5 : 1, display: "inline-flex", alignItems: "center", gap: 6 }}>
-                  <Icon name="save" size={13} /> {ioBusy ? "Saving…" : `Import ${included.length} Row${included.length === 1 ? "" : "s"}`}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 16 }}>
+                <button onClick={() => setUploadPreview(p => ({ ...p, items: [...p.items, { name: "", unit: "pcs", group: "", gst_pct: 18, price_inc_gst: 0, base_price: 0, qty: 1, existing: null, include: true }] }))}
+                  style={{ padding: "8px 14px", borderRadius: 8, background: "var(--bg3)", color: "var(--accent)", border: "1px solid var(--border2)", fontWeight: 700, fontSize: 11, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 5 }}>
+                  <Icon name="plus" size={11} /> Add Row
                 </button>
+                <div style={{ display: "flex", gap: 10 }}>
+                  <button onClick={() => setUploadPreview(null)} disabled={ioBusy}
+                    style={{ padding: "10px 18px", borderRadius: 10, background: "var(--bg4)", color: "var(--text2)", border: "1px solid var(--border2)", fontWeight: 600, fontSize: 12, cursor: ioBusy ? "wait" : "pointer" }}>Cancel</button>
+                  <button onClick={commitMasterUpload} disabled={ioBusy || included.length === 0}
+                    style={{ padding: "10px 20px", borderRadius: 10, background: "linear-gradient(135deg,var(--accent),var(--gold2))", color: "#000", border: "none", fontWeight: 800, fontSize: 12, cursor: (ioBusy || included.length === 0) ? "not-allowed" : "pointer", opacity: (ioBusy || included.length === 0) ? 0.5 : 1, display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    <Icon name="save" size={13} /> {ioBusy ? "Saving…" : `Import ${included.length} Row${included.length === 1 ? "" : "s"}`}
+                  </button>
+                </div>
               </div>
             </div>
           );

@@ -3562,7 +3562,7 @@ export default function POSPage() {
                       <div style={{ fontSize: 10, color: "var(--text3)", marginTop: 2, fontStyle: "italic" }}>Anonymous visitor</div>
                     )}
                   </div>
-                  <button onClick={() => setBookingModal({ ...bookingModal, customer: null, customerSearch: "" })}
+                  <button onClick={() => setBookingModal(prev => ({ ...prev, customer: null, customerSearch: "" }))}
                     style={{ background: "transparent", border: "none", color: "var(--text3)", cursor: "pointer", fontSize: 16 }}>✕</button>
                 </div>
               ) : (
@@ -3570,13 +3570,13 @@ export default function POSPage() {
                   <input type="text"
                     value={bookingModal.customerSearch || ""}
                     placeholder="Name or phone — search existing…"
-                    onChange={e => setBookingModal({ ...bookingModal, customerSearch: e.target.value })}
+                    onChange={e => { const v = e.target.value; setBookingModal(prev => ({ ...prev, customerSearch: v })); }}
                     style={{ width: "100%", padding: "10px 12px", background: "var(--bg3)", border: "1px solid var(--border2)", borderRadius: 8, color: "var(--text)", fontSize: 13, outline: "none", boxSizing: "border-box" }} />
                   {matches.length > 0 && (
                     <div style={{ marginTop: 6, background: "var(--bg3)", border: "1px solid var(--border2)", borderRadius: 8, overflow: "hidden" }}>
                       {matches.map(c => (
                         <button key={c.id} type="button"
-                          onClick={() => setBookingModal({ ...bookingModal, customer: { id: c.id, name: c.name, phone: c.phone }, customerSearch: "" })}
+                          onClick={() => setBookingModal(prev => ({ ...prev, customer: { id: c.id, name: c.name, phone: c.phone }, customerSearch: "" }))}
                           style={{ width: "100%", padding: "8px 12px", textAlign: "left", background: "transparent", border: "none", borderBottom: "1px solid var(--border)", cursor: "pointer", color: "var(--text)" }}>
                           <div style={{ fontSize: 12, fontWeight: 700 }}>{c.name}</div>
                           {c.phone && <div style={{ fontSize: 10, color: "var(--text3)", marginTop: 1 }}>{c.phone}</div>}
@@ -3586,12 +3586,12 @@ export default function POSPage() {
                   )}
                   <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
                     <button type="button"
-                      onClick={() => setBookingModal({ ...bookingModal, newCustomer: { name: bookingModal.customerSearch || "", phone: "" }, customerSearch: "" })}
+                      onClick={() => setBookingModal(prev => ({ ...prev, newCustomer: { name: prev.customerSearch || "", phone: "" }, customerSearch: "" }))}
                       style={{ padding: "6px 12px", borderRadius: 6, background: "rgba(var(--accent-rgb),0.1)", border: "1px solid rgba(var(--accent-rgb),0.35)", color: "var(--accent)", fontSize: 10, fontWeight: 800, letterSpacing: 1, textTransform: "uppercase", cursor: "pointer" }}>
                       + Add New Customer
                     </button>
                     <button type="button"
-                      onClick={() => setBookingModal({ ...bookingModal, customer: { id: null, name: "Walk-in", phone: "" } })}
+                      onClick={() => setBookingModal(prev => ({ ...prev, customer: { id: null, name: "Walk-in", phone: "" } }))}
                       style={{ padding: "6px 12px", borderRadius: 6, background: "var(--bg3)", border: "1px solid var(--border2)", color: "var(--text2)", fontSize: 10, fontWeight: 800, letterSpacing: 1, textTransform: "uppercase", cursor: "pointer" }}>
                       Walk-in
                     </button>
@@ -3602,17 +3602,17 @@ export default function POSPage() {
               <div style={{ padding: 12, background: "rgba(var(--accent-rgb),0.06)", border: "1px solid rgba(var(--accent-rgb),0.3)", borderRadius: 10 }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
                   <div style={{ fontSize: 10, fontWeight: 800, color: "var(--accent)", textTransform: "uppercase", letterSpacing: 1 }}>New customer</div>
-                  <button type="button" onClick={() => setBookingModal({ ...bookingModal, newCustomer: null })}
+                  <button type="button" onClick={() => setBookingModal(prev => ({ ...prev, newCustomer: null }))}
                     style={{ background: "transparent", border: "none", color: "var(--text3)", cursor: "pointer", fontSize: 12 }}>✕ Cancel</button>
                 </div>
                 <input type="text" autoFocus required
                   value={bookingModal.newCustomer.name}
-                  onChange={e => setBookingModal({ ...bookingModal, newCustomer: { ...bookingModal.newCustomer, name: e.target.value } })}
+                  onChange={e => { const v = e.target.value; setBookingModal(prev => ({ ...prev, newCustomer: { ...prev.newCustomer, name: v } })); }}
                   placeholder="Name *"
                   style={{ width: "100%", padding: "10px 12px", background: "var(--bg3)", border: "1px solid var(--border2)", borderRadius: 8, color: "var(--text)", fontSize: 13, outline: "none", boxSizing: "border-box", marginBottom: 8 }} />
                 <input type="text"
                   value={bookingModal.newCustomer.phone}
-                  onChange={e => setBookingModal({ ...bookingModal, newCustomer: { ...bookingModal.newCustomer, phone: e.target.value } })}
+                  onChange={e => { const v = e.target.value; setBookingModal(prev => ({ ...prev, newCustomer: { ...prev.newCustomer, phone: v } })); }}
                   placeholder="Phone"
                   style={{ width: "100%", padding: "10px 12px", background: "var(--bg3)", border: "1px solid var(--border2)", borderRadius: 8, color: "var(--text)", fontSize: 13, outline: "none", boxSizing: "border-box" }} />
                 <button type="button"
@@ -3627,7 +3627,7 @@ export default function POSPage() {
                         created_by: currentUser?.name || "user",
                         source: "booking",
                       });
-                      setBookingModal({ ...bookingModal, customer: { id: ref.id, name, phone: bookingModal.newCustomer.phone.trim() || "" }, newCustomer: null });
+                      setBookingModal(prev => ({ ...prev, customer: { id: ref.id, name, phone: prev.newCustomer?.phone?.trim() || "" }, newCustomer: null }));
                       toast({ title: "Customer Saved", message: `${name} added.`, type: "success" });
                     } catch (err) {
                       toast({ title: "Save Failed", message: err.message, type: "danger" });
@@ -3708,13 +3708,13 @@ export default function POSPage() {
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
               {[30, 45, 60, 90, 120].map(d => (
                 <button key={d} type="button"
-                  onClick={() => setBookingModal({ ...bookingModal, duration: d, durationOverride: true })}
+                  onClick={() => setBookingModal(prev => ({ ...prev, duration: d, durationOverride: true }))}
                   style={{ padding: "6px 14px", borderRadius: 8, background: (bookingModal.durationOverride && bookingModal.duration === d) ? "var(--accent)" : "var(--bg3)", border: "1px solid var(--border2)", color: (bookingModal.durationOverride && bookingModal.duration === d) ? "#000" : "var(--text2)", fontSize: 11, fontWeight: 800, cursor: "pointer" }}>
                   {d} min
                 </button>
               ))}
               {bookingModal.durationOverride && (
-                <button type="button" onClick={() => setBookingModal({ ...bookingModal, durationOverride: false })}
+                <button type="button" onClick={() => setBookingModal(prev => ({ ...prev, durationOverride: false }))}
                   style={{ padding: "6px 10px", borderRadius: 8, background: "transparent", border: "1px dashed var(--border2)", color: "var(--text3)", fontSize: 10, fontWeight: 800, letterSpacing: 1, textTransform: "uppercase", cursor: "pointer" }}>
                   Reset to auto
                 </button>
@@ -3726,7 +3726,7 @@ export default function POSPage() {
 
             <label style={{ display: "block", fontSize: 10, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, marginTop: 14, marginBottom: 6 }}>Notes (optional)</label>
             <textarea rows={2} value={bookingModal.notes}
-              onChange={e => setBookingModal({ ...bookingModal, notes: e.target.value })}
+              onChange={e => { const v = e.target.value; setBookingModal(prev => ({ ...prev, notes: v })); }}
               placeholder="Service preferences, etc."
               style={{ width: "100%", padding: "10px 12px", background: "var(--bg3)", border: "1px solid var(--border2)", borderRadius: 8, color: "var(--text)", fontSize: 12, outline: "none", resize: "vertical", boxSizing: "border-box" }} />
 
