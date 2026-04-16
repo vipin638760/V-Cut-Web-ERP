@@ -1811,9 +1811,14 @@ export default function POSPage() {
       };
     });
     const subtotal = items.reduce((s, it) => s + it.price, 0);
+    // Discount applies to service lines only — skip membership plan fee.
+    const serviceSubtotal = cart.filter(it => !it.is_membership).reduce((s, it) => s + (Number(it.price) || 0), 0);
+    const discountPctNum = Number(discountPct) || 0;
+    const discountAmt = Math.round(serviceSubtotal * discountPctNum / 100);
+    const netTotal = Math.max(0, subtotal - discountAmt);
     const gstAmt = Math.round(subtotal * (Number(gstPct) || 0) / 100);
     const onlineAmt = Math.max(0, Number(onlineInc) || 0);
-    const cashAmt = Math.max(0, subtotal - onlineAmt);
+    const cashAmt = Math.max(0, netTotal - onlineAmt);
     let paymentMode = "Cash";
     if (onlineAmt > 0 && cashAmt > 0) paymentMode = "Split (Cash + Online)";
     else if (onlineAmt > 0) paymentMode = "Online";
@@ -1829,9 +1834,11 @@ export default function POSPage() {
       walkinNo,
       items,
       subtotal,
+      discountPct: discountPctNum,
+      discountAmt,
       gstPct: Number(gstPct) || 0,
       gstAmt,
-      total: subtotal, // GST already included in service prices (inclusive) — treat total as subtotal
+      total: netTotal, // GST is inclusive; net total nets out the member discount
       onlineAmt,
       cashAmt,
       paymentMode,
@@ -1851,8 +1858,10 @@ export default function POSPage() {
       loan_flag: !!it.loan_flag,
     }));
     const subtotal = Number(inv.subtotal) || items.reduce((s, it) => s + it.price, 0);
+    const discountPctNum = Number(inv.discount_pct) || 0;
+    const discountAmt = Number(inv.discount_amount) || 0;
     const onlineAmt = Number(inv.online) || 0;
-    const cashAmt = Number(inv.cash) || Math.max(0, subtotal - onlineAmt);
+    const cashAmt = Number(inv.cash) || Math.max(0, subtotal - discountAmt - onlineAmt);
     let paymentMode = "Cash";
     if (onlineAmt > 0 && cashAmt > 0) paymentMode = "Split (Cash + Online)";
     else if (onlineAmt > 0) paymentMode = "Online";
@@ -1866,9 +1875,11 @@ export default function POSPage() {
       walkinNo: inv.walkin_no || null,
       items,
       subtotal,
+      discountPct: discountPctNum,
+      discountAmt,
       gstPct: Number(inv.gst_pct) || 0,
       gstAmt: Number(inv.gst_amount) || 0,
-      total: Number(inv.total) || subtotal,
+      total: Number(inv.total) || Math.max(0, subtotal - discountAmt),
       onlineAmt,
       cashAmt,
       paymentMode,
@@ -2987,11 +2998,22 @@ export default function POSPage() {
                 {/* Totals */}
                 <div style={{ borderTop: "1px solid #111", paddingTop: 10, fontSize: 12 }}>
                   <Row label="Subtotal" value={INR(billPreview.subtotal)} />
+                  {billPreview.discountAmt > 0 && (
+                    <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", color: "#0a7a3b", fontWeight: 700 }}>
+                      <span>Member Discount ({billPreview.discountPct}%)</span>
+                      <span>−{INR(billPreview.discountAmt)}</span>
+                    </div>
+                  )}
                   {billPreview.gstPct > 0 && <Row label={`GST (${billPreview.gstPct}%) — incl.`} value={INR(billPreview.gstAmt)} muted />}
                   <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8, paddingTop: 8, borderTop: "2px solid #111", fontSize: 16, fontWeight: 900 }}>
                     <span>TOTAL</span>
                     <span>{INR(billPreview.total)}</span>
                   </div>
+                  {billPreview.discountAmt > 0 && (
+                    <div style={{ textAlign: "right", fontSize: 10, color: "#0a7a3b", fontWeight: 700, marginTop: 4 }}>
+                      You saved {INR(billPreview.discountAmt)} with membership
+                    </div>
+                  )}
                 </div>
 
                 {/* Payment */}
