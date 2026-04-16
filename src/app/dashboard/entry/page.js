@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState, useRef, useMemo, startTransition } from "react";
-import { collection, onSnapshot, query, orderBy, where, addDoc, deleteDoc, doc, updateDoc } from "firebase/firestore";
+import { collection, onSnapshot, query, orderBy, where, addDoc, deleteDoc, doc, updateDoc, getDocs } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
 import { INR } from "@/lib/calculations";
@@ -423,6 +423,22 @@ export default function EntryPage() {
     if (!leavePrompt) return;
     const { staff: ls, type, reason } = leavePrompt;
     try {
+      // Block if a non-rejected leave already exists for this staff on this date
+      const dupSnap = await getDocs(query(
+        collection(db, "leaves"),
+        where("staff_id", "==", ls.id),
+        where("date", "==", selDate)
+      ));
+      const dup = dupSnap.docs.map(d => d.data()).find(l => l.status !== "rejected");
+      if (dup) {
+        confirm({
+          title: "Leave Already Exists",
+          message: `${ls.name} already has a <strong>${dup.status}</strong> leave (${dup.type || "—"}) on ${selDate}. Can't submit it again.`,
+          confirmText: "OK", cancelText: "Close", type: "warning", onConfirm: () => {}
+        });
+        setLeavePrompt(null);
+        return;
+      }
       await addDoc(collection(db, "leaves"), {
         staff_id: ls.id,
         staff_name: ls.name,

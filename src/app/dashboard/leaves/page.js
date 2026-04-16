@@ -153,6 +153,22 @@ export default function LeavesPage() {
 
   const handleSaveEdit = async () => {
     if (!editLeave) return;
+    // Block if another leave already exists for this staff on the new date
+    const clash = leaves.find(l =>
+      l.id !== editLeave.id &&
+      l.staff_id === editLeave.staff_id &&
+      l.date === editLeave.date &&
+      l.status !== "rejected"
+    );
+    if (clash) {
+      const s = staff.find(x => x.id === editLeave.staff_id);
+      confirm({
+        title: "Duplicate Leave",
+        message: `Another leave record for <strong>${s?.name || "this staff"}</strong> already exists on <strong>${editLeave.date}</strong>. Pick a different date.`,
+        confirmText: "OK", cancelText: "Close", type: "warning", onConfirm: () => {}
+      });
+      return;
+    }
     try {
       await updateDoc(doc(db, "leaves", editLeave.id), {
         date: editLeave.date,
@@ -172,6 +188,20 @@ export default function LeavesPage() {
   const handleApply = async (e) => {
     e.preventDefault();
     if (form.staff_ids.length === 0 || !form.date) { setSaveMsg("❌ Select at least one staff and a date."); return; }
+
+    // Block duplicates: same staff + same date + not rejected
+    const duplicates = form.staff_ids.filter(id =>
+      leaves.some(l => l.staff_id === id && l.date === form.date && l.status !== "rejected")
+    );
+    if (duplicates.length > 0) {
+      const names = duplicates.map(id => staff.find(s => s.id === id)?.name || id).join(", ");
+      confirm({
+        title: "Leave Already Submitted",
+        message: `A leave request for <strong>${form.date}</strong> already exists for:<br/><strong>${names}</strong><br/><br/>Please deselect them or pick a different date.`,
+        confirmText: "OK", cancelText: "Close", type: "warning", onConfirm: () => {}
+      });
+      return;
+    }
 
     const days = Number(form.days) || 1;
     const exhausted = [];

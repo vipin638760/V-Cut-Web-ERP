@@ -54,6 +54,17 @@ export default function LeaveTab({ view = "admin" }) {
   const handleSave = async (e) => {
     e.preventDefault();
     if (!form.staff_id || !form.date) { confirm({ title: "Validation", message: "Selection and Date are required.", confirmText: "OK", type: "warning", onConfirm: () => {} }); return; }
+    // Block duplicates: same staff + same date + not rejected
+    const dup = leaves.find(l => l.staff_id === form.staff_id && l.date === form.date && l.status !== "rejected");
+    if (dup) {
+      const s = staff.find(x => x.id === form.staff_id);
+      confirm({
+        title: "Leave Already Submitted",
+        message: `A leave for <strong>${s?.name || "this staff"}</strong> on <strong>${form.date}</strong> already exists (<em>${dup.status}</em>). You can't submit it again.`,
+        confirmText: "OK", cancelText: "Close", type: "warning", onConfirm: () => {}
+      });
+      return;
+    }
     try {
       await addDoc(collection(db, "leaves"), {
         ...form,
