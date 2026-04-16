@@ -114,6 +114,7 @@ export default function POSPage() {
   const [editingDraftId, setEditingDraftId] = useState(null);
   const [historyInvoices, setHistoryInvoices] = useState([]); // all invoices (settled + draft) in current filter period
   const [historySearch, setHistorySearch] = useState("");
+  const [historyDateFilter, setHistoryDateFilter] = useState(""); // "" = whole period; else YYYY-MM-DD narrows to a single day
   const [selectedBranchIds, setSelectedBranchIds] = useState(() => new Set());
   // Drill-down filters for the expanded branch
   const [branchSortBy, setBranchSortBy] = useState("date_desc"); // date_desc | date_asc | amount_desc | amount_asc
@@ -1372,12 +1373,15 @@ export default function POSPage() {
     [historyInvoices]
   );
 
-  // History search — match by invoice no, customer name/phone, amount, or date substring.
+  // History search — date filter (single day) applies first, then free-text search narrows.
   const filteredInvoices = useMemo(() => {
+    const dateScoped = historyDateFilter
+      ? settledInvoices.filter(inv => inv.date === historyDateFilter)
+      : settledInvoices;
     const q = historySearch.trim().toLowerCase();
-    if (!q) return settledInvoices;
+    if (!q) return dateScoped;
     const qNum = Number(q.replace(/[^\d.]/g, ""));
-    return settledInvoices.filter(inv => {
+    return dateScoped.filter(inv => {
       if ((inv.invoice_no || "").toLowerCase().includes(q)) return true;
       if ((inv.customer_name || "").toLowerCase().includes(q)) return true;
       if ((inv.customer_phone || "").toLowerCase().includes(q)) return true;
@@ -1388,7 +1392,7 @@ export default function POSPage() {
       }
       return false;
     });
-  }, [settledInvoices, historySearch]);
+  }, [settledInvoices, historySearch, historyDateFilter]);
 
   // Branch summary cards — grouped counts + totals. Search narrows the underlying set.
   const branchSummaries = useMemo(() => {
@@ -1409,11 +1413,14 @@ export default function POSPage() {
       s.total += Number(inv.total) || Number(inv.subtotal) || 0;
     });
     // Include draft counts for the same branches so the card can hint "+N drafts"
-    historyInvoices.filter(i => i.status === "draft").forEach(inv => {
-      if (map.has(inv.branch_id)) map.get(inv.branch_id).drafts += 1;
-    });
+    // Scope drafts to the same date filter so counts stay consistent with the settled card.
+    historyInvoices
+      .filter(i => i.status === "draft" && (!historyDateFilter || i.date === historyDateFilter))
+      .forEach(inv => {
+        if (map.has(inv.branch_id)) map.get(inv.branch_id).drafts += 1;
+      });
     return [...map.values()].sort((a, b) => b.total - a.total);
-  }, [filteredInvoices, historyInvoices, branchesById]);
+  }, [filteredInvoices, historyInvoices, historyDateFilter, branchesById]);
 
   // Invoices for the selected branch cards — applies filter controls + sort.
   // Includes drafts when status filter is "all" or "draft".
@@ -1879,7 +1886,7 @@ export default function POSPage() {
               background: viewMode === "pos" ? "var(--accent)" : "var(--bg4)", color: viewMode === "pos" ? "#000" : "var(--text3)",
               textTransform: "uppercase", transition: "all .3s"
             }}>Terminal</button>
-            <button onClick={() => setViewMode("history")} style={{
+            <button onClick={() => { setViewMode("history"); setHistoryDateFilter(selDate); }} style={{
               padding: "10px 16px", borderRadius: 10, fontSize: 11, fontWeight: 800, border: "none", cursor: "pointer",
               background: viewMode === "history" ? "var(--accent)" : "var(--bg4)", color: viewMode === "history" ? "#000" : "var(--text3)",
               textTransform: "uppercase", transition: "all .3s"
@@ -2268,15 +2275,32 @@ export default function POSPage() {
         <div style={{ flex: 1, overflowY: "auto" }}>
            <PeriodWidget filterMode={filterMode} setFilterMode={setFilterMode} filterYear={filterYear} setFilterYear={setFilterYear} filterMonth={filterMonth} setFilterMonth={setFilterMonth} />
 
-           {/* Search bar — filters invoices across branches by inv-no / customer / amount / date */}
-           <div style={{ marginTop: 16, display: "flex", alignItems: "center", gap: 10, background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 12, padding: 10, position: "relative" }}>
-             <div style={{ position: "absolute", left: 22, color: "var(--text3)" }}><Icon name="search" size={14} /></div>
-             <input value={historySearch} onChange={e => setHistorySearch(e.target.value)}
-               placeholder="Search bills by invoice no, customer, amount, or date (YYYY-MM-DD)…"
-               style={{ flex: 1, padding: "10px 12px 10px 34px", background: "var(--bg3)", border: "1px solid var(--border2)", borderRadius: 8, color: "var(--text)", fontSize: 13, outline: "none" }} />
-             {historySearch && (
-               <button onClick={() => setHistorySearch("")}
-                 style={{ background: "transparent", border: "none", color: "var(--text3)", cursor: "pointer", fontSize: 18, fontWeight: 700 }}>✕</button>
+           {/* Search + date filter bar */}
+           <div style={{ marginTop: 16, display: "flex", alignItems: "center", gap: 10, background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 12, padding: 10, position: "relative", flexWrap: "wrap" }}>
+             <div style={{ position: "relative", flex: "1 1 240px", minWidth: 200 }}>
+               <div style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "var(--text3)" }}><Icon name="search" size={14} /></div>
+               <input value={historySearch} onChange={e => setHistorySearch(e.target.value)}
+                 placeholder="Search bills by invoice no, customer, amount…"
+                 style={{ width: "100%", padding: "10px 30px 10px 34px", background: "var(--bg3)", border: "1px solid var(--border2)", borderRadius: 8, color: "var(--text)", fontSize: 13, outline: "none", boxSizing: "border-box" }} />
+               {historySearch && (
+                 <button onClick={() => setHistorySearch("")}
+                   style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", background: "transparent", border: "none", color: "var(--text3)", cursor: "pointer", fontSize: 16, fontWeight: 700 }}>✕</button>
+               )}
+             </div>
+             <div style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 10px", background: historyDateFilter ? "rgba(var(--accent-rgb),0.1)" : "var(--bg3)", border: `1px solid ${historyDateFilter ? "rgba(var(--accent-rgb),0.35)" : "var(--border2)"}`, borderRadius: 8 }}>
+               <span style={{ fontSize: 10, fontWeight: 800, color: historyDateFilter ? "var(--accent)" : "var(--text3)", textTransform: "uppercase", letterSpacing: 1 }}>Date</span>
+               <input type="date" value={historyDateFilter} onChange={e => setHistoryDateFilter(e.target.value)}
+                 style={{ background: "transparent", border: "none", color: historyDateFilter ? "var(--accent)" : "var(--text2)", fontSize: 12, fontWeight: 700, outline: "none", cursor: "pointer", padding: 0, minWidth: 130 }} />
+               {historyDateFilter && (
+                 <button onClick={() => setHistoryDateFilter("")} title="Show all invoices for the period"
+                   style={{ background: "transparent", border: "none", color: "var(--text3)", cursor: "pointer", fontSize: 14, fontWeight: 700, lineHeight: 1, padding: 0 }}>✕</button>
+               )}
+             </div>
+             {!historyDateFilter && (
+               <button onClick={() => setHistoryDateFilter(selDate)} title={`Filter to ${selDate}`}
+                 style={{ padding: "6px 10px", borderRadius: 8, border: "1px dashed var(--border2)", background: "transparent", color: "var(--text3)", fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: 1, cursor: "pointer" }}>
+                 Today&apos;s date only
+               </button>
              )}
            </div>
 
