@@ -358,6 +358,27 @@ body {
     width: 100% !important;
     padding: 16px !important;
   }
+  /* Bound the cart-items scroll area on mobile so the list actually
+     scrolls instead of growing to fit every item (which hides the
+     staff selector beneath the next card). */
+  .pos-cart-items {
+    max-height: 45vh !important;
+    min-height: 180px !important;
+  }
+}
+
+/* Visible accent scrollbar so users know the list is scrollable */
+.pos-cart-items {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(var(--accent-rgb), 0.4) transparent;
+}
+.pos-cart-items::-webkit-scrollbar { width: 6px; }
+.pos-cart-items::-webkit-scrollbar-thumb {
+  background: rgba(var(--accent-rgb), 0.35);
+  border-radius: 3px;
+}
+.pos-cart-items::-webkit-scrollbar-thumb:hover {
+  background: rgba(var(--accent-rgb), 0.6);
 }
 
 /* Cart-card entrance animation (matches the menu-card look when an item is added) */

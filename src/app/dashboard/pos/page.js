@@ -2105,7 +2105,7 @@ export default function POSPage() {
               );
             })()}
 
-            <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: 12, paddingRight: 4 }}>
+            <div className="pos-cart-items" style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: 12, paddingRight: 6 }}>
               {cart.length === 0 ? (
                 <div style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16, opacity: 0.3 }}>
                    <Icon name="log" size={48} />
@@ -2145,16 +2145,16 @@ export default function POSPage() {
                       <Icon name="del" size={14} />
                     </button>
                   </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                    <div style={{ fontSize: 9, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 0.5 }}>Staff:</div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <div style={{ fontSize: 10, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1 }}>Staff</div>
                     <select
                       value={item.staffId}
                       onChange={e => updateCartStaff(item.cartId, e.target.value)}
                       style={{
-                        flex: 1, background: "var(--bg2)", border: "1px solid var(--border2)", borderRadius: 8,
-                        padding: "4px 6px", color: "var(--text2)", fontSize: 10, fontWeight: 600, outline: "none"
+                        flex: 1, background: "var(--bg2)", border: `1px solid ${item.staffId ? "rgba(var(--accent-rgb),0.35)" : "var(--border2)"}`, borderRadius: 8,
+                        padding: "8px 10px", color: item.staffId ? "var(--accent)" : "var(--text3)", fontSize: 12, fontWeight: 700, outline: "none", cursor: "pointer", minHeight: 36
                       }}>
-                      <option value="">Select…</option>
+                      <option value="">Select stylist…</option>
                       <optgroup label="This branch">
                         {branchStaff.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                       </optgroup>
