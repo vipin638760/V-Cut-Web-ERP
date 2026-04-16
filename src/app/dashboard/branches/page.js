@@ -254,11 +254,19 @@ export default function BranchesPage() {
     const staffById = new Map(staff.map(st => [st.id, st]));
 
     const perDay = (dateStr) => {
+      // Approved leaves first — their staff IDs take precedence and must be removed
+      // from present/loan so the same person can never appear twice on the same date.
+      const approvedLeaves = leaves
+        .filter(l => l.date === dateStr && (l.status === "approved" || !l.status) && staffById.get(l.staff_id)?.branch_id === attBranch.id)
+        .map(l => ({ id: l.staff_id, name: staffById.get(l.staff_id)?.name || "Staff", type: l.type || "Paid" }));
+      const onLeaveIds = new Set(approvedLeaves.map(l => l.id));
+
       const entry = branchEntries.find(e => e.date === dateStr);
       const present = [], loan = [];
       if (entry) {
         (entry.staff_billing || []).forEach(sb => {
           if (sb.present === false) return;
+          if (onLeaveIds.has(sb.staff_id)) return; // leave wins over stale present row
           const staffRec = staffById.get(sb.staff_id);
           const item = {
             id: sb.staff_id,
@@ -269,9 +277,6 @@ export default function BranchesPage() {
           if (sb.loan_flag) loan.push(item); else present.push(item);
         });
       }
-      const approvedLeaves = leaves
-        .filter(l => l.date === dateStr && (l.status === "approved" || !l.status) && staffById.get(l.staff_id)?.branch_id === attBranch.id)
-        .map(l => ({ id: l.staff_id, name: staffById.get(l.staff_id)?.name || "Staff", type: l.type || "Paid" }));
       return { present, loan, approvedLeaves };
     };
 
