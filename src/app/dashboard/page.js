@@ -232,8 +232,13 @@ export default function DashboardPage() {
     return m;
   }, [branches]);
 
-  // Staff leaderboard
+  // Staff leaderboard — honours the same Mens/Unisex filter as branch cards
   const staffData = staff
+    .filter(s => {
+      if (brTypeFilter === "all") return true;
+      const sb = branchesById.get(s.branch_id);
+      return sb?.type === brTypeFilter;
+    })
     .map(s => {
       const sale = staffBillingInPeriod(s.id, entries, filterPrefix, filterMode, filterYear);
       const baseTgt = s.target || 50000;
@@ -857,6 +862,33 @@ export default function DashboardPage() {
         <PremiumStatCard label="Service Force" value={staff.length} sub="Active stylists" icon="users" color="var(--accent)" />
       </div>
 
+      {/* Persistent filter bar — stays visible across Mixed / Branch Only / Staff Only */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12, padding: "14px 16px", background: "var(--bg3)", border: "1px solid var(--border)", borderRadius: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <div style={{ fontSize: 10, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.5, marginRight: 4 }}>View</div>
+          <ToggleGroup options={[["all","Mixed"],["shop","Branch Only"],["staff","Staff Only"]]} value={dashView} onChange={setDashView} />
+          <div style={{ width: 1, height: 22, background: "var(--border2)", margin: "0 4px" }} />
+          <div style={{ fontSize: 10, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.5, marginRight: 4 }}>Type</div>
+          <ToggleGroup options={[["all","All"],["mens","Mens"],["unisex","Unisex"]]} value={brTypeFilter} onChange={setBrTypeFilter}
+            colors={{ all: "var(--blue)", mens: "var(--accent)", unisex: "#c084fc" }} />
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          {(dashView === "all" || dashView === "shop") && (
+            <>
+              <ToggleGroup options={[["all","All"],["profit","Profit"],["loss","Loss"]]} value={brFilter} onChange={setBrFilter}
+                colors={{ all: "var(--blue)", profit: "var(--green)", loss: "var(--red)" }} />
+              <ToggleGroup options={[["card","Grid"],["table","List"]]} value={brView} onChange={setBrView} />
+            </>
+          )}
+          {isAdmin && (dashView === "all" || dashView === "shop") && (
+            <button onClick={exportBranchPerformance} disabled={exporting} title="Export branch performance to Excel (one tab per branch)"
+              style={{ padding: "6px 12px", borderRadius: 8, background: "var(--bg4)", border: "1px solid var(--border2)", cursor: exporting ? "wait" : "pointer", display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 700, color: "var(--green)", textTransform: "uppercase", letterSpacing: 0.5, opacity: exporting ? 0.6 : 1 }}>
+              <Icon name="save" size={13} /> {exporting ? "Exporting..." : "Export"}
+            </button>
+          )}
+        </div>
+      </div>
+
       {/* Main Admin Grid */}
       <div style={{ display: "grid", gridTemplateColumns: dashView === "all" ? "1.6fr 1fr" : "1fr", gap: 24 }}>
 
@@ -864,19 +896,13 @@ export default function DashboardPage() {
         {(dashView === "all" || dashView === "shop") && (
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
-               <h3 style={{ fontSize: 16, fontWeight: 700, margin: 0, fontFamily: "var(--font-headline, var(--font-outfit))" }}>Branch Performance</h3>
-               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                 <ToggleGroup options={[["all","Mixed"],["shop","Branch Only"],["staff","Staff Only"]]} value={dashView} onChange={setDashView} />
-                 <ToggleGroup options={[["all","All"],["profit","Profit"],["loss","Loss"]]} value={brFilter} onChange={setBrFilter}
-                   colors={{ all: "var(--blue)", profit: "var(--green)", loss: "var(--red)" }} />
-                 <ToggleGroup options={[["card","Grid"],["table","List"]]} value={brView} onChange={setBrView} />
-                 {isAdmin && (
-                   <button onClick={exportBranchPerformance} disabled={exporting} title="Export branch performance to Excel (one tab per branch)"
-                     style={{ padding: "6px 12px", borderRadius: 8, background: "var(--bg4)", border: "1px solid var(--border2)", cursor: exporting ? "wait" : "pointer", display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 700, color: "var(--green)", textTransform: "uppercase", letterSpacing: 0.5, opacity: exporting ? 0.6 : 1 }}>
-                     <Icon name="save" size={13} /> {exporting ? "Exporting..." : "Export"}
-                   </button>
+               <h3 style={{ fontSize: 16, fontWeight: 700, margin: 0, fontFamily: "var(--font-headline, var(--font-outfit))" }}>
+                 Branch Performance
+                 {brTypeFilter !== "all" && (
+                   <span style={{ marginLeft: 10, fontSize: 11, fontWeight: 700, color: brTypeFilter === "mens" ? "var(--accent)" : "#c084fc", textTransform: "uppercase", letterSpacing: 1 }}>· {brTypeFilter}</span>
                  )}
-               </div>
+               </h3>
+               <div style={{ fontSize: 11, color: "var(--text3)", fontWeight: 600 }}>{branchData.length} branch{branchData.length === 1 ? "" : "es"}</div>
             </div>
 
             {brView === "table" ? (
@@ -932,7 +958,15 @@ export default function DashboardPage() {
         {/* Staff Section */}
         {(dashView === "all" || dashView === "staff") && (
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-             <h3 style={{ fontSize: 16, fontWeight: 700, margin: 0, fontFamily: "var(--font-headline, var(--font-outfit))" }}>Top Performers</h3>
+             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+               <h3 style={{ fontSize: 16, fontWeight: 700, margin: 0, fontFamily: "var(--font-headline, var(--font-outfit))" }}>
+                 Top Performers
+                 {brTypeFilter !== "all" && (
+                   <span style={{ marginLeft: 10, fontSize: 11, fontWeight: 700, color: brTypeFilter === "mens" ? "var(--accent)" : "#c084fc", textTransform: "uppercase", letterSpacing: 1 }}>· {brTypeFilter}</span>
+                 )}
+               </h3>
+               <div style={{ fontSize: 11, color: "var(--text3)", fontWeight: 600 }}>{staffData.length} stylist{staffData.length === 1 ? "" : "s"}</div>
+             </div>
              <Card style={{ padding: 0, overflow: "hidden" }}>
                 <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0 }}>
                   <thead>
