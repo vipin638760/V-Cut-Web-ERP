@@ -396,6 +396,12 @@ export default function POSPage() {
     setHistoryDateFilter(prev => (prev === "" ? "" : selDate));
   }, [selDate, viewMode]);
 
+  // Push the top-level date chip down into any open drill-down filter so the
+  // invoice list below reflects the same day the summary cards are counting.
+  useEffect(() => {
+    setBranchDateFilter(historyDateFilter || "");
+  }, [historyDateFilter]);
+
   // Branch lookup — memoized so per-row resolution in tables/exports is O(1) instead of O(n).
   const branchesById = useMemo(() => {
     const m = new Map();
@@ -1433,12 +1439,15 @@ export default function POSPage() {
 
   // Invoices for the selected branch cards — applies filter controls + sort.
   // Includes drafts when status filter is "all" or "draft".
+  // The top-level historyDateFilter is the baseline scope; branchDateFilter (the
+  // drill-down's own date input) narrows further when set.
   const filteredBranchInvoices = useMemo(() => {
     if (selectedBranchIds.size === 0) return [];
     const custQ = branchCustomerFilter.trim().toLowerCase();
     const list = historyInvoices.filter(inv => {
       if (!selectedBranchIds.has(inv.branch_id)) return false;
       if (branchStatusFilter !== "all" && inv.status !== branchStatusFilter) return false;
+      if (historyDateFilter && inv.date !== historyDateFilter) return false;
       if (branchDateFilter && inv.date !== branchDateFilter) return false;
       if (custQ) {
         const hit = (inv.customer_name || "").toLowerCase().includes(custQ)
@@ -1456,7 +1465,7 @@ export default function POSPage() {
       default:            list.sort((a, b) => (b.date || "").localeCompare(a.date || "") || (b.invoice_no || "").localeCompare(a.invoice_no || "")); break;
     }
     return list;
-  }, [historyInvoices, selectedBranchIds, branchStatusFilter, branchDateFilter, branchCustomerFilter, branchSortBy]);
+  }, [historyInvoices, selectedBranchIds, branchStatusFilter, branchDateFilter, branchCustomerFilter, branchSortBy, historyDateFilter]);
 
   const toggleBranchSelection = (bid) => {
     setSelectedBranchIds(prev => {
@@ -1464,7 +1473,10 @@ export default function POSPage() {
       if (next.has(bid)) next.delete(bid); else next.add(bid);
       return next;
     });
-    setBranchDateFilter(""); setBranchCustomerFilter(""); setBranchSortBy("date_desc"); setBranchStatusFilter("all");
+    // Seed the drill-down's own date filter with whatever the top chip is on,
+    // so the invoice list matches the summary card count when you open it.
+    setBranchDateFilter(historyDateFilter || "");
+    setBranchCustomerFilter(""); setBranchSortBy("date_desc"); setBranchStatusFilter("all");
   };
 
   // Invoice number: {BRANCH-PREFIX}-{DDMMYY}-{NNN}
