@@ -39,8 +39,15 @@ export default function StaffPage() {
   // UI state
   const [branchFilter, setBranchFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("active");
+  const [roleFilter, setRoleFilter] = useState("all"); // all | mens | unisex
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState(null);
+
+  // Attendance calendar (per-staff, per-month)
+  const [attendanceModal, setAttendanceModal] = useState(null); // { staff, month: "YYYY-MM" }
+  const [attendanceOverrides, setAttendanceOverrides] = useState([]); // overlay rows from staff_attendance
+  const [editingDay, setEditingDay] = useState(null); // "YYYY-MM-DD" or null
+  const [dayDraft, setDayDraft] = useState({ present: true, branch_id: "", note: "" });
 
   // Form state
   const [form, setForm] = useState({ name: "", branch_id: "", role: "", mobile: "", salary: "", incentive_pct: "10", target: "", join: "", exit_date: "" });
@@ -74,12 +81,34 @@ export default function StaffPage() {
     return () => unsubs.forEach(u => u());
   }, []);
 
+  // Subscribe to staff_attendance overlay for the currently-viewed staff/month.
+  // Overlay wins over entries-derived presence when both exist for the same date.
+  useEffect(() => {
+    if (!db || !attendanceModal) return;
+    const { staff: s, month } = attendanceModal;
+    const [yr, mo] = month.split("-").map(Number);
+    const start = `${month}-01`;
+    const endDate = new Date(yr, mo, 0).toISOString().slice(0, 10);
+    const q = query(
+      collection(db, "staff_attendance"),
+      orderBy("date", "asc"),
+    );
+    const unsub = onSnapshot(q, sn => {
+      const rows = sn.docs.map(d => ({ ...d.data(), id: d.id }))
+        .filter(r => r.staff_id === s.id && r.date >= start && r.date <= endDate);
+      setAttendanceOverrides(rows);
+    });
+    return () => unsub();
+  }, [attendanceModal]);
+
   const statusRefMon = filterMode === "month" ? filterPrefix : filterYear + "-" + String(NOW.getMonth() + 1).padStart(2, "0");
 
   // Filtered list
   let filtered = branchFilter ? staff.filter(s => s.branch_id === branchFilter) : [...staff];
   if (statusFilter === "active") filtered = filtered.filter(s => staffOverallStatus(s, statusRefMon) === "active");
   else if (statusFilter === "inactive") filtered = filtered.filter(s => staffOverallStatus(s, statusRefMon) !== "active");
+  if (roleFilter === "mens") filtered = filtered.filter(s => (s.role || "").toLowerCase().includes("mens"));
+  else if (roleFilter === "unisex") filtered = filtered.filter(s => (s.role || "").toLowerCase().includes("unisex"));
   // For admin, hide pending-setup staff from the main table (they appear in the Pending Setup section above)
   if (isAdmin) filtered = filtered.filter(s => !s.pending_setup);
 
@@ -334,6 +363,16 @@ export default function StaffPage() {
           ))}
         </div>
 
+        {/* Role type filter — narrows to mens-only or unisex stylists */}
+        <div style={{ display: "inline-flex", background: "var(--bg3)", border: "1.5px solid var(--border2)", borderRadius: 12, padding: 3, gap: 2 }}>
+          {[["all", "All Roles"], ["mens", "Mens"], ["unisex", "Unisex"]].map(([val, label]) => (
+            <button key={val} onClick={() => setRoleFilter(val)}
+              style={{ padding: "6px 14px", fontSize: 11, fontWeight: 700, color: roleFilter === val ? "#000" : "var(--text3)", background: roleFilter === val ? "var(--accent)" : "transparent", border: "none", borderRadius: 9, cursor: "pointer", transition: "all 0.2s", textTransform: "uppercase" }}>
+              {label}
+            </button>
+          ))}
+        </div>
+
         <div style={{ marginLeft: "auto", display: "flex", gap: 12 }}>
           {canEdit && (
             <button onClick={() => { setShowForm(true); setEditId(null); setForm({ name: "", branch_id: "", role: "", mobile: "", salary: "", incentive_pct: "10", target: "", join: new Date().toISOString().split("T")[0], exit_date: "" }); }}
@@ -430,6 +469,202 @@ export default function StaffPage() {
           </Modal>
         );
       })()}
+
+      {/* Attendance Calendar Modal — per-staff, per-month, editable by admin/accountant */}
+      <Modal isOpen={!!attendanceModal} onClose={() => { setAttendanceModal(null); setAttendanceOverrides([]); setEditingDay(null); }} title={`Attendance · ${attendanceModal?.staff?.name || ""}`} width={720}>
+        {attendanceModal && (() => {
+          const { staff: s, month } = attendanceModal;
+          const [yr, mo] = month.split("-").map(Number);
+          const daysInMonth = new Date(yr, mo, 0).getDate();
+          const firstDow = new Date(yr, mo - 1, 1).getDay(); // 0 = Sun
+          const todayStr = new Date().toISOString().slice(0, 10);
+          const joinDate = s.join || null;
+          const exitDate = s.exit_date || null;
+          const monEntries = entries.filter(e => e.date && e.date.startsWith(month));
+          const monLeaves = leaves.filter(l => l.staff_id === s.id && (l.date || "").startsWith(month) && (l.status === "approved" || !l.status));
+          const overrideByDate = new Map(attendanceOverrides.map(o => [o.date, o]));
+
+          // Resolve per-day status. Priority: override > leave > entries > default.
+          const dayStatus = (dateStr) => {
+            if (overrideByDate.has(dateStr)) {
+              const o = overrideByDate.get(dateStr);
+              return { kind: o.present ? "present" : "absent", branch_id: o.branch_id || null, note: o.note || "", source: "override" };
+            }
+            const leave = monLeaves.find(l => l.date === dateStr);
+            if (leave) return { kind: "leave", branch_id: null, note: leave.type || "Leave", source: "leave" };
+            const hits = monEntries.filter(e => e.date === dateStr && (e.staff_billing || []).some(sb => sb.staff_id === s.id && sb.present !== false));
+            if (hits.length > 0) {
+              const hit = hits[0];
+              return { kind: "present", branch_id: hit.branch_id, note: "", source: "entries" };
+            }
+            if (joinDate && dateStr < joinDate) return { kind: "before", branch_id: null, note: "", source: "lifecycle" };
+            if (exitDate && dateStr > exitDate) return { kind: "after", branch_id: null, note: "", source: "lifecycle" };
+            return { kind: "absent", branch_id: null, note: "", source: "default" };
+          };
+
+          const saveDay = async (dateStr, draft) => {
+            try {
+              await setDoc(doc(db, "staff_attendance", `${s.id}_${dateStr}`), {
+                staff_id: s.id,
+                staff_name: s.name,
+                date: dateStr,
+                present: !!draft.present,
+                branch_id: draft.branch_id || null,
+                branch_name: branches.find(b => b.id === draft.branch_id)?.name || null,
+                note: draft.note || "",
+                edited_by: currentUser?.id || "unknown",
+                edited_by_name: currentUser?.name || "User",
+                edited_at: new Date().toISOString(),
+              });
+              toast({ title: "Attendance Saved", message: `${s.name} · ${dateStr} · ${draft.present ? "Present" : "Absent"}`, type: "success" });
+              setEditingDay(null);
+            } catch (err) {
+              toast({ title: "Save Failed", message: err.message, type: "error" });
+            }
+          };
+
+          const clearOverride = async (dateStr) => {
+            try {
+              await deleteDoc(doc(db, "staff_attendance", `${s.id}_${dateStr}`));
+              toast({ title: "Override Cleared", message: `${dateStr} reverted to computed attendance.`, type: "success" });
+              setEditingDay(null);
+            } catch (err) {
+              toast({ title: "Clear Failed", message: err.message, type: "error" });
+            }
+          };
+
+          const colorFor = (kind) => ({
+            present: { bg: "rgba(74,222,128,0.12)", border: "rgba(74,222,128,0.4)", text: "var(--green)" },
+            absent:  { bg: "rgba(248,113,113,0.1)", border: "rgba(248,113,113,0.3)", text: "var(--red)" },
+            leave:   { bg: "rgba(96,165,250,0.12)", border: "rgba(96,165,250,0.35)", text: "var(--blue, #60a5fa)" },
+            before:  { bg: "var(--bg4)", border: "var(--border)", text: "var(--text3)" },
+            after:   { bg: "var(--bg4)", border: "var(--border)", text: "var(--text3)" },
+          }[kind] || { bg: "var(--bg4)", border: "var(--border)", text: "var(--text3)" });
+
+          const short = (bid) => (branches.find(b => b.id === bid)?.name || "").replace("V-CUT ", "").slice(0, 8);
+
+          const blanks = Array(firstDow).fill(null);
+          const days = Array.from({ length: daysInMonth }, (_, i) => {
+            const d = String(i + 1).padStart(2, "0");
+            return `${month}-${d}`;
+          });
+
+          let presentCount = 0, leaveCount = 0, absentCount = 0;
+          days.forEach(dateStr => {
+            const st = dayStatus(dateStr);
+            if (st.kind === "present") presentCount++;
+            else if (st.kind === "leave") leaveCount++;
+            else if (st.kind === "absent") absentCount++;
+          });
+
+          return (
+            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 10, fontSize: 11, fontWeight: 700 }}>
+                <span style={{ padding: "6px 10px", borderRadius: 8, background: "rgba(74,222,128,0.12)", color: "var(--green)" }}>● Present {presentCount}</span>
+                <span style={{ padding: "6px 10px", borderRadius: 8, background: "rgba(96,165,250,0.12)", color: "var(--blue, #60a5fa)" }}>● Leave {leaveCount}</span>
+                <span style={{ padding: "6px 10px", borderRadius: 8, background: "rgba(248,113,113,0.1)", color: "var(--red)" }}>● Absent {absentCount}</span>
+                <span style={{ marginLeft: "auto", padding: "6px 10px", borderRadius: 8, background: "var(--bg4)", color: "var(--text3)" }}>Home: {(branches.find(b => b.id === s.branch_id)?.name || "—").replace("V-CUT ", "")}</span>
+              </div>
+
+              {/* Weekday header */}
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 6, fontSize: 10, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.2, textAlign: "center" }}>
+                {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(d => <div key={d}>{d}</div>)}
+              </div>
+
+              {/* Calendar grid */}
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 6 }}>
+                {blanks.map((_, i) => <div key={`b${i}`} />)}
+                {days.map(dateStr => {
+                  const st = dayStatus(dateStr);
+                  const c = colorFor(st.kind);
+                  const isToday = dateStr === todayStr;
+                  const bName = st.branch_id ? short(st.branch_id) : "";
+                  const hasOverride = st.source === "override";
+                  return (
+                    <button key={dateStr}
+                      disabled={!canEdit}
+                      onClick={() => { setEditingDay(dateStr); setDayDraft({ present: st.kind === "present" || st.kind === "leave" ? (st.kind === "present") : false, branch_id: st.branch_id || s.branch_id || "", note: st.note || "" }); }}
+                      style={{
+                        position: "relative",
+                        aspectRatio: "1 / 1",
+                        padding: 6,
+                        borderRadius: 10,
+                        background: c.bg,
+                        border: `1px solid ${isToday ? "var(--accent)" : c.border}`,
+                        color: c.text,
+                        cursor: canEdit ? "pointer" : "default",
+                        display: "flex",
+                        flexDirection: "column",
+                        alignItems: "flex-start",
+                        justifyContent: "space-between",
+                        fontFamily: "var(--font-headline, var(--font-outfit))",
+                      }}>
+                      <div style={{ display: "flex", width: "100%", justifyContent: "space-between", alignItems: "center", fontSize: 12, fontWeight: 800 }}>
+                        <span>{Number(dateStr.slice(8, 10))}</span>
+                        {hasOverride && <span title="Manually edited" style={{ fontSize: 8, color: "var(--accent)" }}>✎</span>}
+                      </div>
+                      {bName && <div style={{ fontSize: 9, fontWeight: 700, opacity: 0.9, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%" }}>{bName}</div>}
+                      {st.kind === "leave" && <div style={{ fontSize: 9, fontWeight: 700, opacity: 0.85 }}>LEAVE</div>}
+                      {st.kind === "absent" && st.source === "default" && <div style={{ fontSize: 9, fontWeight: 700, opacity: 0.75 }}>—</div>}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Inline day editor */}
+              {editingDay && canEdit && (() => {
+                const st = dayStatus(editingDay);
+                const hasOverride = st.source === "override";
+                return (
+                  <div style={{ padding: 14, borderRadius: 12, background: "var(--bg3)", border: "1px solid var(--border2)", display: "flex", flexDirection: "column", gap: 10 }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                      <div style={{ fontSize: 13, fontWeight: 800, color: "var(--text)" }}>Edit {editingDay}</div>
+                      <button type="button" onClick={() => setEditingDay(null)}
+                        style={{ background: "transparent", border: "none", color: "var(--text3)", cursor: "pointer", fontSize: 14 }}>✕</button>
+                    </div>
+                    <div style={{ display: "inline-flex", borderRadius: 8, overflow: "hidden", border: "1px solid var(--border2)", width: "fit-content" }}>
+                      {[["present", true, "Present"], ["absent", false, "Absent"]].map(([k, v, lbl]) => (
+                        <button key={k} type="button" onClick={() => setDayDraft(d => ({ ...d, present: v }))}
+                          style={{ padding: "8px 14px", background: dayDraft.present === v ? (v ? "var(--green)" : "var(--red)") : "var(--bg3)", color: dayDraft.present === v ? "#000" : "var(--text2)", border: "none", fontSize: 11, fontWeight: 800, cursor: "pointer", textTransform: "uppercase", letterSpacing: 1 }}>{lbl}</button>
+                      ))}
+                    </div>
+                    {dayDraft.present && (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                        <label style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Worked at</label>
+                        <select value={dayDraft.branch_id || ""} onChange={e => setDayDraft(d => ({ ...d, branch_id: e.target.value }))}
+                          style={{ padding: "8px 10px", borderRadius: 8, background: "var(--bg4)", border: "1px solid var(--border2)", color: "var(--text)", fontSize: 12 }}>
+                          <option value="">—</option>
+                          {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                        </select>
+                      </div>
+                    )}
+                    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                      <label style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Note (optional)</label>
+                      <input value={dayDraft.note} onChange={e => setDayDraft(d => ({ ...d, note: e.target.value }))}
+                        placeholder="Reason / context"
+                        style={{ padding: "8px 10px", borderRadius: 8, background: "var(--bg4)", border: "1px solid var(--border2)", color: "var(--text)", fontSize: 12, outline: "none" }} />
+                    </div>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <button type="button" onClick={() => saveDay(editingDay, dayDraft)}
+                        style={{ flex: 1, padding: "10px", borderRadius: 10, background: "var(--accent)", color: "#000", border: "none", fontWeight: 800, cursor: "pointer" }}>Save</button>
+                      {hasOverride && (
+                        <button type="button" onClick={() => clearOverride(editingDay)}
+                          title="Revert to computed attendance"
+                          style={{ padding: "10px 14px", borderRadius: 10, background: "var(--bg4)", color: "var(--text2)", border: "1px solid var(--border)", fontWeight: 700, cursor: "pointer" }}>Clear Override</button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              <div style={{ fontSize: 10, color: "var(--text3)", lineHeight: 1.5 }}>
+                Source priority: <strong>Manual override</strong> › Approved leave › Daily entries › Join/exit lifecycle.
+                {!canEdit && <> You have read-only access.</>}
+              </div>
+            </div>
+          );
+        })()}
+      </Modal>
 
       {/* Transfer Modal */}
       <Modal isOpen={!!transferModal} onClose={() => setTransferModal(null)} title={`Transfer Staff — ${transferModal?.name || ''}`}>
@@ -561,7 +796,22 @@ export default function StaffPage() {
                         <Pill label={s.role || "Trainee"} color={s.role === 'Captain' ? 'purple' : 'blue'} />
                         {overall === 'active' ? <Pill label="Active" color="green" /> : <Pill label="Inactive" color="red" />}
                       </div>
-                      {monthSt.status === 'partial' && <div style={{ fontSize: 10, color: "var(--orange)", fontWeight: 600 }}>Partial: {monthSt.daysWorked} working days</div>}
+                      {monthSt.status === 'partial' && (
+                        <button type="button"
+                          onClick={() => setAttendanceModal({ staff: s, month: filterMode === "month" ? filterPrefix : `${filterYear}-${String(NOW.getMonth() + 1).padStart(2, "0")}` })}
+                          title="Open attendance calendar"
+                          style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", fontSize: 10, color: "var(--orange)", fontWeight: 600, textAlign: "left", textDecoration: "underline dotted" }}>
+                          Partial: {monthSt.daysWorked} working days · view calendar
+                        </button>
+                      )}
+                      {monthSt.status === 'active' && (
+                        <button type="button"
+                          onClick={() => setAttendanceModal({ staff: s, month: filterMode === "month" ? filterPrefix : `${filterYear}-${String(NOW.getMonth() + 1).padStart(2, "0")}` })}
+                          title="Open attendance calendar"
+                          style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", fontSize: 10, color: "var(--text3)", fontWeight: 500, textAlign: "left" }}>
+                          📅 Attendance
+                        </button>
+                      )}
                     </div>
                   </TD>
                   <TD style={{ minWidth: 200 }}>
