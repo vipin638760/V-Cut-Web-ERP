@@ -39,7 +39,7 @@ export default function StaffPage() {
   // UI state
   const [branchFilter, setBranchFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("active");
-  const [roleFilter, setRoleFilter] = useState("all"); // all | mens | unisex
+  const [branchTypeFilter, setBranchTypeFilter] = useState("all"); // all | mens | unisex — based on branch.type
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState(null);
 
@@ -107,15 +107,13 @@ export default function StaffPage() {
   let filtered = branchFilter ? staff.filter(s => s.branch_id === branchFilter) : [...staff];
   if (statusFilter === "active") filtered = filtered.filter(s => staffOverallStatus(s, statusRefMon) === "active");
   else if (statusFilter === "inactive") filtered = filtered.filter(s => staffOverallStatus(s, statusRefMon) !== "active");
-  if (roleFilter !== "all") filtered = filtered.filter(s => (s.role || "—") === roleFilter);
-
-  // Distinct role chips built from the current staff list (skips empty) —
-  // automatically picks up new roles added via Settings without a code change.
-  const roleChips = (() => {
-    const seen = new Set();
-    staff.forEach(s => { if (s.role) seen.add(s.role); });
-    return [...seen].sort();
-  })();
+  if (branchTypeFilter !== "all") {
+    const branchById = new Map(branches.map(b => [b.id, b]));
+    filtered = filtered.filter(s => {
+      const t = (branchById.get(s.branch_id)?.type || "").toLowerCase();
+      return branchTypeFilter === "unisex" ? t === "unisex" : t !== "unisex"; // mens = everything that isn't unisex
+    });
+  }
   // For admin, hide pending-setup staff from the main table (they appear in the Pending Setup section above)
   if (isAdmin) filtered = filtered.filter(s => !s.pending_setup);
 
@@ -370,16 +368,12 @@ export default function StaffPage() {
           ))}
         </div>
 
-        {/* Role filter — one chip per distinct role in the current staff list */}
-        <div style={{ display: "inline-flex", flexWrap: "wrap", background: "var(--bg3)", border: "1.5px solid var(--border2)", borderRadius: 12, padding: 3, gap: 2 }}>
-          <button onClick={() => setRoleFilter("all")}
-            style={{ padding: "6px 14px", fontSize: 11, fontWeight: 700, color: roleFilter === "all" ? "#000" : "var(--text3)", background: roleFilter === "all" ? "var(--accent)" : "transparent", border: "none", borderRadius: 9, cursor: "pointer", transition: "all 0.2s", textTransform: "uppercase" }}>
-            All Roles
-          </button>
-          {roleChips.map(role => (
-            <button key={role} onClick={() => setRoleFilter(role)}
-              style={{ padding: "6px 14px", fontSize: 11, fontWeight: 700, color: roleFilter === role ? "#000" : "var(--text3)", background: roleFilter === role ? "var(--accent)" : "transparent", border: "none", borderRadius: 9, cursor: "pointer", transition: "all 0.2s", textTransform: "uppercase" }}>
-              {role.replace(" Hairdresser", "")}
+        {/* Branch-type filter — filters by the staff's branch.type (mens / unisex) */}
+        <div style={{ display: "inline-flex", background: "var(--bg3)", border: "1.5px solid var(--border2)", borderRadius: 12, padding: 3, gap: 2 }}>
+          {[["all", "All"], ["mens", "Mens"], ["unisex", "Unisex"]].map(([val, label]) => (
+            <button key={val} onClick={() => setBranchTypeFilter(val)}
+              style={{ padding: "6px 16px", fontSize: 11, fontWeight: 700, color: branchTypeFilter === val ? "#000" : "var(--text3)", background: branchTypeFilter === val ? "var(--accent)" : "transparent", border: "none", borderRadius: 9, cursor: "pointer", transition: "all 0.2s", textTransform: "uppercase" }}>
+              {label}
             </button>
           ))}
         </div>
@@ -560,8 +554,15 @@ export default function StaffPage() {
             return `${month}-${d}`;
           });
 
+          // For the current month, counts stop at yesterday (today hasn't closed).
+          const nowDate = new Date();
+          const isCurrentMonthView = nowDate.getFullYear() === yr && nowDate.getMonth() + 1 === mo;
+          const cutoff = isCurrentMonthView
+            ? new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate() - 1).toISOString().slice(0, 10)
+            : null;
           let presentCount = 0, leaveCount = 0, absentCount = 0;
           days.forEach(dateStr => {
+            if (cutoff && dateStr > cutoff) return;
             const st = dayStatus(dateStr);
             if (st.kind === "present") presentCount++;
             else if (st.kind === "leave") leaveCount++;
@@ -777,7 +778,9 @@ export default function StaffPage() {
               const tgt = (s.target || 50000) * monthsInView;
               const overall = staffOverallStatus(s, statusRefMon);
               const checkMon = filterMode === "month" ? filterPrefix : filterYear + "-" + String(NOW.getMonth() + 1).padStart(2, "0");
-              const monthSt = staffStatusForMonth(s, checkMon);
+              // Cap to yesterday for display — current-month "22 working days" is misleading
+              // when today's entry hasn't been captured yet. Payroll/targets still use the full-month view.
+              const monthSt = staffStatusForMonth(s, checkMon, { capToYesterday: true });
               const sal = yearlyStaffSalary(s);
               const isPending = pendingStatus[s.id];
               const activeTransfer = getActiveTransfer(s.id);
@@ -807,20 +810,14 @@ export default function StaffPage() {
                         <Pill label={s.role || "Trainee"} color={s.role === 'Captain' ? 'purple' : 'blue'} />
                         {overall === 'active' ? <Pill label="Active" color="green" /> : <Pill label="Inactive" color="red" />}
                       </div>
-                      {monthSt.status === 'partial' && (
+                      {(monthSt.status === 'partial' || monthSt.status === 'active') && (
                         <button type="button"
                           onClick={() => setAttendanceModal({ staff: s, month: filterMode === "month" ? filterPrefix : `${filterYear}-${String(NOW.getMonth() + 1).padStart(2, "0")}` })}
                           title="Open attendance calendar"
-                          style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", fontSize: 10, color: "var(--orange)", fontWeight: 600, textAlign: "left", textDecoration: "underline dotted" }}>
-                          Partial: {monthSt.daysWorked} working days · view calendar
-                        </button>
-                      )}
-                      {monthSt.status === 'active' && (
-                        <button type="button"
-                          onClick={() => setAttendanceModal({ staff: s, month: filterMode === "month" ? filterPrefix : `${filterYear}-${String(NOW.getMonth() + 1).padStart(2, "0")}` })}
-                          title="Open attendance calendar"
-                          style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", fontSize: 10, color: "var(--text3)", fontWeight: 500, textAlign: "left" }}>
-                          📅 Attendance
+                          style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", fontSize: 10, color: monthSt.status === 'partial' ? "var(--orange)" : "var(--text3)", fontWeight: 600, textAlign: "left", textDecoration: "underline dotted" }}>
+                          {monthSt.status === 'partial'
+                            ? `Partial: ${monthSt.daysWorked} working days${monthSt.toDate ? " · to date" : ""} · view calendar`
+                            : `📅 ${monthSt.daysWorked} working days${monthSt.toDate ? " · to date" : ""}`}
                         </button>
                       )}
                     </div>

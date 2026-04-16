@@ -96,18 +96,36 @@ export function staffOverallStatus(st, forMonth) {
 }
 
 /** Staff status detail for a specific month (active/partial/inactive + days worked) */
-export function staffStatusForMonth(st, monthStr) {
+// Opts:
+//   capToYesterday — for the CURRENT month, clamp the end to (today - 1).
+//     Reason: today's entries haven't been captured yet, so showing full-month
+//     working days is misleading in attendance / "Partial: N working days" UI.
+//     Payroll and targets keep the full-month view, so this is opt-in.
+export function staffStatusForMonth(st, monthStr, opts = {}) {
+  const { capToYesterday = false } = opts;
   const [yr, mo] = monthStr.split('-').map(Number);
   const daysInMonth = new Date(yr, mo, 0).getDate();
   const monthStart = new Date(yr, mo - 1, 1);
-  const monthEnd = new Date(yr, mo, 0);
+  let monthEnd = new Date(yr, mo, 0);
+  let fullMonth = true;
+
+  if (capToYesterday) {
+    const now = new Date();
+    const isCurrentMonth = now.getFullYear() === yr && now.getMonth() + 1 === mo;
+    if (isCurrentMonth) {
+      const y = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+      if (y < monthStart) return { status: 'active', daysWorked: 0, calDays: 0, toDate: true };
+      if (y < monthEnd) { monthEnd = y; fullMonth = false; }
+    }
+  }
+
   const joinDate = st.join ? new Date(st.join) : null;
   const exitDate = st.exit_date ? new Date(st.exit_date) : null;
 
   if (joinDate && joinDate > monthEnd) return { status: 'inactive', daysWorked: 0 };
   if (exitDate && exitDate < monthStart) return { status: 'inactive', daysWorked: 0 };
 
-  if ((!joinDate || joinDate <= monthStart) && (!exitDate || exitDate >= monthEnd)) {
+  if ((!joinDate || joinDate <= monthStart) && (!exitDate || exitDate >= monthEnd) && fullMonth) {
     return { status: 'active', daysWorked: daysInMonth };
   }
 
@@ -116,7 +134,15 @@ export function staffStatusForMonth(st, monthStr) {
   const calDays = Math.round((effEnd - effStart) / 86400000) + 1;
   const offDays = Math.floor(calDays / 7) * 2 + (calDays % 7 >= 6 ? 1 : 0);
   const worked = Math.max(0, calDays - offDays);
-  return { status: 'partial', daysWorked: worked, calDays, joinedOn: st.join, exitedOn: st.exit_date };
+  const spansFullWindow = (!joinDate || joinDate <= monthStart) && (!exitDate || exitDate >= monthEnd);
+  return {
+    status: spansFullWindow && !fullMonth ? 'active' : 'partial',
+    daysWorked: worked,
+    calDays,
+    toDate: !fullMonth,
+    joinedOn: st.join,
+    exitedOn: st.exit_date,
+  };
 }
 
 /** Count approved leaves for a staff member in a given month string (YYYY-MM) */
