@@ -54,6 +54,7 @@ export default function DashboardLayout({ children }) {
   const [sidebarPinned, setSidebarPinned] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const [isTablet, setIsTablet] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
   const { confirm, ConfirmDialog } = useConfirm();
 
   const router   = useRouter();
@@ -127,6 +128,7 @@ export default function DashboardLayout({ children }) {
   }, [router, sidebarPinned, isMobile]);
 
   if (!user) return <VLoader fullscreen label="Connecting" />;
+  if (loggingOut) return <VLoader fullscreen label="Signing out" />;
 
   const parts = pathname.split("/").filter(Boolean);
   const currentTab = parts.length >= 2 ? parts[1] : "dashboard";
@@ -152,6 +154,7 @@ export default function DashboardLayout({ children }) {
       cancelText: "Stay Signed In",
       type: "warning",
       onConfirm: () => {
+        setLoggingOut(true);
         localStorage.removeItem("vcut_user");
         sessionStorage.removeItem("vcut_user");
         router.push("/");
