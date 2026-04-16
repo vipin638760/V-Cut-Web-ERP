@@ -293,35 +293,92 @@ export default function BranchesPage() {
       setAttendanceSelectedDay(null);
     };
 
+    // Month totals for header summary
+    const monthTotals = days.reduce((acc, d) => {
+      if (cutoff && d > cutoff) return acc;
+      const { present, loan, approvedLeaves } = perDay(d);
+      acc.present += present.length;
+      acc.loan += loan.length;
+      acc.leave += approvedLeaves.length;
+      if (present.length + loan.length > 0) acc.activeDays += 1;
+      return acc;
+    }, { present: 0, loan: 0, leave: 0, activeDays: 0 });
+
+    const LEAVE_HEX = "#c084fc"; // violet-400 — distinct from accent/blue
+    const LEAVE_BG = "rgba(192,132,252,0.10)";
+    const LEAVE_BORDER = "rgba(192,132,252,0.35)";
+
     return (
       <div onClick={() => { setAttendanceCalendar(null); setAttendanceSelectedDay(null); }}
-        style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", backdropFilter: "blur(8px)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: 20, overflowY: "auto" }}>
+        style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.78)", backdropFilter: "blur(10px)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: 20, overflowY: "auto" }}>
         <div onClick={e => e.stopPropagation()}
-          style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 20, width: "100%", maxWidth: 1080, maxHeight: "90vh", overflow: "hidden", display: "flex", flexDirection: "column", boxShadow: "0 25px 50px -12px rgba(0,0,0,0.6)" }}>
-          {/* Header */}
-          <div style={{ padding: "18px 24px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-            <div>
-              <div style={{ fontSize: 10, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 2 }}>Attendance Calendar</div>
-              <div style={{ fontSize: 18, fontWeight: 800, color: "var(--gold)", letterSpacing: 0.3 }}>{attBranch.name}</div>
-            </div>
-            <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-              <button onClick={prevMonth} title="Previous month"
-                style={{ width: 32, height: 32, borderRadius: 8, background: "var(--bg3)", border: "1px solid var(--border2)", color: "var(--text2)", cursor: "pointer", fontSize: 14 }}>‹</button>
-              <div style={{ minWidth: 150, textAlign: "center", fontSize: 14, fontWeight: 700, color: "var(--text)" }}>
-                {new Date(yr, mo - 1, 1).toLocaleString("en-US", { month: "long", year: "numeric" })}
+          style={{ background: "linear-gradient(180deg, var(--bg2) 0%, var(--bg1) 100%)", border: "1px solid var(--border)", borderRadius: 22, width: "100%", maxWidth: 1120, maxHeight: "92vh", overflow: "hidden", display: "flex", flexDirection: "column", boxShadow: "0 30px 60px -15px rgba(0,0,0,0.75), 0 0 0 1px rgba(34,211,238,0.05)" }}>
+
+          {/* Header with gradient accent bar */}
+          <div style={{ position: "relative", padding: "22px 28px 20px", borderBottom: "1px solid var(--border)", background: "linear-gradient(135deg, rgba(34,211,238,0.06) 0%, rgba(192,132,252,0.04) 50%, rgba(251,146,60,0.04) 100%)" }}>
+            <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 2, background: "linear-gradient(90deg, var(--accent) 0%, #c084fc 50%, var(--orange) 100%)" }} />
+            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+                <div style={{ width: 44, height: 44, borderRadius: 12, background: "linear-gradient(135deg, rgba(34,211,238,0.18), rgba(34,211,238,0.04))", border: "1px solid rgba(34,211,238,0.35)", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--accent)" }}>
+                  <Icon name="checkCircle" size={22} />
+                </div>
+                <div>
+                  <div style={{ fontSize: 10, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 2 }}>Attendance Calendar</div>
+                  <div style={{ fontSize: 19, fontWeight: 800, color: "var(--gold)", letterSpacing: 0.3, lineHeight: 1.2, marginTop: 2 }}>{attBranch.name}</div>
+                </div>
               </div>
-              <button onClick={nextMonth} title="Next month"
-                style={{ width: 32, height: 32, borderRadius: 8, background: "var(--bg3)", border: "1px solid var(--border2)", color: "var(--text2)", cursor: "pointer", fontSize: 14 }}>›</button>
-              <button onClick={() => { setAttendanceCalendar(null); setAttendanceSelectedDay(null); }}
-                style={{ marginLeft: 8, width: 32, height: 32, borderRadius: 8, background: "transparent", border: "1px solid var(--border)", color: "var(--text3)", cursor: "pointer", fontSize: 14 }}>✕</button>
+              <div style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                <button onClick={prevMonth} title="Previous month"
+                  style={{ width: 34, height: 34, borderRadius: 10, background: "var(--bg3)", border: "1px solid var(--border2)", color: "var(--text2)", cursor: "pointer", fontSize: 16, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", transition: "all .15s" }}
+                  onMouseEnter={e => { e.currentTarget.style.background = "var(--bg4)"; e.currentTarget.style.color = "var(--accent)"; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = "var(--bg3)"; e.currentTarget.style.color = "var(--text2)"; }}>‹</button>
+                <div style={{ minWidth: 170, textAlign: "center", fontSize: 15, fontWeight: 800, color: "var(--text)", letterSpacing: 0.3, fontFamily: "var(--font-headline, var(--font-outfit))" }}>
+                  {new Date(yr, mo - 1, 1).toLocaleString("en-US", { month: "long", year: "numeric" })}
+                </div>
+                <button onClick={nextMonth} title="Next month"
+                  style={{ width: 34, height: 34, borderRadius: 10, background: "var(--bg3)", border: "1px solid var(--border2)", color: "var(--text2)", cursor: "pointer", fontSize: 16, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", transition: "all .15s" }}
+                  onMouseEnter={e => { e.currentTarget.style.background = "var(--bg4)"; e.currentTarget.style.color = "var(--accent)"; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = "var(--bg3)"; e.currentTarget.style.color = "var(--text2)"; }}>›</button>
+                <button onClick={() => { setAttendanceCalendar(null); setAttendanceSelectedDay(null); }} title="Close"
+                  style={{ marginLeft: 8, width: 34, height: 34, borderRadius: 10, background: "transparent", border: "1px solid var(--border)", color: "var(--text3)", cursor: "pointer", fontSize: 14, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", transition: "all .15s" }}
+                  onMouseEnter={e => { e.currentTarget.style.background = "rgba(239,68,68,0.10)"; e.currentTarget.style.color = "var(--red)"; e.currentTarget.style.borderColor = "rgba(239,68,68,0.35)"; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--text3)"; e.currentTarget.style.borderColor = "var(--border)"; }}>✕</button>
+              </div>
+            </div>
+
+            {/* Summary stat strip */}
+            <div style={{ display: "flex", gap: 8, marginTop: 16, flexWrap: "wrap" }}>
+              <div style={{ padding: "6px 12px", borderRadius: 8, background: "rgba(74,222,128,0.08)", border: "1px solid rgba(74,222,128,0.25)", display: "inline-flex", alignItems: "center", gap: 6 }}>
+                <span style={{ width: 6, height: 6, borderRadius: 3, background: "var(--green)" }} />
+                <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1 }}>Present</span>
+                <span style={{ fontSize: 13, fontWeight: 800, color: "var(--green)" }}>{monthTotals.present}</span>
+              </div>
+              {monthTotals.loan > 0 && (
+                <div style={{ padding: "6px 12px", borderRadius: 8, background: "rgba(251,146,60,0.08)", border: "1px solid rgba(251,146,60,0.25)", display: "inline-flex", alignItems: "center", gap: 6 }}>
+                  <span style={{ width: 6, height: 6, borderRadius: 3, background: "var(--orange)" }} />
+                  <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1 }}>Loaned</span>
+                  <span style={{ fontSize: 13, fontWeight: 800, color: "var(--orange)" }}>{monthTotals.loan}</span>
+                </div>
+              )}
+              {monthTotals.leave > 0 && (
+                <div style={{ padding: "6px 12px", borderRadius: 8, background: LEAVE_BG, border: `1px solid ${LEAVE_BORDER}`, display: "inline-flex", alignItems: "center", gap: 6 }}>
+                  <Icon name="moon" size={11} />
+                  <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1 }}>On Leave</span>
+                  <span style={{ fontSize: 13, fontWeight: 800, color: LEAVE_HEX }}>{monthTotals.leave}</span>
+                </div>
+              )}
+              <div style={{ padding: "6px 12px", borderRadius: 8, background: "var(--bg3)", border: "1px solid var(--border2)", display: "inline-flex", alignItems: "center", gap: 6 }}>
+                <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1 }}>Active Days</span>
+                <span style={{ fontSize: 13, fontWeight: 800, color: "var(--text)" }}>{monthTotals.activeDays}</span>
+              </div>
             </div>
           </div>
 
           {/* Body: calendar grid + right roster */}
-          <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 2fr) minmax(0, 1fr)", gap: 20, padding: 20, overflowY: "auto" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 2fr) minmax(0, 1fr)", gap: 22, padding: 22, overflowY: "auto" }}>
             {/* Calendar grid */}
             <div>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 6, fontSize: 10, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.2, textAlign: "center", marginBottom: 6 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 6, fontSize: 10, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.5, textAlign: "center", marginBottom: 8, paddingBottom: 8, borderBottom: "1px dashed var(--border)" }}>
                 {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(d => <div key={d}>{d}</div>)}
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 6 }}>
@@ -330,96 +387,152 @@ export default function BranchesPage() {
                   const isFuture = cutoff && dateStr > cutoff;
                   const { present, loan, approvedLeaves } = perDay(dateStr);
                   const total = present.length + loan.length;
+                  const hasLeave = approvedLeaves.length > 0;
                   const isToday = dateStr === todayStr;
                   const isActive = dateStr === activeDay;
+                  // Colour priority: active > future > leave-only > has-activity > empty
+                  const baseBg = isActive
+                    ? "linear-gradient(135deg, var(--accent) 0%, #0ea5c4 100%)"
+                    : isFuture
+                      ? "repeating-linear-gradient(45deg, var(--bg4), var(--bg4) 4px, transparent 4px, transparent 8px)"
+                      : total > 0
+                        ? "linear-gradient(180deg, rgba(74,222,128,0.10), rgba(74,222,128,0.02))"
+                        : hasLeave && !total
+                          ? `linear-gradient(180deg, ${LEAVE_BG}, rgba(192,132,252,0.02))`
+                          : "var(--bg4)";
+                  const baseBorder = isActive
+                    ? "var(--accent)"
+                    : isToday
+                      ? "rgba(34,211,238,0.6)"
+                      : total > 0
+                        ? "rgba(74,222,128,0.28)"
+                        : hasLeave
+                          ? LEAVE_BORDER
+                          : "var(--border)";
                   return (
                     <button key={dateStr}
                       onClick={() => setAttendanceSelectedDay(dateStr)}
                       style={{
                         aspectRatio: "1 / 1",
                         padding: 8,
-                        borderRadius: 10,
-                        background: isActive ? "var(--accent)" : isFuture ? "transparent" : total > 0 ? "rgba(74,222,128,0.08)" : "var(--bg4)",
-                        border: `1px solid ${isActive ? "var(--accent)" : isToday ? "var(--accent)" : total > 0 ? "rgba(74,222,128,0.3)" : "var(--border)"}`,
-                        color: isActive ? "#000" : "var(--text)",
+                        borderRadius: 12,
+                        background: baseBg,
+                        border: `1px solid ${baseBorder}`,
+                        boxShadow: isActive ? "0 6px 18px -4px rgba(34,211,238,0.5)" : isToday ? "inset 0 0 0 1px rgba(34,211,238,0.25)" : "none",
+                        color: isActive ? "#001418" : "var(--text)",
                         cursor: "pointer",
                         display: "flex",
                         flexDirection: "column",
                         alignItems: "flex-start",
                         justifyContent: "space-between",
-                        opacity: isFuture ? 0.45 : 1,
+                        opacity: isFuture ? 0.42 : 1,
                         fontFamily: "var(--font-headline, var(--font-outfit))",
-                        transition: "all .15s",
-                      }}>
+                        transition: "transform .15s, box-shadow .15s",
+                        outline: "none",
+                      }}
+                      onMouseEnter={e => { if (!isActive && !isFuture) { e.currentTarget.style.transform = "translateY(-1px)"; e.currentTarget.style.boxShadow = "0 4px 12px -2px rgba(0,0,0,0.4)"; } }}
+                      onMouseLeave={e => { if (!isActive && !isFuture) { e.currentTarget.style.transform = "translateY(0)"; e.currentTarget.style.boxShadow = isToday ? "inset 0 0 0 1px rgba(34,211,238,0.25)" : "none"; } }}>
                       <div style={{ display: "flex", width: "100%", justifyContent: "space-between", alignItems: "center", fontSize: 13, fontWeight: 800 }}>
                         <span>{Number(dateStr.slice(8, 10))}</span>
-                        {approvedLeaves.length > 0 && <span title={`${approvedLeaves.length} on leave`} style={{ fontSize: 10, color: isActive ? "#000" : "var(--blue, #60a5fa)" }}>🌴{approvedLeaves.length}</span>}
+                        {hasLeave && (
+                          <span title={`${approvedLeaves.length} on leave`}
+                            style={{ display: "inline-flex", alignItems: "center", gap: 2, fontSize: 9, fontWeight: 800, padding: "1px 5px", borderRadius: 5, background: isActive ? "rgba(0,20,24,0.15)" : LEAVE_BG, color: isActive ? "#001418" : LEAVE_HEX, border: `1px solid ${isActive ? "transparent" : LEAVE_BORDER}` }}>
+                            <Icon name="moon" size={9} />{approvedLeaves.length}
+                          </span>
+                        )}
                       </div>
                       <div style={{ display: "inline-flex", gap: 4, fontSize: 10, fontWeight: 800 }}>
-                        {present.length > 0 && <span style={{ padding: "2px 6px", borderRadius: 5, background: isActive ? "rgba(0,0,0,0.12)" : "rgba(74,222,128,0.18)", color: isActive ? "#000" : "var(--green)" }}>{present.length}</span>}
-                        {loan.length > 0 && <span style={{ padding: "2px 6px", borderRadius: 5, background: isActive ? "rgba(0,0,0,0.12)" : "rgba(251,146,60,0.18)", color: isActive ? "#000" : "var(--orange)" }}>+{loan.length}</span>}
-                        {!total && !isFuture && <span style={{ color: "var(--text3)" }}>—</span>}
+                        {present.length > 0 && <span style={{ padding: "2px 7px", borderRadius: 5, background: isActive ? "rgba(0,20,24,0.15)" : "rgba(74,222,128,0.18)", color: isActive ? "#001418" : "var(--green)" }}>{present.length}</span>}
+                        {loan.length > 0 && <span style={{ padding: "2px 7px", borderRadius: 5, background: isActive ? "rgba(0,20,24,0.15)" : "rgba(251,146,60,0.18)", color: isActive ? "#001418" : "var(--orange)" }}>+{loan.length}</span>}
+                        {!total && !hasLeave && !isFuture && <span style={{ color: "var(--text3)", opacity: 0.5 }}>—</span>}
                       </div>
                     </button>
                   );
                 })}
               </div>
-              <div style={{ fontSize: 10, color: "var(--text3)", marginTop: 12, lineHeight: 1.5 }}>
-                <span style={{ color: "var(--green)", fontWeight: 700 }}>Green</span> = home-branch staff · <span style={{ color: "var(--orange)", fontWeight: 700 }}>Orange</span> = loaned in · 🌴 = on leave. Click any day for the full roster.
-                {cutoff && <> Current month cells after <strong>{cutoff}</strong> are dimmed (not yet captured).</>}
+
+              {/* Legend */}
+              <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginTop: 14, padding: "10px 14px", background: "var(--bg3)", borderRadius: 10, border: "1px solid var(--border)" }}>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 10, color: "var(--text3)" }}>
+                  <span style={{ width: 10, height: 10, borderRadius: 3, background: "var(--green)" }} />
+                  <span style={{ color: "var(--text2)", fontWeight: 600 }}>Home-branch</span>
+                </span>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 10, color: "var(--text3)" }}>
+                  <span style={{ width: 10, height: 10, borderRadius: 3, background: "var(--orange)" }} />
+                  <span style={{ color: "var(--text2)", fontWeight: 600 }}>Loaned in</span>
+                </span>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 10, color: "var(--text3)" }}>
+                  <span style={{ color: LEAVE_HEX, display: "inline-flex" }}><Icon name="moon" size={11} /></span>
+                  <span style={{ color: "var(--text2)", fontWeight: 600 }}>On leave</span>
+                </span>
+                {cutoff && (
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 10, color: "var(--text3)" }}>
+                    <span style={{ width: 14, height: 10, borderRadius: 2, backgroundImage: "repeating-linear-gradient(45deg, var(--bg4), var(--bg4) 3px, transparent 3px, transparent 6px)", border: "1px solid var(--border2)" }} />
+                    <span style={{ color: "var(--text2)", fontWeight: 600 }}>After <strong style={{ color: "var(--text2)" }}>{cutoff}</strong> — not captured</span>
+                  </span>
+                )}
               </div>
             </div>
 
             {/* Right — selected day roster */}
-            <div style={{ borderLeft: "1px solid var(--border)", paddingLeft: 20 }}>
+            <div style={{ borderLeft: "1px solid var(--border)", paddingLeft: 22 }}>
               {activeRoster ? (
                 <div>
-                  <div style={{ fontSize: 11, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.5 }}>Roster for</div>
-                  <div style={{ fontSize: 16, fontWeight: 800, color: "var(--text)", marginBottom: 14 }}>
+                  <div style={{ fontSize: 11, fontWeight: 800, color: "var(--accent)", textTransform: "uppercase", letterSpacing: 1.8 }}>Roster for</div>
+                  <div style={{ fontSize: 17, fontWeight: 800, color: "var(--text)", marginBottom: 14, fontFamily: "var(--font-headline, var(--font-outfit))" }}>
                     {new Date(activeDay + "T00:00").toLocaleString("en-US", { weekday: "long", day: "numeric", month: "short", year: "numeric" })}
                   </div>
 
                   {activeRoster.present.length === 0 && activeRoster.loan.length === 0 && activeRoster.approvedLeaves.length === 0 ? (
-                    <div style={{ padding: 20, background: "var(--bg3)", border: "1px dashed var(--border2)", borderRadius: 10, color: "var(--text3)", fontSize: 12, textAlign: "center" }}>No activity recorded for this day.</div>
+                    <div style={{ padding: 24, background: "var(--bg3)", border: "1px dashed var(--border2)", borderRadius: 12, color: "var(--text3)", fontSize: 12, textAlign: "center" }}>
+                      <div style={{ fontSize: 24, marginBottom: 6, opacity: 0.5 }}>📭</div>
+                      No activity recorded for this day.
+                    </div>
                   ) : (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                       {activeRoster.present.map(p => (
-                        <div key={`p-${p.id}`} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", background: "rgba(74,222,128,0.06)", border: "1px solid rgba(74,222,128,0.2)", borderRadius: 10 }}>
-                          <div style={{ width: 32, height: 32, borderRadius: 8, background: "var(--bg4)", color: "var(--green)", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 13 }}>{p.name[0]}</div>
+                        <div key={`p-${p.id}`} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 13px", background: "linear-gradient(180deg, rgba(74,222,128,0.08), rgba(74,222,128,0.02))", border: "1px solid rgba(74,222,128,0.22)", borderLeft: "3px solid var(--green)", borderRadius: 10 }}>
+                          <div style={{ width: 34, height: 34, borderRadius: 10, background: "linear-gradient(135deg, rgba(74,222,128,0.2), rgba(74,222,128,0.05))", color: "var(--green)", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 14, border: "1px solid rgba(74,222,128,0.25)" }}>{p.name[0]}</div>
                           <div style={{ flex: 1, minWidth: 0 }}>
                             <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</div>
-                            {p.role && <div style={{ fontSize: 10, color: "var(--text3)" }}>{p.role}</div>}
+                            {p.role && <div style={{ fontSize: 10, color: "var(--text3)", marginTop: 1 }}>{p.role}</div>}
                           </div>
-                          {p.billing > 0 && <span style={{ fontSize: 11, color: "var(--green)", fontWeight: 700 }}>{INR(p.billing)}</span>}
+                          {p.billing > 0 && <span style={{ fontSize: 12, color: "var(--green)", fontWeight: 800, fontFamily: "var(--font-headline, var(--font-outfit))" }}>{INR(p.billing)}</span>}
                         </div>
                       ))}
                       {activeRoster.loan.map(p => {
                         const homeName = (branches.find(x => x.id === staffById.get(p.id)?.branch_id)?.name || "").replace("V-CUT ", "");
                         return (
-                          <div key={`l-${p.id}`} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", background: "rgba(251,146,60,0.06)", border: "1px solid rgba(251,146,60,0.25)", borderRadius: 10 }}>
-                            <div style={{ width: 32, height: 32, borderRadius: 8, background: "var(--bg4)", color: "var(--orange)", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 13 }}>{p.name[0]}</div>
+                          <div key={`l-${p.id}`} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 13px", background: "linear-gradient(180deg, rgba(251,146,60,0.08), rgba(251,146,60,0.02))", border: "1px solid rgba(251,146,60,0.25)", borderLeft: "3px solid var(--orange)", borderRadius: 10 }}>
+                            <div style={{ width: 34, height: 34, borderRadius: 10, background: "linear-gradient(135deg, rgba(251,146,60,0.2), rgba(251,146,60,0.05))", color: "var(--orange)", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 14, border: "1px solid rgba(251,146,60,0.25)" }}>{p.name[0]}</div>
                             <div style={{ flex: 1, minWidth: 0 }}>
                               <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</div>
-                              <div style={{ fontSize: 10, color: "var(--orange)" }}>LOAN{homeName ? ` · Home: ${homeName}` : ""}</div>
+                              <div style={{ fontSize: 10, color: "var(--orange)", fontWeight: 700, letterSpacing: 0.5, marginTop: 1 }}>LOAN{homeName ? ` · Home: ${homeName}` : ""}</div>
                             </div>
-                            {p.billing > 0 && <span style={{ fontSize: 11, color: "var(--orange)", fontWeight: 700 }}>{INR(p.billing)}</span>}
+                            {p.billing > 0 && <span style={{ fontSize: 12, color: "var(--orange)", fontWeight: 800, fontFamily: "var(--font-headline, var(--font-outfit))" }}>{INR(p.billing)}</span>}
                           </div>
                         );
                       })}
                       {activeRoster.approvedLeaves.map(l => (
-                        <div key={`lv-${l.id}`} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", background: "rgba(96,165,250,0.06)", border: "1px solid rgba(96,165,250,0.25)", borderRadius: 10 }}>
-                          <div style={{ width: 32, height: 32, borderRadius: 8, background: "var(--bg4)", color: "var(--blue, #60a5fa)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>🌴</div>
+                        <div key={`lv-${l.id}`} style={{ position: "relative", display: "flex", alignItems: "center", gap: 12, padding: "11px 13px", background: `linear-gradient(180deg, ${LEAVE_BG}, rgba(192,132,252,0.02))`, border: `1px solid ${LEAVE_BORDER}`, borderLeft: `3px solid ${LEAVE_HEX}`, borderRadius: 10, opacity: 0.95 }}>
+                          <div style={{ width: 34, height: 34, borderRadius: 10, background: "linear-gradient(135deg, rgba(192,132,252,0.22), rgba(192,132,252,0.05))", color: LEAVE_HEX, display: "flex", alignItems: "center", justifyContent: "center", border: `1px solid ${LEAVE_BORDER}` }}>
+                            <Icon name="moon" size={16} />
+                          </div>
                           <div style={{ flex: 1, minWidth: 0 }}>
                             <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{l.name}</div>
-                            <div style={{ fontSize: 10, color: "var(--blue, #60a5fa)" }}>On leave · {l.type}</div>
+                            <div style={{ fontSize: 10, color: LEAVE_HEX, fontWeight: 700, letterSpacing: 0.4, marginTop: 1 }}>ON LEAVE · {l.type}</div>
                           </div>
+                          <span style={{ fontSize: 9, fontWeight: 800, padding: "3px 8px", borderRadius: 6, background: LEAVE_BG, color: LEAVE_HEX, border: `1px solid ${LEAVE_BORDER}`, textTransform: "uppercase", letterSpacing: 0.8 }}>Off</span>
                         </div>
                       ))}
                     </div>
                   )}
                 </div>
               ) : (
-                <div style={{ padding: 30, textAlign: "center", color: "var(--text3)", fontSize: 12 }}>Click any day on the calendar to see its full roster here.</div>
+                <div style={{ padding: 30, textAlign: "center", color: "var(--text3)", fontSize: 12, background: "var(--bg3)", border: "1px dashed var(--border2)", borderRadius: 12 }}>
+                  <div style={{ fontSize: 28, marginBottom: 8, opacity: 0.4 }}>👆</div>
+                  Click any day on the calendar to see its full roster here.
+                </div>
               )}
             </div>
           </div>
