@@ -8,6 +8,10 @@ import { Icon, IconBtn, Card, PeriodWidget, TH, TD, Modal, useConfirm, useToast 
 import { staffStatusForMonth, effectiveBranchOnDate } from "@/lib/calculations";
 import VLoader from "@/components/VLoader";
 import { MEMBERSHIP_TIERS, tierByKey, isActiveMember, daysUntilExpiry, computeMemberToDate, resolveDiscountRate, DEFAULT_MEMBER_DISCOUNT_PCT, MAX_EXTRA_DISCOUNT_PCT } from "@/lib/membership";
+import { shiftId, prevDate, computeDaySummary } from "@/lib/dayShift";
+import { addMinutes } from "@/lib/appointments";
+import AppointmentBoard from "@/components/AppointmentBoard";
+import { setDoc, getDoc } from "firebase/firestore";
 
 
 // ExcelJS is ~200KB — load only when Template/Upload/Export is actually used.
@@ -129,7 +133,17 @@ export default function POSPage() {
   const [discountPct, setDiscountPct] = useState(0); // applied to subtotal at POS
   const [discountApprovalModal, setDiscountApprovalModal] = useState(null); // { requestedPct, reason }
   const [pendingApproval, setPendingApproval] = useState(null); // snapshot of the approval doc currently gating this bill
-  const [viewMode, setViewMode] = useState("pos"); // "pos" | "history"
+
+  // Day shift (open / close)
+  const [dayOpening, setDayOpening] = useState(null);      // doc data or null if not opened
+  const [openDayModal, setOpenDayModal] = useState(null);  // { openingCash } when user clicks Open Day
+  const [closeDayModal, setCloseDayModal] = useState(null); // { cashCounted, summary }
+
+  // Appointments
+  const [appointments, setAppointments] = useState([]);    // today's appointments for this branch
+  const [bookingModal, setBookingModal] = useState(null);  // { staff_id, staff_name, start, customer, services, duration, notes }
+  const [aptDetailModal, setAptDetailModal] = useState(null); // viewing/editing an existing appointment
+  const [viewMode, setViewMode] = useState("pos"); // "pos" | "history" | "booking"
 
   // Dynamic menu: pulled from the `menus` collection based on selected branch.
   // Falls back to a short default when nothing is configured so the POS isn't empty.
@@ -422,6 +436,153 @@ export default function POSPage() {
     return () => unsub();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingApproval?.id]);
+
+  // Day-opening subscription: read the shift doc for this branch+date so we can
+  // gate billing until the day is opened and show the Open/Close banner.
+  useEffect(() => {
+    if (!db || !selBranch || !selDate) { setDayOpening(null); return; }
+    const unsub = onSnapshot(doc(db, "day_openings", shiftId(selBranch, selDate)), snap => {
+      setDayOpening(snap.exists() ? { id: snap.id, ...snap.data() } : null);
+    });
+    return () => unsub();
+  }, [selBranch, selDate]);
+
+  // Appointments subscription for this branch+date.
+  useEffect(() => {
+    if (!db || !selBranch || !selDate) { setAppointments([]); return; }
+    const q = query(
+      collection(db, "appointments"),
+      where("branch_id", "==", selBranch),
+      where("date", "==", selDate),
+    );
+    const unsub = onSnapshot(q, sn => {
+      const list = sn.docs.map(d => ({ id: d.id, ...d.data() }));
+      list.sort((a, b) => (a.start || "").localeCompare(b.start || ""));
+      setAppointments(list);
+    });
+    return () => unsub();
+  }, [selBranch, selDate]);
+
+  // ── Day open / close handlers ──
+  const openDay = async (openingCash) => {
+    if (!selBranch || !selDate) return;
+    const id = shiftId(selBranch, selDate);
+    await setDoc(doc(db, "day_openings", id), {
+      branch_id: selBranch,
+      date: selDate,
+      opening_cash: Number(openingCash) || 0,
+      opened_by: currentUser?.name || "user",
+      opened_by_id: currentUser?.id || "",
+      opened_at: new Date().toISOString(),
+    }, { merge: true });
+    setOpenDayModal(null);
+    toast({ title: "Day Opened", message: `Float ${INR(openingCash)} recorded.`, type: "success" });
+  };
+
+  const startOpenDay = async () => {
+    // Pre-fill with previous day's closing cash (float roll-over).
+    let prefill = 0;
+    try {
+      const prev = await getDoc(doc(db, "day_openings", shiftId(selBranch, prevDate(selDate))));
+      if (prev.exists()) {
+        const d = prev.data();
+        prefill = Number(d.closing_cash_counted) || Number(d.summary?.expected_cash) || 0;
+      }
+    } catch { /* non-fatal */ }
+    setOpenDayModal({ openingCash: prefill });
+  };
+
+  const settledTodayList = useMemo(
+    () => invoices.filter(i => i.status === "settled"),
+    [invoices]
+  );
+
+  const startCloseDay = () => {
+    if (!dayOpening) return;
+    const summary = computeDaySummary({
+      settledInvoices: settledTodayList,
+      staffRows,
+      petrol,
+      otherExp,
+      openingCash: dayOpening.opening_cash || 0,
+    });
+    setCloseDayModal({ cashCounted: "", summary });
+  };
+
+  const confirmCloseDay = async () => {
+    if (!closeDayModal || !dayOpening) return;
+    const cashCounted = Number(closeDayModal.cashCounted) || 0;
+    const id = shiftId(selBranch, selDate);
+    await setDoc(doc(db, "day_openings", id), {
+      closing_cash_counted: cashCounted,
+      closing_variance: Math.round(cashCounted - (closeDayModal.summary.expected_cash || 0)),
+      closed_by: currentUser?.name || "user",
+      closed_by_id: currentUser?.id || "",
+      closed_at: new Date().toISOString(),
+      summary: closeDayModal.summary,
+    }, { merge: true });
+    setCloseDayModal(null);
+    toast({ title: "Day Closed", message: `Summary saved. Variance: ${INR(Math.round(cashCounted - closeDayModal.summary.expected_cash))}.`, type: "success" });
+  };
+
+  // ── Appointment booking handlers ──
+  const saveAppointment = async (form) => {
+    const { staff_id, staff_name, customer, services, start, duration, notes } = form;
+    if (!start || !staff_id) return;
+    const end = addMinutes(start, Number(duration) || 30);
+    await addDoc(collection(db, "appointments"), {
+      branch_id: selBranch,
+      branch_name: (branchesById.get(selBranch)?.name || "").replace("V-CUT ", ""),
+      date: selDate,
+      start, end,
+      staff_id, staff_name,
+      customer_id: customer?.id || null,
+      customer_name: customer?.name || null,
+      customer_phone: customer?.phone || null,
+      services: services || [],
+      notes: notes || "",
+      status: "booked",
+      created_by: currentUser?.name || "user",
+      created_by_id: currentUser?.id || "",
+      created_at: new Date().toISOString(),
+    });
+    setBookingModal(null);
+    toast({ title: "Appointment Booked", message: `${customer?.name || "Walk-in"} · ${start}–${end} with ${staff_name}.`, type: "success" });
+  };
+
+  const cancelAppointment = async (apt) => {
+    if (!apt?.id) return;
+    await updateDoc(doc(db, "appointments", apt.id), { status: "cancelled", cancelled_at: new Date().toISOString() });
+    setAptDetailModal(null);
+  };
+
+  const loadAppointmentIntoCart = (apt) => {
+    if (!apt) return;
+    if (cart.length > 0) {
+      toast({ title: "Cart Not Empty", message: "Clear the current cart before loading another appointment.", type: "warning" });
+      return;
+    }
+    if (apt.customer_id) {
+      setSelectedCustomer({ id: apt.customer_id, name: apt.customer_name || "", phone: apt.customer_phone || "" });
+      setClientSearch(apt.customer_name || "");
+    }
+    const apptCart = (apt.services || []).map((sv, i) => ({
+      ...sv,
+      cartId: Date.now() + Math.random() + i,
+      staffId: apt.staff_id,
+      home_branch_id: homeOf(apt.staff_id),
+    }));
+    setCart(apptCart);
+    apptCart.forEach(it => {
+      if (it.staffId) {
+        const cur = staffRows[it.staffId]?.billing || 0;
+        updateStaffRow(it.staffId, "billing", cur + (Number(it.price) || 0));
+      }
+    });
+    setViewMode("pos");
+    setAptDetailModal(null);
+    toast({ title: "Appointment Loaded", message: `${apt.customer_name || "Walk-in"} · cart ready to bill.`, type: "info" });
+  };
 
   // Entries subscription scoped to current filter period (month or year).
   useEffect(() => {
@@ -2084,6 +2245,11 @@ export default function POSPage() {
               background: viewMode === "pos" ? "var(--accent)" : "var(--bg4)", color: viewMode === "pos" ? "#000" : "var(--text3)",
               textTransform: "uppercase", transition: "all .3s"
             }}>Terminal</button>
+            <button onClick={() => setViewMode("booking")} style={{
+              padding: "10px 16px", borderRadius: 10, fontSize: 11, fontWeight: 800, border: "none", cursor: "pointer",
+              background: viewMode === "booking" ? "var(--accent)" : "var(--bg4)", color: viewMode === "booking" ? "#000" : "var(--text3)",
+              textTransform: "uppercase", transition: "all .3s"
+            }}>Booking</button>
             <button onClick={() => { setViewMode("history"); setHistoryDateFilter(selDate); }} style={{
               padding: "10px 16px", borderRadius: 10, fontSize: 11, fontWeight: 800, border: "none", cursor: "pointer",
               background: viewMode === "history" ? "var(--accent)" : "var(--bg4)", color: viewMode === "history" ? "#000" : "var(--text3)",
@@ -2091,6 +2257,44 @@ export default function POSPage() {
             }}>History</button>
         </div>
       </div>
+
+      {/* Day open / close banner — above the POS split so it's the first thing seen */}
+      {selBranch && selDate && viewMode !== "history" && (
+        dayOpening && dayOpening.closed_at ? (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "10px 16px", borderRadius: 12, background: "rgba(148,163,184,0.08)", border: "1px solid rgba(148,163,184,0.2)", flexWrap: "wrap" }}>
+            <div>
+              <span style={{ fontSize: 10, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 2 }}>Day Closed</span>
+              <span style={{ marginLeft: 10, fontSize: 12, color: "var(--text2)", fontWeight: 700 }}>
+                Settled {dayOpening.summary?.bills_count || 0} bills · Cash counted {INR(dayOpening.closing_cash_counted || 0)} · Variance {INR(dayOpening.closing_variance || 0)}
+              </span>
+            </div>
+          </div>
+        ) : dayOpening ? (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "10px 16px", borderRadius: 12, background: "rgba(74,222,128,0.08)", border: "1px solid rgba(74,222,128,0.3)", flexWrap: "wrap" }}>
+            <div>
+              <span style={{ fontSize: 10, fontWeight: 800, color: "var(--green)", textTransform: "uppercase", letterSpacing: 2 }}>● Day Opened</span>
+              <span style={{ marginLeft: 10, fontSize: 12, color: "var(--text2)", fontWeight: 700 }}>
+                Float {INR(dayOpening.opening_cash)} · {dayOpening.opened_by} at {dayOpening.opened_at ? new Date(dayOpening.opened_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : ""}
+              </span>
+            </div>
+            <button onClick={startCloseDay}
+              style={{ padding: "8px 16px", background: "linear-gradient(135deg, var(--orange), #ea580c)", border: "none", color: "#000", borderRadius: 10, fontSize: 11, fontWeight: 900, letterSpacing: 1, textTransform: "uppercase", cursor: "pointer" }}>
+              Close Day
+            </button>
+          </div>
+        ) : (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "12px 18px", borderRadius: 12, background: "rgba(251,146,60,0.08)", border: "1px solid rgba(251,146,60,0.35)", flexWrap: "wrap" }}>
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 900, color: "var(--orange)", textTransform: "uppercase", letterSpacing: 2 }}>Day Not Opened</div>
+              <div style={{ fontSize: 12, color: "var(--text2)", marginTop: 2 }}>Record the opening cash float to start taking bills for {selDate}.</div>
+            </div>
+            <button onClick={startOpenDay}
+              style={{ padding: "10px 18px", background: "linear-gradient(135deg, var(--accent), var(--gold2))", border: "none", color: "#000", borderRadius: 10, fontSize: 12, fontWeight: 900, letterSpacing: 1, textTransform: "uppercase", cursor: "pointer", boxShadow: "0 6px 18px rgba(var(--accent-rgb),0.3)" }}>
+              + Open Day
+            </button>
+          </div>
+        )
+      )}
 
       {viewMode === "pos" ? (
         <div className="pos-split" style={{ flex: 1, display: "flex", gap: 16, minHeight: 0 }}>
@@ -2516,7 +2720,7 @@ export default function POSPage() {
 
               <div style={{ display: "flex", gap: 10 }}>
                 <button
-                  disabled={saving || cart.length === 0}
+                  disabled={saving || cart.length === 0 || !dayOpening || !!dayOpening?.closed_at}
                   onClick={saveDraft}
                   style={{
                     flex: 1, padding: "14px", borderRadius: 14, fontSize: 12, fontWeight: 900,
@@ -2524,14 +2728,16 @@ export default function POSPage() {
                     border: "1px solid var(--border2)",
                     cursor: cart.length === 0 ? "not-allowed" : "pointer", textTransform: "uppercase", letterSpacing: 1.2,
                     transition: "all .2s",
-                    opacity: cart.length === 0 ? 0.5 : 1,
+                    opacity: (cart.length === 0 || !dayOpening || !!dayOpening?.closed_at) ? 0.5 : 1,
                   }}
+                  title={!dayOpening ? "Open the day before saving drafts" : dayOpening?.closed_at ? "Day closed — reopen tomorrow" : ""}
                   onMouseEnter={e => { if (cart.length) e.currentTarget.style.borderColor = "var(--accent)"; }}
                   onMouseLeave={e => e.currentTarget.style.borderColor = "var(--border2)"}>
                   {saving ? "…" : (editingDraftId ? "Update Draft" : "Save Draft")}
                 </button>
                 <button
-                  disabled={saving || cart.length === 0}
+                  disabled={saving || cart.length === 0 || !dayOpening || !!dayOpening?.closed_at}
+                  title={!dayOpening ? "Open the day before settling bills" : dayOpening?.closed_at ? "Day already closed" : ""}
                   onClick={openBillPreview}
                   style={{
                     flex: 1.2, padding: "14px", borderRadius: 14, border: "none", fontSize: 12, fontWeight: 900,
@@ -2547,6 +2753,31 @@ export default function POSPage() {
               </div>
             </div>
           </div>
+        </div>
+      ) : viewMode === "booking" ? (
+        <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: 16 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 2 }}>Appointments</div>
+              <div style={{ fontSize: 16, fontWeight: 800, color: "var(--text)", marginTop: 2 }}>
+                {branchesById.get(selBranch)?.name || "Pick a branch"} · {selDate}
+              </div>
+            </div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)" }}>
+              {appointments.filter(a => a.status !== "cancelled").length} booking{appointments.length === 1 ? "" : "s"}
+            </div>
+          </div>
+          {!selBranch ? (
+            <div style={{ padding: 40, textAlign: "center", color: "var(--text3)" }}>Pick a branch first.</div>
+          ) : (
+            <AppointmentBoard
+              staffList={branchStaff}
+              appointments={appointments}
+              date={selDate}
+              onBookSlot={({ staff_id, staff_name, start }) => setBookingModal({ staff_id, staff_name, start, duration: 30, services: [], customer: null, notes: "" })}
+              onOpenAppointment={(apt) => setAptDetailModal(apt)}
+            />
+          )}
         </div>
       ) : (
         <div style={{ flex: 1, overflowY: "auto" }}>
@@ -3124,9 +3355,201 @@ export default function POSPage() {
         </div>
       )}
 
+      {/* Open Day modal */}
+      {openDayModal && (
+        <div onClick={() => setOpenDayModal(null)}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", backdropFilter: "blur(6px)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+          <div onClick={e => e.stopPropagation()}
+            style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 18, width: "100%", maxWidth: 420, padding: 24, boxShadow: "0 24px 60px -12px rgba(0,0,0,0.7)" }}>
+            <div style={{ fontSize: 10, fontWeight: 800, color: "var(--accent)", textTransform: "uppercase", letterSpacing: 2 }}>Open Day</div>
+            <div style={{ fontSize: 18, fontWeight: 800, color: "var(--text)", marginTop: 4 }}>
+              {branchesById.get(selBranch)?.name} · {selDate}
+            </div>
+            <div style={{ fontSize: 12, color: "var(--text3)", marginTop: 4, lineHeight: 1.5 }}>
+              Count the physical cash float and enter it below. Prefilled from yesterday&apos;s closing count if available.
+            </div>
+            <label style={{ display: "block", fontSize: 10, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, marginTop: 16, marginBottom: 6 }}>Opening Cash (₹)</label>
+            <input type="number" min={0} step={1} autoFocus
+              value={openDayModal.openingCash}
+              onChange={e => setOpenDayModal({ ...openDayModal, openingCash: Math.max(0, Number(e.target.value) || 0) })}
+              style={{ width: "100%", padding: "12px 14px", background: "var(--bg3)", border: "1px solid var(--border2)", borderRadius: 10, color: "var(--accent)", fontSize: 20, fontWeight: 900, outline: "none", boxSizing: "border-box", fontFamily: "var(--font-headline, var(--font-outfit))" }} />
+            <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+              <button onClick={() => setOpenDayModal(null)}
+                style={{ flex: 1, padding: 12, background: "var(--bg3)", border: "1px solid var(--border2)", color: "var(--text2)", borderRadius: 10, fontSize: 11, fontWeight: 800, letterSpacing: 1, textTransform: "uppercase", cursor: "pointer" }}>Cancel</button>
+              <button onClick={() => openDay(openDayModal.openingCash)}
+                style={{ flex: 1.3, padding: 12, background: "linear-gradient(135deg, var(--accent), var(--gold2))", border: "none", color: "#000", borderRadius: 10, fontSize: 11, fontWeight: 900, letterSpacing: 1, textTransform: "uppercase", cursor: "pointer" }}>
+                Confirm &amp; Open
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Close Day modal */}
+      {closeDayModal && (
+        <div onClick={() => setCloseDayModal(null)}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", backdropFilter: "blur(6px)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+          <div onClick={e => e.stopPropagation()}
+            style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 18, width: "100%", maxWidth: 500, padding: 24, boxShadow: "0 24px 60px -12px rgba(0,0,0,0.7)", maxHeight: "85vh", overflowY: "auto" }}>
+            <div style={{ fontSize: 10, fontWeight: 800, color: "var(--orange)", textTransform: "uppercase", letterSpacing: 2 }}>Close Day</div>
+            <div style={{ fontSize: 18, fontWeight: 800, color: "var(--text)", marginTop: 4 }}>
+              {branchesById.get(selBranch)?.name} · {selDate}
+            </div>
+
+            <div style={{ marginTop: 16, padding: 14, background: "var(--bg3)", borderRadius: 12, border: "1px solid var(--border)", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px 14px", fontSize: 12 }}>
+              <SummaryRow label="Bills settled" value={closeDayModal.summary.bills_count} />
+              <SummaryRow label="Services total" value={INR(closeDayModal.summary.services_total)} />
+              <SummaryRow label="Cash sales" value={INR(closeDayModal.summary.cash_total)} />
+              <SummaryRow label="Online sales" value={INR(closeDayModal.summary.online_total)} />
+              <SummaryRow label="Tips collected" value={INR(closeDayModal.summary.tips_total)} />
+              <SummaryRow label="Incentive paid" value={INR(closeDayModal.summary.incentive_total)} color="var(--red)" />
+              <SummaryRow label="Expenses" value={INR(closeDayModal.summary.expense_total)} color="var(--red)" />
+              <SummaryRow label="Opening float" value={INR(dayOpening?.opening_cash || 0)} />
+            </div>
+
+            <div style={{ marginTop: 14, padding: 14, background: "rgba(var(--accent-rgb),0.06)", border: "1px solid rgba(var(--accent-rgb),0.3)", borderRadius: 12 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>
+                <span>Expected Cash in Drawer</span>
+                <span style={{ fontSize: 15, fontWeight: 900, color: "var(--accent)" }}>{INR(closeDayModal.summary.expected_cash)}</span>
+              </div>
+            </div>
+
+            <label style={{ display: "block", fontSize: 10, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, marginTop: 16, marginBottom: 6 }}>Actual Cash Counted (₹)</label>
+            <input type="number" min={0} step={1} autoFocus
+              value={closeDayModal.cashCounted}
+              onChange={e => setCloseDayModal({ ...closeDayModal, cashCounted: e.target.value })}
+              placeholder="0"
+              style={{ width: "100%", padding: "12px 14px", background: "var(--bg3)", border: "1px solid var(--border2)", borderRadius: 10, color: "var(--text)", fontSize: 20, fontWeight: 900, outline: "none", boxSizing: "border-box" }} />
+            {closeDayModal.cashCounted !== "" && (() => {
+              const variance = Math.round(Number(closeDayModal.cashCounted) - closeDayModal.summary.expected_cash);
+              const isZero = variance === 0;
+              return (
+                <div style={{ marginTop: 8, fontSize: 11, fontWeight: 800, color: isZero ? "var(--green)" : variance > 0 ? "var(--accent)" : "var(--red)" }}>
+                  {isZero ? "✓ Perfectly balanced" : `${variance > 0 ? "+" : ""}${INR(variance)} ${variance > 0 ? "over" : "short"}`}
+                </div>
+              );
+            })()}
+
+            <div style={{ display: "flex", gap: 8, marginTop: 20 }}>
+              <button onClick={() => setCloseDayModal(null)}
+                style={{ flex: 1, padding: 12, background: "var(--bg3)", border: "1px solid var(--border2)", color: "var(--text2)", borderRadius: 10, fontSize: 11, fontWeight: 800, letterSpacing: 1, textTransform: "uppercase", cursor: "pointer" }}>Cancel</button>
+              <button onClick={confirmCloseDay}
+                disabled={closeDayModal.cashCounted === ""}
+                style={{ flex: 1.3, padding: 12, background: closeDayModal.cashCounted === "" ? "var(--bg4)" : "linear-gradient(135deg, var(--orange), #ea580c)", border: "none", color: closeDayModal.cashCounted === "" ? "var(--text3)" : "#000", borderRadius: 10, fontSize: 11, fontWeight: 900, letterSpacing: 1, textTransform: "uppercase", cursor: closeDayModal.cashCounted === "" ? "not-allowed" : "pointer" }}>
+                Close Day
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Booking modal */}
+      {bookingModal && (
+        <div onClick={() => setBookingModal(null)}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", backdropFilter: "blur(6px)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+          <div onClick={e => e.stopPropagation()}
+            style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 18, width: "100%", maxWidth: 520, padding: 24, boxShadow: "0 24px 60px -12px rgba(0,0,0,0.7)", maxHeight: "85vh", overflowY: "auto" }}>
+            <div style={{ fontSize: 10, fontWeight: 800, color: "var(--accent)", textTransform: "uppercase", letterSpacing: 2 }}>New Appointment</div>
+            <div style={{ fontSize: 17, fontWeight: 800, color: "var(--text)", marginTop: 4 }}>
+              {bookingModal.staff_name} · {bookingModal.start}
+            </div>
+
+            <label style={{ display: "block", fontSize: 10, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, marginTop: 14, marginBottom: 6 }}>Customer</label>
+            <input type="text" list="booking-customers"
+              value={bookingModal.customer?.name || ""}
+              placeholder="Name or phone — type to search existing, or leave blank for walk-in"
+              onChange={e => {
+                const q = e.target.value.toLowerCase();
+                const match = customers.find(c => c.name?.toLowerCase() === q || c.phone === e.target.value);
+                setBookingModal({ ...bookingModal, customer: match || { name: e.target.value, phone: "", id: null } });
+              }}
+              style={{ width: "100%", padding: "10px 12px", background: "var(--bg3)", border: "1px solid var(--border2)", borderRadius: 8, color: "var(--text)", fontSize: 13, outline: "none", boxSizing: "border-box" }} />
+            <datalist id="booking-customers">
+              {customers.slice(0, 100).map(c => <option key={c.id} value={c.name}>{c.phone || ""}</option>)}
+            </datalist>
+
+            <label style={{ display: "block", fontSize: 10, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, marginTop: 14, marginBottom: 6 }}>Duration</label>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {[30, 45, 60, 90, 120].map(d => (
+                <button key={d} type="button"
+                  onClick={() => setBookingModal({ ...bookingModal, duration: d })}
+                  style={{ padding: "6px 14px", borderRadius: 8, background: bookingModal.duration === d ? "var(--accent)" : "var(--bg3)", border: "1px solid var(--border2)", color: bookingModal.duration === d ? "#000" : "var(--text2)", fontSize: 11, fontWeight: 800, cursor: "pointer" }}>
+                  {d} min
+                </button>
+              ))}
+            </div>
+            <div style={{ fontSize: 10, color: "var(--text3)", marginTop: 6 }}>
+              Ends at <strong style={{ color: "var(--text2)" }}>{addMinutes(bookingModal.start, bookingModal.duration)}</strong>
+            </div>
+
+            <label style={{ display: "block", fontSize: 10, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, marginTop: 14, marginBottom: 6 }}>Notes (optional)</label>
+            <textarea rows={2} value={bookingModal.notes}
+              onChange={e => setBookingModal({ ...bookingModal, notes: e.target.value })}
+              placeholder="Service preferences, etc."
+              style={{ width: "100%", padding: "10px 12px", background: "var(--bg3)", border: "1px solid var(--border2)", borderRadius: 8, color: "var(--text)", fontSize: 12, outline: "none", resize: "vertical", boxSizing: "border-box" }} />
+
+            <div style={{ display: "flex", gap: 8, marginTop: 18 }}>
+              <button onClick={() => setBookingModal(null)}
+                style={{ flex: 1, padding: 12, background: "var(--bg3)", border: "1px solid var(--border2)", color: "var(--text2)", borderRadius: 10, fontSize: 11, fontWeight: 800, letterSpacing: 1, textTransform: "uppercase", cursor: "pointer" }}>Cancel</button>
+              <button onClick={() => saveAppointment(bookingModal)}
+                style={{ flex: 1.3, padding: 12, background: "linear-gradient(135deg, var(--accent), var(--gold2))", border: "none", color: "#000", borderRadius: 10, fontSize: 11, fontWeight: 900, letterSpacing: 1, textTransform: "uppercase", cursor: "pointer" }}>
+                Book Appointment
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Appointment detail modal */}
+      {aptDetailModal && (
+        <div onClick={() => setAptDetailModal(null)}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", backdropFilter: "blur(6px)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+          <div onClick={e => e.stopPropagation()}
+            style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 18, width: "100%", maxWidth: 440, padding: 24 }}>
+            <div style={{ fontSize: 10, fontWeight: 800, color: "var(--accent)", textTransform: "uppercase", letterSpacing: 2 }}>Appointment</div>
+            <div style={{ fontSize: 17, fontWeight: 800, color: "var(--text)", marginTop: 4 }}>
+              {aptDetailModal.customer_name || "Walk-in"}
+            </div>
+            <div style={{ fontSize: 12, color: "var(--text3)", marginTop: 4 }}>
+              {aptDetailModal.staff_name} · {aptDetailModal.start}–{aptDetailModal.end} · <span style={{ textTransform: "uppercase", fontWeight: 700, color: aptDetailModal.status === "cancelled" ? "var(--red)" : "var(--accent)" }}>{aptDetailModal.status}</span>
+            </div>
+            {aptDetailModal.customer_phone && <div style={{ fontSize: 12, color: "var(--text2)", marginTop: 4 }}>📞 {aptDetailModal.customer_phone}</div>}
+            {aptDetailModal.notes && <div style={{ fontSize: 12, color: "var(--text3)", marginTop: 8, padding: 10, background: "var(--bg3)", borderRadius: 8 }}>{aptDetailModal.notes}</div>}
+
+            <div style={{ display: "flex", gap: 8, marginTop: 18, flexWrap: "wrap" }}>
+              {aptDetailModal.status !== "cancelled" && (
+                <button onClick={() => loadAppointmentIntoCart(aptDetailModal)}
+                  style={{ flex: 1, padding: 12, background: "linear-gradient(135deg, var(--accent), var(--gold2))", border: "none", color: "#000", borderRadius: 10, fontSize: 11, fontWeight: 900, letterSpacing: 1, textTransform: "uppercase", cursor: "pointer" }}>
+                  Load to Cart
+                </button>
+              )}
+              {aptDetailModal.status !== "cancelled" && (
+                <button onClick={() => cancelAppointment(aptDetailModal)}
+                  style={{ flex: 1, padding: 12, background: "rgba(248,113,113,0.1)", border: "1px solid rgba(248,113,113,0.3)", color: "var(--red)", borderRadius: 10, fontSize: 11, fontWeight: 800, letterSpacing: 1, textTransform: "uppercase", cursor: "pointer" }}>
+                  Cancel
+                </button>
+              )}
+              <button onClick={() => setAptDetailModal(null)}
+                style={{ flex: 1, padding: 12, background: "var(--bg3)", border: "1px solid var(--border2)", color: "var(--text2)", borderRadius: 10, fontSize: 11, fontWeight: 800, letterSpacing: 1, textTransform: "uppercase", cursor: "pointer" }}>
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {ToastContainer}
       {ConfirmDialog}
     </div>
+  );
+}
+
+function SummaryRow({ label, value, color }) {
+  return (
+    <>
+      <div style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1 }}>{label}</div>
+      <div style={{ fontSize: 13, fontWeight: 800, color: color || "var(--text)", textAlign: "right", fontFamily: "var(--font-headline, var(--font-outfit))" }}>{value}</div>
+    </>
   );
 }
 
