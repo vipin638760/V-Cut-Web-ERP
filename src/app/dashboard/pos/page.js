@@ -2268,6 +2268,25 @@ export default function POSPage() {
                 Settled {dayOpening.summary?.bills_count || 0} bills · Cash counted {INR(dayOpening.closing_cash_counted || 0)} · Variance {INR(dayOpening.closing_variance || 0)}
               </span>
             </div>
+            <div style={{ display: "inline-flex", gap: 6 }}>
+              <button onClick={startCloseDay}
+                title="Re-run the close summary (e.g. re-count cash)"
+                style={{ padding: "6px 12px", background: "var(--bg3)", border: "1px solid var(--border2)", color: "var(--text2)", borderRadius: 8, fontSize: 10, fontWeight: 800, letterSpacing: 1, textTransform: "uppercase", cursor: "pointer" }}>
+                Edit Close
+              </button>
+              <button onClick={async () => {
+                await setDoc(doc(db, "day_openings", shiftId(selBranch, selDate)), {
+                  closed_at: null, closed_by: null, closed_by_id: null,
+                  closing_cash_counted: null, closing_variance: null,
+                  reopened_at: new Date().toISOString(), reopened_by: currentUser?.name || "user",
+                }, { merge: true });
+                toast({ title: "Day Reopened", message: "Billing is live again.", type: "success" });
+              }}
+                title="Closed by mistake — unlock billing for this day"
+                style={{ padding: "6px 12px", background: "rgba(var(--accent-rgb),0.1)", border: "1px solid rgba(var(--accent-rgb),0.35)", color: "var(--accent)", borderRadius: 8, fontSize: 10, fontWeight: 800, letterSpacing: 1, textTransform: "uppercase", cursor: "pointer" }}>
+                ↻ Reopen
+              </button>
+            </div>
           </div>
         ) : dayOpening ? (
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "10px 16px", borderRadius: 12, background: "rgba(74,222,128,0.08)", border: "1px solid rgba(74,222,128,0.3)", flexWrap: "wrap" }}>
@@ -3444,42 +3463,191 @@ export default function POSPage() {
       )}
 
       {/* Booking modal */}
-      {bookingModal && (
+      {bookingModal && (() => {
+        // Derived helpers inline for the modal
+        const searchQ = (bookingModal.customerSearch || "").trim().toLowerCase();
+        const matches = searchQ.length >= 1
+          ? customers.filter(c =>
+              (c.name || "").toLowerCase().includes(searchQ) ||
+              (c.phone || "").includes(searchQ)
+            ).slice(0, 6)
+          : [];
+        const parseMin = (t) => {
+          if (!t) return 0;
+          const m = String(t).match(/(\d+)/);
+          return m ? Number(m[1]) : 0;
+        };
+        const servicesTotalMin = (bookingModal.services || []).reduce((s, sv) => s + (parseMin(sv.time) || 30), 0);
+        const servicesTotalPrice = (bookingModal.services || []).reduce((s, sv) => s + (Number(sv.price) || 0), 0);
+        const effectiveDuration = bookingModal.durationOverride
+          ? bookingModal.duration
+          : (servicesTotalMin > 0 ? servicesTotalMin : bookingModal.duration);
+        const toggleService = (sv) => {
+          setBookingModal(prev => {
+            const has = (prev.services || []).some(s => s.id === sv.id);
+            const services = has
+              ? prev.services.filter(s => s.id !== sv.id)
+              : [...(prev.services || []), sv];
+            return { ...prev, services, durationOverride: prev.durationOverride || false };
+          });
+        };
+        return (
         <div onClick={() => setBookingModal(null)}
           style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", backdropFilter: "blur(6px)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
           <div onClick={e => e.stopPropagation()}
-            style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 18, width: "100%", maxWidth: 520, padding: 24, boxShadow: "0 24px 60px -12px rgba(0,0,0,0.7)", maxHeight: "85vh", overflowY: "auto" }}>
+            style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 18, width: "100%", maxWidth: 620, padding: 24, boxShadow: "0 24px 60px -12px rgba(0,0,0,0.7)", maxHeight: "88vh", overflowY: "auto" }}>
             <div style={{ fontSize: 10, fontWeight: 800, color: "var(--accent)", textTransform: "uppercase", letterSpacing: 2 }}>New Appointment</div>
             <div style={{ fontSize: 17, fontWeight: 800, color: "var(--text)", marginTop: 4 }}>
               {bookingModal.staff_name} · {bookingModal.start}
             </div>
 
+            {/* Customer: search + pick existing, OR switch to the inline new-customer form */}
             <label style={{ display: "block", fontSize: 10, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, marginTop: 14, marginBottom: 6 }}>Customer</label>
-            <input type="text" list="booking-customers"
-              value={bookingModal.customer?.name || ""}
-              placeholder="Name or phone — type to search existing, or leave blank for walk-in"
-              onChange={e => {
-                const q = e.target.value.toLowerCase();
-                const match = customers.find(c => c.name?.toLowerCase() === q || c.phone === e.target.value);
-                setBookingModal({ ...bookingModal, customer: match || { name: e.target.value, phone: "", id: null } });
-              }}
-              style={{ width: "100%", padding: "10px 12px", background: "var(--bg3)", border: "1px solid var(--border2)", borderRadius: 8, color: "var(--text)", fontSize: 13, outline: "none", boxSizing: "border-box" }} />
-            <datalist id="booking-customers">
-              {customers.slice(0, 100).map(c => <option key={c.id} value={c.name}>{c.phone || ""}</option>)}
-            </datalist>
+            {!bookingModal.newCustomer ? (
+              bookingModal.customer?.id ? (
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "10px 12px", borderRadius: 10, background: "rgba(74,222,128,0.08)", border: "1px solid rgba(74,222,128,0.3)" }}>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 800, color: "var(--text)" }}>{bookingModal.customer.name}</div>
+                    {bookingModal.customer.phone && <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 2 }}>📞 {bookingModal.customer.phone}</div>}
+                  </div>
+                  <button onClick={() => setBookingModal({ ...bookingModal, customer: null, customerSearch: "" })}
+                    style={{ background: "transparent", border: "none", color: "var(--text3)", cursor: "pointer", fontSize: 16 }}>✕</button>
+                </div>
+              ) : (
+                <>
+                  <input type="text"
+                    value={bookingModal.customerSearch || ""}
+                    placeholder="Name or phone — search existing…"
+                    onChange={e => setBookingModal({ ...bookingModal, customerSearch: e.target.value })}
+                    style={{ width: "100%", padding: "10px 12px", background: "var(--bg3)", border: "1px solid var(--border2)", borderRadius: 8, color: "var(--text)", fontSize: 13, outline: "none", boxSizing: "border-box" }} />
+                  {matches.length > 0 && (
+                    <div style={{ marginTop: 6, background: "var(--bg3)", border: "1px solid var(--border2)", borderRadius: 8, overflow: "hidden" }}>
+                      {matches.map(c => (
+                        <button key={c.id} type="button"
+                          onClick={() => setBookingModal({ ...bookingModal, customer: { id: c.id, name: c.name, phone: c.phone }, customerSearch: "" })}
+                          style={{ width: "100%", padding: "8px 12px", textAlign: "left", background: "transparent", border: "none", borderBottom: "1px solid var(--border)", cursor: "pointer", color: "var(--text)" }}>
+                          <div style={{ fontSize: 12, fontWeight: 700 }}>{c.name}</div>
+                          {c.phone && <div style={{ fontSize: 10, color: "var(--text3)", marginTop: 1 }}>{c.phone}</div>}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+                    <button type="button"
+                      onClick={() => setBookingModal({ ...bookingModal, newCustomer: { name: bookingModal.customerSearch || "", phone: "" }, customerSearch: "" })}
+                      style={{ padding: "6px 12px", borderRadius: 6, background: "rgba(var(--accent-rgb),0.1)", border: "1px solid rgba(var(--accent-rgb),0.35)", color: "var(--accent)", fontSize: 10, fontWeight: 800, letterSpacing: 1, textTransform: "uppercase", cursor: "pointer" }}>
+                      + Add New Customer
+                    </button>
+                    <button type="button"
+                      onClick={() => setBookingModal({ ...bookingModal, customer: { id: null, name: "Walk-in", phone: "" } })}
+                      style={{ padding: "6px 12px", borderRadius: 6, background: "var(--bg3)", border: "1px solid var(--border2)", color: "var(--text2)", fontSize: 10, fontWeight: 800, letterSpacing: 1, textTransform: "uppercase", cursor: "pointer" }}>
+                      Walk-in
+                    </button>
+                  </div>
+                </>
+              )
+            ) : (
+              <div style={{ padding: 12, background: "rgba(var(--accent-rgb),0.06)", border: "1px solid rgba(var(--accent-rgb),0.3)", borderRadius: 10 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+                  <div style={{ fontSize: 10, fontWeight: 800, color: "var(--accent)", textTransform: "uppercase", letterSpacing: 1 }}>New customer</div>
+                  <button type="button" onClick={() => setBookingModal({ ...bookingModal, newCustomer: null })}
+                    style={{ background: "transparent", border: "none", color: "var(--text3)", cursor: "pointer", fontSize: 12 }}>✕ Cancel</button>
+                </div>
+                <input type="text" autoFocus required
+                  value={bookingModal.newCustomer.name}
+                  onChange={e => setBookingModal({ ...bookingModal, newCustomer: { ...bookingModal.newCustomer, name: e.target.value } })}
+                  placeholder="Name *"
+                  style={{ width: "100%", padding: "10px 12px", background: "var(--bg3)", border: "1px solid var(--border2)", borderRadius: 8, color: "var(--text)", fontSize: 13, outline: "none", boxSizing: "border-box", marginBottom: 8 }} />
+                <input type="text"
+                  value={bookingModal.newCustomer.phone}
+                  onChange={e => setBookingModal({ ...bookingModal, newCustomer: { ...bookingModal.newCustomer, phone: e.target.value } })}
+                  placeholder="Phone"
+                  style={{ width: "100%", padding: "10px 12px", background: "var(--bg3)", border: "1px solid var(--border2)", borderRadius: 8, color: "var(--text)", fontSize: 13, outline: "none", boxSizing: "border-box" }} />
+                <button type="button"
+                  disabled={!bookingModal.newCustomer.name.trim()}
+                  onClick={async () => {
+                    const name = bookingModal.newCustomer.name.trim();
+                    try {
+                      const ref = await addDoc(collection(db, "customers"), {
+                        name,
+                        phone: bookingModal.newCustomer.phone.trim() || null,
+                        created_at: new Date().toISOString(),
+                        created_by: currentUser?.name || "user",
+                        source: "booking",
+                      });
+                      setBookingModal({ ...bookingModal, customer: { id: ref.id, name, phone: bookingModal.newCustomer.phone.trim() || "" }, newCustomer: null });
+                      toast({ title: "Customer Saved", message: `${name} added.`, type: "success" });
+                    } catch (err) {
+                      toast({ title: "Save Failed", message: err.message, type: "danger" });
+                    }
+                  }}
+                  style={{ marginTop: 10, width: "100%", padding: 10, background: bookingModal.newCustomer.name.trim() ? "linear-gradient(135deg, var(--accent), var(--gold2))" : "var(--bg4)", border: "none", color: bookingModal.newCustomer.name.trim() ? "#000" : "var(--text3)", borderRadius: 8, fontSize: 11, fontWeight: 900, letterSpacing: 1, textTransform: "uppercase", cursor: bookingModal.newCustomer.name.trim() ? "pointer" : "not-allowed" }}>
+                  Save &amp; Use
+                </button>
+              </div>
+            )}
 
-            <label style={{ display: "block", fontSize: 10, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, marginTop: 14, marginBottom: 6 }}>Duration</label>
+            {/* Services picker */}
+            <label style={{ display: "block", fontSize: 10, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, marginTop: 14, marginBottom: 6 }}>
+              Services {(bookingModal.services || []).length > 0 && <span style={{ color: "var(--accent)" }}>· {bookingModal.services.length} picked · {INR(servicesTotalPrice)}</span>}
+            </label>
+            {Object.keys(MENU).length === 0 ? (
+              <div style={{ padding: 10, fontSize: 11, color: "var(--text3)", fontStyle: "italic" }}>No menu configured for this branch.</div>
+            ) : (
+              <div style={{ maxHeight: 180, overflowY: "auto", background: "var(--bg3)", border: "1px solid var(--border2)", borderRadius: 8, padding: 8 }}>
+                {Object.entries(MENU).map(([group, items]) => (
+                  <div key={group} style={{ marginBottom: 8 }}>
+                    <div style={{ fontSize: 9, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, padding: "4px 6px" }}>{group}</div>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 4 }}>
+                      {items.map(item => {
+                        const picked = (bookingModal.services || []).some(s => s.id === item.id);
+                        return (
+                          <button key={item.id} type="button"
+                            onClick={() => toggleService(item)}
+                            style={{
+                              textAlign: "left", padding: "6px 8px",
+                              background: picked ? "rgba(74,222,128,0.12)" : "var(--bg2)",
+                              border: `1px solid ${picked ? "rgba(74,222,128,0.4)" : "var(--border)"}`,
+                              borderRadius: 6, cursor: "pointer",
+                            }}>
+                            <div style={{ fontSize: 11, fontWeight: 700, color: picked ? "var(--green)" : "var(--text)" }}>
+                              {picked ? "✓ " : ""}{item.name}
+                            </div>
+                            <div style={{ fontSize: 10, color: "var(--text3)", fontWeight: 600, marginTop: 1 }}>
+                              {INR(item.price)}{item.time ? ` · ${item.time}` : ""}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <label style={{ display: "block", fontSize: 10, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, marginTop: 14, marginBottom: 6 }}>
+              Duration
+              {!bookingModal.durationOverride && servicesTotalMin > 0 && (
+                <span style={{ color: "var(--accent)", marginLeft: 6, textTransform: "none", letterSpacing: 0 }}>· auto from services</span>
+              )}
+            </label>
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
               {[30, 45, 60, 90, 120].map(d => (
                 <button key={d} type="button"
-                  onClick={() => setBookingModal({ ...bookingModal, duration: d })}
-                  style={{ padding: "6px 14px", borderRadius: 8, background: bookingModal.duration === d ? "var(--accent)" : "var(--bg3)", border: "1px solid var(--border2)", color: bookingModal.duration === d ? "#000" : "var(--text2)", fontSize: 11, fontWeight: 800, cursor: "pointer" }}>
+                  onClick={() => setBookingModal({ ...bookingModal, duration: d, durationOverride: true })}
+                  style={{ padding: "6px 14px", borderRadius: 8, background: (bookingModal.durationOverride && bookingModal.duration === d) ? "var(--accent)" : "var(--bg3)", border: "1px solid var(--border2)", color: (bookingModal.durationOverride && bookingModal.duration === d) ? "#000" : "var(--text2)", fontSize: 11, fontWeight: 800, cursor: "pointer" }}>
                   {d} min
                 </button>
               ))}
+              {bookingModal.durationOverride && (
+                <button type="button" onClick={() => setBookingModal({ ...bookingModal, durationOverride: false })}
+                  style={{ padding: "6px 10px", borderRadius: 8, background: "transparent", border: "1px dashed var(--border2)", color: "var(--text3)", fontSize: 10, fontWeight: 800, letterSpacing: 1, textTransform: "uppercase", cursor: "pointer" }}>
+                  Reset to auto
+                </button>
+              )}
             </div>
             <div style={{ fontSize: 10, color: "var(--text3)", marginTop: 6 }}>
-              Ends at <strong style={{ color: "var(--text2)" }}>{addMinutes(bookingModal.start, bookingModal.duration)}</strong>
+              {effectiveDuration} min · ends at <strong style={{ color: "var(--text2)" }}>{addMinutes(bookingModal.start, effectiveDuration)}</strong>
             </div>
 
             <label style={{ display: "block", fontSize: 10, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, marginTop: 14, marginBottom: 6 }}>Notes (optional)</label>
@@ -3491,14 +3659,16 @@ export default function POSPage() {
             <div style={{ display: "flex", gap: 8, marginTop: 18 }}>
               <button onClick={() => setBookingModal(null)}
                 style={{ flex: 1, padding: 12, background: "var(--bg3)", border: "1px solid var(--border2)", color: "var(--text2)", borderRadius: 10, fontSize: 11, fontWeight: 800, letterSpacing: 1, textTransform: "uppercase", cursor: "pointer" }}>Cancel</button>
-              <button onClick={() => saveAppointment(bookingModal)}
+              <button
+                onClick={() => saveAppointment({ ...bookingModal, duration: effectiveDuration })}
                 style={{ flex: 1.3, padding: 12, background: "linear-gradient(135deg, var(--accent), var(--gold2))", border: "none", color: "#000", borderRadius: 10, fontSize: 11, fontWeight: 900, letterSpacing: 1, textTransform: "uppercase", cursor: "pointer" }}>
                 Book Appointment
               </button>
             </div>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* Appointment detail modal */}
       {aptDetailModal && (
