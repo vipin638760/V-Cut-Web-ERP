@@ -163,11 +163,19 @@ export function Pill({ label, color = "gold" }) {
 export function Card({ children, style }) {
   const ref = useRef(null);
   const [overflow, setOverflow] = useState(false);
+  const [scrollPos, setScrollPos] = useState({ atStart: true, atEnd: false });
 
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const check = () => setOverflow(el.scrollWidth > el.clientWidth + 1);
+    const check = () => {
+      const hasOverflow = el.scrollWidth > el.clientWidth + 1;
+      setOverflow(hasOverflow);
+      setScrollPos({
+        atStart: el.scrollLeft <= 2,
+        atEnd: el.scrollLeft + el.clientWidth >= el.scrollWidth - 2,
+      });
+    };
     check();
     const ro = new ResizeObserver(check);
     ro.observe(el);
@@ -177,14 +185,48 @@ export function Card({ children, style }) {
 
   return (
     <div style={{ position: "relative" }}>
-      <div ref={ref} style={{ background: "var(--bg3)", borderRadius: 16, overflowX: "auto", marginBottom: 0, border: "1px solid rgba(72,72,71,0.12)", ...style }}>
-        {children}
-      </div>
       {overflow && (
-        <div style={{ marginTop: 6, fontSize: 10, fontWeight: 600, color: "var(--text3)", textAlign: "right", textTransform: "uppercase", letterSpacing: 0.8, opacity: 0.75 }}>
-          ← Scroll horizontally — more data hidden →
+        <div style={{
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          padding: "7px 14px", marginBottom: 8,
+          background: "linear-gradient(90deg, rgba(var(--accent-rgb),0.08) 0%, rgba(var(--accent-rgb),0.03) 100%)",
+          border: "1px solid rgba(var(--accent-rgb),0.18)",
+          borderRadius: 10,
+          fontSize: 10, fontWeight: 700, color: "var(--accent)",
+          textTransform: "uppercase", letterSpacing: 1,
+        }}>
+          <span style={{
+            display: "inline-flex", alignItems: "center", gap: 5,
+            opacity: scrollPos.atStart ? 0.35 : 1,
+            transition: "opacity .15s",
+          }}>
+            <span style={{ fontSize: 13, lineHeight: 1 }}>←</span>
+            <span>Scroll</span>
+          </span>
+          <span style={{ color: "var(--text3)", fontWeight: 600, letterSpacing: 0.5 }}>
+            More data hidden — swipe to see
+          </span>
+          <span style={{
+            display: "inline-flex", alignItems: "center", gap: 5,
+            opacity: scrollPos.atEnd ? 0.35 : 1,
+            transition: "opacity .15s",
+          }}>
+            <span>Scroll</span>
+            <span style={{ fontSize: 13, lineHeight: 1 }}>→</span>
+          </span>
         </div>
       )}
+      <div style={{ position: "relative" }}>
+        <div ref={ref} style={{ background: "var(--bg3)", borderRadius: 16, overflowX: "auto", marginBottom: 0, border: "1px solid rgba(72,72,71,0.12)", ...style }}>
+          {children}
+        </div>
+        {overflow && !scrollPos.atEnd && (
+          <div style={{ position: "absolute", top: 0, bottom: 0, right: 0, width: 32, pointerEvents: "none", background: "linear-gradient(270deg, var(--bg3) 0%, transparent 100%)", borderTopRightRadius: 16, borderBottomRightRadius: 16 }} />
+        )}
+        {overflow && !scrollPos.atStart && (
+          <div style={{ position: "absolute", top: 0, bottom: 0, left: 0, width: 32, pointerEvents: "none", background: "linear-gradient(90deg, var(--bg3) 0%, transparent 100%)", borderTopLeftRadius: 16, borderBottomLeftRadius: 16 }} />
+        )}
+      </div>
     </div>
   );
 }
