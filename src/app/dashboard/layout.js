@@ -4,6 +4,7 @@ import { useRouter, usePathname } from "next/navigation";
 import { Sidebar, SidebarItem, SidebarToggle, SidebarPin, Icon, IconBtn, ThemeToggle, useConfirm } from "@/components/ui";
 import SearchPalette from "@/components/SearchPalette";
 import VLoader from "@/components/VLoader";
+import BellNotifications from "@/components/BellNotifications";
 import { collection, onSnapshot } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 
@@ -251,6 +252,7 @@ export default function DashboardLayout({ children }) {
                 </div>
               )}
 
+              {(user.role === "admin" || user.role === "accountant") && <BellNotifications currentUser={user} />}
               <ThemeToggle size={34} />
               <IconBtn name="plus" variant="primary" title="New Entry" onClick={() => router.push("/dashboard/entry")} size={34} />
            </div>

@@ -7,6 +7,7 @@ import { INR } from "@/lib/calculations";
 import { Icon, IconBtn, Card, PeriodWidget, TH, TD, Modal, useConfirm, useToast } from "@/components/ui";
 import { staffStatusForMonth, effectiveBranchOnDate } from "@/lib/calculations";
 import VLoader from "@/components/VLoader";
+import { MEMBERSHIP_TIERS, tierByKey, isActiveMember, daysUntilExpiry, computeMemberToDate, resolveDiscountRate, DEFAULT_MEMBER_DISCOUNT_PCT, MAX_EXTRA_DISCOUNT_PCT } from "@/lib/membership";
 
 
 // ExcelJS is ~200KB — load only when Template/Upload/Export is actually used.
@@ -124,6 +125,10 @@ export default function POSPage() {
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
   const [customerForm, setCustomerForm] = useState(null); // null | { name, phone, email, notes }
+  const [showMembershipModal, setShowMembershipModal] = useState(false);
+  const [discountPct, setDiscountPct] = useState(0); // applied to subtotal at POS
+  const [discountApprovalModal, setDiscountApprovalModal] = useState(null); // { requestedPct, reason }
+  const [pendingApproval, setPendingApproval] = useState(null); // snapshot of the approval doc currently gating this bill
   const [viewMode, setViewMode] = useState("pos"); // "pos" | "history"
 
   // Dynamic menu: pulled from the `menus` collection based on selected branch.
@@ -206,6 +211,62 @@ export default function POSPage() {
     if (cartItem.staffId) {
       const currentBilling = staffRows[cartItem.staffId]?.billing || 0;
       updateStaffRow(cartItem.staffId, "billing", Math.max(0, currentBilling - cartItem.price));
+    }
+  };
+
+  // Membership: adds a tier line to the cart as a non-commissionable service.
+  // On settle, the customer's membership fields are updated with the new validity.
+  const addMembershipToCart = (tierKey) => {
+    const tier = tierByKey(tierKey);
+    if (!tier) return;
+    if (!selectedCustomer) {
+      toast({ title: "Customer Required", message: "Pick or create a customer before purchasing a membership.", type: "warning" });
+      return;
+    }
+    // Remove any previous membership line so only one applies per bill.
+    setCart(prev => [
+      ...prev.filter(i => !i.is_membership),
+      {
+        cartId: Date.now() + Math.random(),
+        name: `Membership · ${tier.label}`,
+        price: tier.price,
+        staffId: "",
+        home_branch_id: selBranch || null,
+        is_membership: true,
+        membership_tier: tier.key,
+      },
+    ]);
+    setShowMembershipModal(false);
+    toast({ title: "Membership Added", message: `${tier.label} membership added to the bill.`, type: "success" });
+  };
+
+  // Submit a discount approval request when the cashier tries > 10%.
+  const submitDiscountApproval = async (requestedPct, reason) => {
+    try {
+      const payload = {
+        type: "pos_discount",
+        status: "pending",
+        requested_by: currentUser?.name || "cashier",
+        requested_by_id: currentUser?.id || "",
+        requested_at: new Date().toISOString(),
+        branch_id: selBranch || "",
+        branch_name: (branchesById.get(selBranch)?.name || "").replace("V-CUT ", ""),
+        customer_id: selectedCustomer?.id || "",
+        customer_name: selectedCustomer?.name || "",
+        requested_pct: Number(requestedPct) || 0,
+        base_pct: DEFAULT_MEMBER_DISCOUNT_PCT,
+        reason: reason || "",
+      };
+      const ref = await addDoc(collection(db, "approvals"), payload);
+      setPendingApproval({ ...payload, id: ref.id });
+      setDiscountApprovalModal(null);
+      toast({
+        title: "Approval Requested",
+        message: `${requestedPct}% discount sent to admin. Bill capped at ${DEFAULT_MEMBER_DISCOUNT_PCT + MAX_EXTRA_DISCOUNT_PCT}% until approved.`,
+        type: "info",
+      });
+    } catch (err) {
+      toast({ title: "Request Failed", message: err.message, type: "danger" });
     }
   };
 
@@ -342,6 +403,25 @@ export default function POSPage() {
     ));
     return () => unsub();
   }, [selBranch, selDate]);
+
+  // Watch the pending approval (if any) so the cashier sees approve/reject live.
+  useEffect(() => {
+    if (!db || !pendingApproval?.id) return;
+    const unsub = onSnapshot(doc(db, "approvals", pendingApproval.id), snap => {
+      if (!snap.exists()) { setPendingApproval(null); return; }
+      const data = { ...snap.data(), id: snap.id };
+      setPendingApproval(data);
+      if (data.status === "approved") {
+        setDiscountPct(Math.min(100, Number(data.requested_pct) || 0));
+        toast({ title: "Discount Approved", message: `${data.requested_pct}% unlocked.`, type: "success" });
+      } else if (data.status === "rejected") {
+        toast({ title: "Discount Rejected", message: `Bill remains at ${DEFAULT_MEMBER_DISCOUNT_PCT + MAX_EXTRA_DISCOUNT_PCT}% max.`, type: "warning" });
+        setPendingApproval(null);
+      }
+    });
+    return () => unsub();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingApproval?.id]);
 
   // Entries subscription scoped to current filter period (month or year).
   useEffect(() => {
@@ -515,8 +595,11 @@ export default function POSPage() {
     return acc;
   }, [staffRows]);
   
+  // Member discount applies to service (totalBilling) only — not materials / tips / GST base.
+  const discountAmount = Math.round(totalBilling * (Number(discountPct) || 0) / 100);
+
   // Online is the manual input; Cash auto-fills to absorb the remainder of total sales.
-  const globalTotalSales = totalBilling + totalMatSale;
+  const globalTotalSales = totalBilling + totalMatSale - discountAmount;
   const totalOnline = Math.max(0, Number(onlineInc) || 0);
   const totalCash = Math.max(0, globalTotalSales - totalOnline);
 
@@ -1324,6 +1407,14 @@ export default function POSPage() {
     setShowCustomerDropdown(false);
   };
 
+  // Auto-apply the default member discount whenever the selected customer changes.
+  // Clearing the customer resets the discount to 0.
+  useEffect(() => {
+    if (!selectedCustomer) { setDiscountPct(0); return; }
+    setDiscountPct(isActiveMember(selectedCustomer, selDate) ? DEFAULT_MEMBER_DISCOUNT_PCT : 0);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCustomer?.id, selDate]);
+
   const openNewCustomerForm = () => {
     const q = clientSearch.trim();
     const looksLikePhone = /^[\d+\-()\s]+$/.test(q) && q.replace(/\D/g, "").length >= 6;
@@ -1509,9 +1600,14 @@ export default function POSPage() {
     const branch = branchesById.get(selBranch);
     const staffMap = new Map(staff.map(s => [s.id, s]));
     const subtotal = cart.reduce((s, it) => s + (Number(it.price) || 0), 0);
+    // Discount applies only to service lines (skip membership lines — they're already the plan fee).
+    const serviceSubtotal = cart.filter(it => !it.is_membership).reduce((s, it) => s + (Number(it.price) || 0), 0);
+    const discount_amount = Math.round(serviceSubtotal * (Number(discountPct) || 0) / 100);
+    const netSubtotal = Math.max(0, subtotal - discount_amount);
     const online = Math.max(0, Number(onlineInc) || 0);
-    const cash = Math.max(0, subtotal - online);
+    const cash = Math.max(0, netSubtotal - online);
     const gst_amount = Math.round(online * (Number(gstPct) || 0) / 100);
+    const membershipItem = cart.find(it => it.is_membership);
     const split = new Map();
     cart.forEach(it => {
       if (!it.staffId) return;
@@ -1551,11 +1647,15 @@ export default function POSPage() {
       customer_name: selectedCustomer?.name || null,
       customer_phone: selectedCustomer?.phone || null,
       subtotal,
+      discount_pct: Number(discountPct) || 0,
+      discount_amount,
       gst_pct: Number(gstPct) || 0,
       gst_amount,
       cash,
       online,
-      total: subtotal,
+      total: netSubtotal,
+      membership: membershipItem ? { tier: membershipItem.membership_tier, price: membershipItem.price } : null,
+      approval_id: pendingApproval?.id || null,
       status,
       ...(invoice_no ? { invoice_no } : {}),
       ...extras,
@@ -1746,6 +1846,11 @@ export default function POSPage() {
   const confirmPrintAndSave = async ({ print = true } = {}) => {
     try {
       if (!billPreview) return;
+      // Block settle while a discount approval is still pending — draft-only mode.
+      if (pendingApproval && pendingApproval.status === "pending") {
+        toast({ title: "Pending Approval", message: `Discount request (${pendingApproval.requested_pct}%) hasn't been approved yet. Save as draft until admin responds.`, type: "warning" });
+        return;
+      }
       const invoice_no = billPreview.billNo;
 
       // 1. Write/settle the invoice doc first so the invoice_no is locked in.
@@ -1805,16 +1910,34 @@ export default function POSPage() {
 
       // 4. Update the customer's last-visit pointer so the Order Summary can prompt
       // the receptionist the next time this customer walks in ("visiting after N days").
+      // If a membership line was on this bill, also bump the customer's membership window.
       if (selectedCustomer?.id) {
         try {
-          await updateDoc(doc(db, "customers", selectedCustomer.id), {
+          const membershipItem = cart.find(it => it.is_membership);
+          const customerUpdate = {
             last_visit_date: selDate,
             last_visit_at: new Date().toISOString(),
             last_visit_invoice: invoice_no,
             last_visit_branch_id: selBranch,
-          });
+          };
+          if (membershipItem) {
+            const from = selDate;
+            const to = computeMemberToDate(from, membershipItem.membership_tier);
+            customerUpdate.is_member = true;
+            customerUpdate.member_tier = membershipItem.membership_tier;
+            customerUpdate.member_from = from;
+            customerUpdate.member_to = to;
+            customerUpdate.member_history = [
+              ...(selectedCustomer.member_history || []),
+              { tier: membershipItem.membership_tier, from, to, invoice_id: invoiceId, invoice_no },
+            ];
+          }
+          await updateDoc(doc(db, "customers", selectedCustomer.id), customerUpdate);
         } catch { /* non-fatal */ }
       }
+
+      // 5. Clear any pending-approval state so the next bill starts fresh.
+      if (pendingApproval) setPendingApproval(null);
 
       setEditingDraftId(null);
 
@@ -2138,6 +2261,36 @@ export default function POSPage() {
                   <div style={{ marginTop: 6, fontSize: 11, fontWeight: 700, color: hintColor }}>
                     {lastVisit ? `Last visit: ${lastVisit} · ${hintLabel}` : hintLabel}
                   </div>
+
+                  {/* Membership strip — badge if active, CTA if not */}
+                  {(() => {
+                    const active = isActiveMember(full, selDate);
+                    const daysLeft = active ? daysUntilExpiry(full, selDate) : 0;
+                    const tierLabel = tierByKey(full.member_tier)?.label || "";
+                    return (
+                      <div style={{ marginTop: 8, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                        {active ? (
+                          <div style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 8px", borderRadius: 6, background: "rgba(74,222,128,0.1)", border: "1px solid rgba(74,222,128,0.3)" }}>
+                            <Icon name="star" size={11} />
+                            <span style={{ fontSize: 10, fontWeight: 800, color: "var(--green)", textTransform: "uppercase", letterSpacing: 1 }}>
+                              Member{tierLabel ? ` · ${tierLabel}` : ""}
+                            </span>
+                            <span style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700 }}>
+                              · {daysLeft}d left
+                            </span>
+                          </div>
+                        ) : (
+                          <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)" }}>
+                            {full.is_member ? "Membership expired" : "Not a member"}
+                          </span>
+                        )}
+                        <button type="button" onClick={() => setShowMembershipModal(true)}
+                          style={{ padding: "4px 10px", borderRadius: 6, background: "rgba(var(--accent-rgb),0.1)", border: "1px solid rgba(var(--accent-rgb),0.35)", color: "var(--accent)", fontSize: 10, fontWeight: 800, letterSpacing: 1, textTransform: "uppercase", cursor: "pointer" }}>
+                          {active ? "Renew" : "+ Become Member"}
+                        </button>
+                      </div>
+                    );
+                  })()}
                 </div>
               );
             })()}
@@ -2237,6 +2390,35 @@ export default function POSPage() {
                  <span>Subtotal</span>
                  <span style={{ color: "var(--text)" }}>{INR(totalBilling + totalMatSale)}</span>
               </div>
+
+              {/* Member discount row — only shown for customers with an active membership */}
+              {selectedCustomer && isActiveMember(selectedCustomer, selDate) && (
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "8px 10px", borderRadius: 10, background: "rgba(var(--accent-rgb),0.06)", border: "1px solid rgba(var(--accent-rgb),0.25)" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+                    <span style={{ fontSize: 10, fontWeight: 800, color: "var(--accent)", textTransform: "uppercase", letterSpacing: 1 }}>Discount</span>
+                    <input type="number" min={0} max={100} step={1} value={discountPct}
+                      onChange={e => {
+                        const v = Math.max(0, Math.floor(Number(e.target.value) || 0));
+                        const ceiling = DEFAULT_MEMBER_DISCOUNT_PCT + MAX_EXTRA_DISCOUNT_PCT;
+                        if (v > ceiling && (!pendingApproval || pendingApproval.status !== "approved" || v > Number(pendingApproval.requested_pct))) {
+                          setDiscountApprovalModal({ requestedPct: v, reason: "" });
+                          setDiscountPct(ceiling);
+                          return;
+                        }
+                        setDiscountPct(v);
+                      }}
+                      style={{ width: 52, padding: "4px 6px", borderRadius: 6, background: "var(--bg3)", border: "1px solid var(--border2)", color: "var(--accent)", fontSize: 12, fontWeight: 800, outline: "none", textAlign: "center" }} />
+                    <span style={{ fontSize: 11, color: "var(--text3)", fontWeight: 700 }}>%</span>
+                    {pendingApproval?.status === "pending" && (
+                      <span style={{ fontSize: 9, fontWeight: 800, color: "var(--orange)", padding: "2px 6px", borderRadius: 5, background: "rgba(251,146,60,0.1)", border: "1px solid rgba(251,146,60,0.3)", textTransform: "uppercase", letterSpacing: 1 }}>
+                        Awaiting approval
+                      </span>
+                    )}
+                  </div>
+                  <span style={{ color: "var(--green)", fontSize: 13, fontWeight: 800 }}>−{INR(discountAmount)}</span>
+                </div>
+              )}
+
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "var(--text3)", fontWeight: 600 }}>
                  <span>GST ({gstPct || 0}%)</span>
                  <span style={{ color: "var(--red)" }}>{INR(totalRowGst)}</span>
@@ -2264,7 +2446,12 @@ export default function POSPage() {
 
               <div style={{ marginTop: 16, padding: "20px", background: "linear-gradient(135deg, var(--bg4), var(--bg3))", borderRadius: 20, textAlign: "center", border: "1px solid rgba(255,255,255,0.03)" }}>
                  <div style={{ fontSize: 11, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 2, marginBottom: 8 }}>Total Receivable</div>
-                 <div style={{ fontSize: 36, fontWeight: 900, color: "var(--gold)", letterSpacing: -1 }}>{INR(totalBilling + totalMatSale + totalTips)}</div>
+                 <div style={{ fontSize: 36, fontWeight: 900, color: "var(--gold)", letterSpacing: -1 }}>{INR(totalBilling + totalMatSale + totalTips - discountAmount)}</div>
+                 {discountAmount > 0 && (
+                   <div style={{ fontSize: 10, color: "var(--accent)", fontWeight: 700, marginTop: 4 }}>
+                     {discountPct}% member discount applied · saved {INR(discountAmount)}
+                   </div>
+                 )}
               </div>
 
               <div style={{ display: "flex", gap: 10 }}>
@@ -2763,6 +2950,70 @@ export default function POSPage() {
                   </button>
                 </>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Membership tier picker */}
+      {showMembershipModal && (
+        <div onClick={() => setShowMembershipModal(false)}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", backdropFilter: "blur(6px)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+          <div onClick={e => e.stopPropagation()}
+            style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 18, width: "100%", maxWidth: 560, padding: 24, boxShadow: "0 24px 60px -12px rgba(0,0,0,0.7)" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 2 }}>Membership</div>
+                <div style={{ fontSize: 18, fontWeight: 800, color: "var(--gold)" }}>Pick a tier</div>
+                {selectedCustomer && <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 2 }}>For: {selectedCustomer.name}</div>}
+              </div>
+              <button onClick={() => setShowMembershipModal(false)}
+                style={{ background: "transparent", border: "1px solid var(--border)", color: "var(--text3)", borderRadius: 8, width: 30, height: 30, cursor: "pointer", fontSize: 14 }}>✕</button>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 10 }}>
+              {MEMBERSHIP_TIERS.map(t => (
+                <button key={t.key} onClick={() => addMembershipToCart(t.key)}
+                  style={{ padding: 14, textAlign: "left", background: "var(--bg3)", border: "1px solid var(--border2)", borderRadius: 12, cursor: "pointer", transition: "all .15s" }}
+                  onMouseEnter={e => { e.currentTarget.style.borderColor = "var(--accent)"; e.currentTarget.style.background = "rgba(var(--accent-rgb),0.06)"; }}
+                  onMouseLeave={e => { e.currentTarget.style.borderColor = "var(--border2)"; e.currentTarget.style.background = "var(--bg3)"; }}>
+                  <div style={{ fontSize: 13, fontWeight: 800, color: "var(--text)" }}>{t.label}</div>
+                  <div style={{ fontSize: 10, color: "var(--text3)", fontWeight: 600, marginTop: 2 }}>{t.days} days validity</div>
+                  <div style={{ fontSize: 18, fontWeight: 900, color: "var(--accent)", marginTop: 8 }}>{INR(t.price)}</div>
+                </button>
+              ))}
+            </div>
+            <div style={{ fontSize: 10, color: "var(--text3)", marginTop: 14, lineHeight: 1.5 }}>
+              The selected tier is added to the cart as a service line. On settle, the customer gets {DEFAULT_MEMBER_DISCOUNT_PCT}% off future bills for the tier&apos;s duration.
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Discount approval request modal */}
+      {discountApprovalModal && (
+        <div onClick={() => setDiscountApprovalModal(null)}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", backdropFilter: "blur(6px)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+          <div onClick={e => e.stopPropagation()}
+            style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 18, width: "100%", maxWidth: 440, padding: 24, boxShadow: "0 24px 60px -12px rgba(0,0,0,0.7)" }}>
+            <div style={{ fontSize: 10, fontWeight: 800, color: "var(--orange)", textTransform: "uppercase", letterSpacing: 2 }}>Approval Required</div>
+            <div style={{ fontSize: 17, fontWeight: 800, color: "var(--text)", marginTop: 4 }}>
+              {discountApprovalModal.requestedPct}% discount exceeds the {DEFAULT_MEMBER_DISCOUNT_PCT + MAX_EXTRA_DISCOUNT_PCT}% cap
+            </div>
+            <div style={{ fontSize: 12, color: "var(--text3)", marginTop: 4, lineHeight: 1.5 }}>
+              Add a short reason. Admin/accountant will see this on their bell. Bill stays at {DEFAULT_MEMBER_DISCOUNT_PCT + MAX_EXTRA_DISCOUNT_PCT}% until approved.
+            </div>
+            <textarea rows={3} value={discountApprovalModal.reason}
+              onChange={e => setDiscountApprovalModal(p => ({ ...p, reason: e.target.value }))}
+              placeholder="e.g. Loyal customer celebrating anniversary"
+              style={{ width: "100%", marginTop: 12, padding: "10px 12px", background: "var(--bg3)", border: "1px solid var(--border2)", borderRadius: 8, color: "var(--text)", fontSize: 12, outline: "none", resize: "vertical", boxSizing: "border-box" }} />
+            <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
+              <button onClick={() => setDiscountApprovalModal(null)}
+                style={{ flex: 1, padding: 10, background: "var(--bg3)", border: "1px solid var(--border2)", color: "var(--text2)", borderRadius: 8, fontSize: 11, fontWeight: 800, letterSpacing: 1, textTransform: "uppercase", cursor: "pointer" }}>Cancel</button>
+              <button onClick={() => submitDiscountApproval(discountApprovalModal.requestedPct, discountApprovalModal.reason)}
+                disabled={!discountApprovalModal.reason.trim()}
+                style={{ flex: 1.3, padding: 10, background: discountApprovalModal.reason.trim() ? "linear-gradient(135deg, var(--accent), var(--gold2))" : "var(--bg4)", border: "none", color: discountApprovalModal.reason.trim() ? "#000" : "var(--text3)", borderRadius: 8, fontSize: 11, fontWeight: 900, letterSpacing: 1, textTransform: "uppercase", cursor: discountApprovalModal.reason.trim() ? "pointer" : "not-allowed" }}>
+                Send for approval
+              </button>
             </div>
           </div>
         </div>
