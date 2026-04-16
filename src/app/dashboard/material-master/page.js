@@ -1017,8 +1017,8 @@ export default function MaterialMasterPage() {
             <Icon name="save" size={12} /> Template
           </button>
           <label title="Upload Excel, PDF, or Image to bulk add/update materials"
-            style={{ padding: "10px 14px", borderRadius: 10, background: "linear-gradient(135deg,var(--accent),var(--gold2))", color: "#000", border: "1px solid rgba(72,72,71,0.15)", cursor: (ioBusy || parsing) ? "wait" : "pointer", fontWeight: 800, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, display: "inline-flex", alignItems: "center", gap: 6, opacity: (ioBusy || parsing) ? 0.6 : 1 }}>
-            <Icon name="plus" size={12} /> {parsing ? (ocrProgress > 0 && ocrProgress < 100 ? `Scanning ${ocrProgress}%` : "Reading…") : "Upload"}
+            style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "10px 18px", borderRadius: 12, background: "linear-gradient(135deg,var(--accent),var(--gold2))", color: "#000", fontWeight: 800, fontSize: 12, cursor: (ioBusy || parsing) ? "wait" : "pointer", textTransform: "uppercase", letterSpacing: 0.5, opacity: (ioBusy || parsing) ? 0.6 : 1 }}>
+            <Icon name="plus" size={14} /> {parsing ? (ocrProgress > 0 && ocrProgress < 100 ? `Scanning Image ${ocrProgress}%` : "Reading File...") : "Upload (Excel / PDF / Image)"}
             <input type="file" accept=".xlsx,.xls,application/pdf,image/*" onChange={handleUploadMaster} disabled={ioBusy || parsing} style={{ display: "none" }} />
           </label>
           <button onClick={exportMaster} disabled={ioBusy || materials.length === 0} title="Export the full master catalog to Excel"
