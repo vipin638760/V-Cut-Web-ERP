@@ -387,6 +387,15 @@ export default function POSPage() {
     return () => unsub();
   }, [filterMode, filterPrefix, filterYear]);
 
+  // Keep the history date chip in sync with the top date picker.
+  // Changing selDate while browsing history re-applies the new date to the
+  // branch cards — unless the user explicitly cleared the chip (""), in which
+  // case 'show all period' mode sticks until they re-enable filtering.
+  useEffect(() => {
+    if (viewMode !== "history") return;
+    setHistoryDateFilter(prev => (prev === "" ? "" : selDate));
+  }, [selDate, viewMode]);
+
   // Branch lookup — memoized so per-row resolution in tables/exports is O(1) instead of O(n).
   const branchesById = useMemo(() => {
     const m = new Map();
@@ -2289,7 +2298,12 @@ export default function POSPage() {
              </div>
              <div style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 10px", background: historyDateFilter ? "rgba(var(--accent-rgb),0.1)" : "var(--bg3)", border: `1px solid ${historyDateFilter ? "rgba(var(--accent-rgb),0.35)" : "var(--border2)"}`, borderRadius: 8 }}>
                <span style={{ fontSize: 10, fontWeight: 800, color: historyDateFilter ? "var(--accent)" : "var(--text3)", textTransform: "uppercase", letterSpacing: 1 }}>Date</span>
-               <input type="date" value={historyDateFilter} onChange={e => setHistoryDateFilter(e.target.value)}
+               <input type="date" value={historyDateFilter}
+                 onChange={e => {
+                   const v = e.target.value;
+                   setHistoryDateFilter(v);
+                   if (v) setSelDate(v);
+                 }}
                  style={{ background: "transparent", border: "none", color: historyDateFilter ? "var(--accent)" : "var(--text2)", fontSize: 12, fontWeight: 700, outline: "none", cursor: "pointer", padding: 0, minWidth: 130 }} />
                {historyDateFilter && (
                  <button onClick={() => setHistoryDateFilter("")} title="Show all invoices for the period"
