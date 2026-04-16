@@ -254,19 +254,17 @@ export default function BranchesPage() {
     const staffById = new Map(staff.map(st => [st.id, st]));
 
     const perDay = (dateStr) => {
-      // Approved leaves first — their staff IDs take precedence and must be removed
-      // from present/loan so the same person can never appear twice on the same date.
-      const approvedLeaves = leaves
-        .filter(l => l.date === dateStr && (l.status === "approved" || !l.status) && staffById.get(l.staff_id)?.branch_id === attBranch.id)
-        .map(l => ({ id: l.staff_id, name: staffById.get(l.staff_id)?.name || "Staff", type: l.type || "Paid" }));
-      const onLeaveIds = new Set(approvedLeaves.map(l => l.id));
-
+      // Build present/loan from the day's entry. Track who demonstrably worked
+      // (any billing / material / tips > 0) — actual work overrides any leave
+      // record that may have been filed by mistake.
       const entry = branchEntries.find(e => e.date === dateStr);
       const present = [], loan = [];
+      const workedIds = new Set();
       if (entry) {
         (entry.staff_billing || []).forEach(sb => {
           if (sb.present === false) return;
-          if (onLeaveIds.has(sb.staff_id)) return; // leave wins over stale present row
+          const hasWork = (sb.billing || 0) > 0 || (sb.material || 0) > 0 || (sb.tips || 0) > 0;
+          if (hasWork) workedIds.add(sb.staff_id);
           const staffRec = staffById.get(sb.staff_id);
           const item = {
             id: sb.staff_id,
@@ -277,7 +275,19 @@ export default function BranchesPage() {
           if (sb.loan_flag) loan.push(item); else present.push(item);
         });
       }
-      return { present, loan, approvedLeaves };
+      // Priority: actual work wins over leave. Staff who clocked work stay in
+      // present/loan and are dropped from the leave list. Staff with a leave
+      // but no work are treated as on-leave and removed from present/loan.
+      const approvedLeaves = leaves
+        .filter(l => l.date === dateStr && (l.status === "approved" || !l.status) && staffById.get(l.staff_id)?.branch_id === attBranch.id)
+        .filter(l => !workedIds.has(l.staff_id))
+        .map(l => ({ id: l.staff_id, name: staffById.get(l.staff_id)?.name || "Staff", type: l.type || "Paid" }));
+      const onLeaveIds = new Set(approvedLeaves.map(l => l.id));
+      return {
+        present: present.filter(p => !onLeaveIds.has(p.id)),
+        loan: loan.filter(p => !onLeaveIds.has(p.id)),
+        approvedLeaves,
+      };
     };
 
     const blanks = Array(firstDow).fill(null);
