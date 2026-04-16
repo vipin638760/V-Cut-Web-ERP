@@ -646,6 +646,14 @@ export default function BranchesPage() {
           </Card>
         </div>
 
+        {/* Quick action: open the standalone attendance calendar modal for this branch */}
+        <div style={{ display: "flex", justifyContent: "flex-end", margin: "8px 0 16px" }}>
+          <button onClick={() => { setAttendanceCalendar(b.id); setAttendanceMonth(filterMode === "month" ? filterPrefix : `${filterYear}-${String(NOW.getMonth() + 1).padStart(2, "0")}`); setAttendanceSelectedDay(null); }}
+            style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "10px 16px", borderRadius: 10, background: "rgba(var(--accent-rgb),0.1)", border: "1px solid rgba(var(--accent-rgb),0.35)", color: "var(--accent)", fontSize: 12, fontWeight: 800, letterSpacing: 1, textTransform: "uppercase", cursor: "pointer" }}>
+            📅 View Attendance Calendar
+          </button>
+        </div>
+
         {/* Staff Table */}
         <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 12, color: "var(--gold)" }}>Branch Staff ({branchStaff.length})</div>
         <Card>
@@ -957,14 +965,6 @@ export default function BranchesPage() {
             </tbody>
           </table>
         </Card>
-
-        {/* Quick action: open the standalone attendance calendar modal for this branch */}
-        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 14 }}>
-          <button onClick={() => { setAttendanceCalendar(b.id); setAttendanceMonth(filterMode === "month" ? filterPrefix : `${filterYear}-${String(NOW.getMonth() + 1).padStart(2, "0")}`); setAttendanceSelectedDay(null); }}
-            style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "10px 16px", borderRadius: 10, background: "rgba(var(--accent-rgb),0.1)", border: "1px solid rgba(var(--accent-rgb),0.35)", color: "var(--accent)", fontSize: 12, fontWeight: 800, letterSpacing: 1, textTransform: "uppercase", cursor: "pointer" }}>
-            📅 View Attendance Calendar
-          </button>
-        </div>
 
         {/* Audit Log Modal */}
         {logView && (
