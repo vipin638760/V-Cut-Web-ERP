@@ -107,8 +107,15 @@ export default function StaffPage() {
   let filtered = branchFilter ? staff.filter(s => s.branch_id === branchFilter) : [...staff];
   if (statusFilter === "active") filtered = filtered.filter(s => staffOverallStatus(s, statusRefMon) === "active");
   else if (statusFilter === "inactive") filtered = filtered.filter(s => staffOverallStatus(s, statusRefMon) !== "active");
-  if (roleFilter === "mens") filtered = filtered.filter(s => (s.role || "").toLowerCase().includes("mens"));
-  else if (roleFilter === "unisex") filtered = filtered.filter(s => (s.role || "").toLowerCase().includes("unisex"));
+  if (roleFilter !== "all") filtered = filtered.filter(s => (s.role || "—") === roleFilter);
+
+  // Distinct role chips built from the current staff list (skips empty) —
+  // automatically picks up new roles added via Settings without a code change.
+  const roleChips = (() => {
+    const seen = new Set();
+    staff.forEach(s => { if (s.role) seen.add(s.role); });
+    return [...seen].sort();
+  })();
   // For admin, hide pending-setup staff from the main table (they appear in the Pending Setup section above)
   if (isAdmin) filtered = filtered.filter(s => !s.pending_setup);
 
@@ -363,12 +370,16 @@ export default function StaffPage() {
           ))}
         </div>
 
-        {/* Role type filter — narrows to mens-only or unisex stylists */}
-        <div style={{ display: "inline-flex", background: "var(--bg3)", border: "1.5px solid var(--border2)", borderRadius: 12, padding: 3, gap: 2 }}>
-          {[["all", "All Roles"], ["mens", "Mens"], ["unisex", "Unisex"]].map(([val, label]) => (
-            <button key={val} onClick={() => setRoleFilter(val)}
-              style={{ padding: "6px 14px", fontSize: 11, fontWeight: 700, color: roleFilter === val ? "#000" : "var(--text3)", background: roleFilter === val ? "var(--accent)" : "transparent", border: "none", borderRadius: 9, cursor: "pointer", transition: "all 0.2s", textTransform: "uppercase" }}>
-              {label}
+        {/* Role filter — one chip per distinct role in the current staff list */}
+        <div style={{ display: "inline-flex", flexWrap: "wrap", background: "var(--bg3)", border: "1.5px solid var(--border2)", borderRadius: 12, padding: 3, gap: 2 }}>
+          <button onClick={() => setRoleFilter("all")}
+            style={{ padding: "6px 14px", fontSize: 11, fontWeight: 700, color: roleFilter === "all" ? "#000" : "var(--text3)", background: roleFilter === "all" ? "var(--accent)" : "transparent", border: "none", borderRadius: 9, cursor: "pointer", transition: "all 0.2s", textTransform: "uppercase" }}>
+            All Roles
+          </button>
+          {roleChips.map(role => (
+            <button key={role} onClick={() => setRoleFilter(role)}
+              style={{ padding: "6px 14px", fontSize: 11, fontWeight: 700, color: roleFilter === role ? "#000" : "var(--text3)", background: roleFilter === role ? "var(--accent)" : "transparent", border: "none", borderRadius: 9, cursor: "pointer", transition: "all 0.2s", textTransform: "uppercase" }}>
+              {role.replace(" Hairdresser", "")}
             </button>
           ))}
         </div>
