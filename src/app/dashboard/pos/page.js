@@ -1467,16 +1467,25 @@ export default function POSPage() {
     return list;
   }, [historyInvoices, selectedBranchIds, branchStatusFilter, branchDateFilter, branchCustomerFilter, branchSortBy, historyDateFilter]);
 
+  // Default card tap = single-select (isolate to just this branch).
+  // Clicking the already-lone-selected card deselects everything.
   const toggleBranchSelection = (bid) => {
+    setSelectedBranchIds(prev => {
+      if (prev.size === 1 && prev.has(bid)) return new Set();
+      return new Set([bid]);
+    });
+    setBranchDateFilter(historyDateFilter || "");
+    setBranchCustomerFilter(""); setBranchSortBy("date_desc"); setBranchStatusFilter("all");
+  };
+
+  // Add-to-selection handle (the tiny +/✕ corner chip on each card).
+  const toggleBranchInMultiSelect = (bid, e) => {
+    e.stopPropagation();
     setSelectedBranchIds(prev => {
       const next = new Set(prev);
       if (next.has(bid)) next.delete(bid); else next.add(bid);
       return next;
     });
-    // Seed the drill-down's own date filter with whatever the top chip is on,
-    // so the invoice list matches the summary card count when you open it.
-    setBranchDateFilter(historyDateFilter || "");
-    setBranchCustomerFilter(""); setBranchSortBy("date_desc"); setBranchStatusFilter("all");
   };
 
   // Invoice number: {BRANCH-PREFIX}-{DDMMYY}-{NNN}
@@ -2359,11 +2368,26 @@ export default function POSPage() {
              )}
              {branchSummaries.map(bs => {
                const active = selectedBranchIds.has(bs.branch_id);
+               const hasSelection = selectedBranchIds.size > 0;
                return (
-                 <button key={bs.branch_id}
+                 <div key={bs.branch_id} style={{ position: "relative" }}>
+                   {hasSelection && (
+                     <button onClick={(e) => toggleBranchInMultiSelect(bs.branch_id, e)}
+                       title={active ? "Remove from comparison" : "Add to comparison"}
+                       style={{
+                         position: "absolute", top: 8, right: 8, zIndex: 2,
+                         width: 24, height: 24, borderRadius: 6,
+                         background: active ? "rgba(248,113,113,0.12)" : "rgba(var(--accent-rgb),0.12)",
+                         border: `1px solid ${active ? "rgba(248,113,113,0.4)" : "rgba(var(--accent-rgb),0.4)"}`,
+                         color: active ? "var(--red)" : "var(--accent)",
+                         fontSize: 13, fontWeight: 900, cursor: "pointer",
+                         display: "flex", alignItems: "center", justifyContent: "center", lineHeight: 1,
+                       }}>{active ? "−" : "+"}</button>
+                   )}
+                 <button
                    onClick={() => toggleBranchSelection(bs.branch_id)}
                    style={{
-                     textAlign: "left", cursor: "pointer",
+                     textAlign: "left", cursor: "pointer", width: "100%",
                      background: active ? "linear-gradient(135deg, rgba(var(--accent-rgb),0.12), rgba(var(--accent-rgb),0.03))" : "var(--bg2)",
                      border: `1px solid ${active ? "var(--accent)" : "var(--border)"}`,
                      borderRadius: 16, padding: 16, display: "flex", flexDirection: "column", gap: 8,
@@ -2385,6 +2409,7 @@ export default function POSPage() {
                      </div>
                    </div>
                  </button>
+                 </div>
                );
              })}
            </div>
