@@ -447,9 +447,37 @@ export default function EntryPage() {
     }
   };
 
-  const handleSave = async (e) => {
+  // Staff marked present but with zero billing / material / tips AND no approved leave for the date.
+  // These are likely either truly absent (needs leave filed) or an oversight.
+  const zeroWorkPresent = [...branchStaff, ...loanStaffList].filter(s => {
+    const r = staffRows[s.id] || {};
+    if (r.present === false) return false;
+    const hasWork = (Number(r.billing) || 0) > 0 || (Number(r.material) || 0) > 0 || (Number(r.tips) || 0) > 0;
+    if (hasWork) return false;
+    const approvedLeave = leaves.find(l => l.staff_id === s.id && l.date === selDate && (l.status === "approved" || !l.status));
+    if (approvedLeave) return false;
+    return true;
+  });
+
+  const handleSave = async (e, opts = {}) => {
     e.preventDefault();
     if (!selBranch) { confirm({ title: "Notice", message: "Select a branch first.", confirmText: "OK", cancelText: "Close", type: "warning", onConfirm: () => {} }); return; }
+
+    // Absence check before save — present staff with no logged work and no leave on file.
+    // Manager / accountant has to decide: truly present (idle) OR absent (file leave).
+    if (!opts.skipAbsenceCheck && zeroWorkPresent.length > 0) {
+      const names = zeroWorkPresent.map(s => s.name).join(", ");
+      confirm({
+        title: "Confirm attendance",
+        message: `${zeroWorkPresent.length} staff marked <strong>present</strong> have no billing, material, or tips and no leave on file for ${selDate}:<br/><br/><strong>${names}</strong><br/><br/>If they were absent, uncheck Present on each row and file leave. If they were genuinely present without work, save as-is.`,
+        confirmText: "Save As-Is",
+        cancelText: "Let Me Fix",
+        type: "warning",
+        onConfirm: () => handleSave(e, { ...opts, skipAbsenceCheck: true }),
+      });
+      return;
+    }
+
     setSaving(true);
     setSaveStatus("");
 
@@ -1408,6 +1436,15 @@ export default function EntryPage() {
                         ? `DEFICIT — short by ${INR(Math.abs(cashDiff))} (expected ${INR(cashInHand)}, counted ${INR(actualCashNum)})`
                         : `EXCESS — over by ${INR(cashDiff)} (expected ${INR(cashInHand)}, counted ${INR(actualCashNum)})`}
                   </span>
+                </div>
+              )}
+
+              {/* Attendance hint — present staff with no work and no leave on file */}
+              {zeroWorkPresent.length > 0 && (
+                <div style={{ marginTop: 14, padding: "10px 14px", borderRadius: 10, background: "rgba(251,146,60,0.08)", border: "1px solid rgba(251,146,60,0.35)", fontSize: 12, color: "var(--orange)" }}>
+                  <strong>⚠ {zeroWorkPresent.length} present staff with no work logged:</strong>{" "}
+                  {zeroWorkPresent.map(s => s.name).join(", ")}.
+                  <span style={{ color: "var(--text3)", fontWeight: 500 }}> If absent, uncheck Present to file leave; otherwise save as-is.</span>
                 </div>
               )}
 

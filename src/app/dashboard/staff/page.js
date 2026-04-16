@@ -561,13 +561,21 @@ export default function StaffPage() {
             ? new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate() - 1).toISOString().slice(0, 10)
             : null;
           let presentCount = 0, leaveCount = 0, absentCount = 0;
+          const branchTally = new Map(); // branch_id -> day count (present only)
           days.forEach(dateStr => {
             if (cutoff && dateStr > cutoff) return;
             const st = dayStatus(dateStr);
-            if (st.kind === "present") presentCount++;
+            if (st.kind === "present") {
+              presentCount++;
+              if (st.branch_id) branchTally.set(st.branch_id, (branchTally.get(st.branch_id) || 0) + 1);
+            }
             else if (st.kind === "leave") leaveCount++;
             else if (st.kind === "absent") absentCount++;
           });
+          // Stable colour swatch per branch for visual coding in day cells + legend.
+          const swatchPalette = ["#22d3ee", "#a78bfa", "#fb923c", "#4ade80", "#f472b6", "#60a5fa", "#fde047", "#f87171"];
+          const branchColour = new Map();
+          [...branchTally.keys()].forEach((bid, i) => branchColour.set(bid, swatchPalette[i % swatchPalette.length]));
 
           return (
             <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -577,6 +585,24 @@ export default function StaffPage() {
                 <span style={{ padding: "6px 10px", borderRadius: 8, background: "rgba(248,113,113,0.1)", color: "var(--red)" }}>● Absent {absentCount}</span>
                 <span style={{ marginLeft: "auto", padding: "6px 10px", borderRadius: 8, background: "var(--bg4)", color: "var(--text3)" }}>Home: {(branches.find(b => b.id === s.branch_id)?.name || "—").replace("V-CUT ", "")}</span>
               </div>
+
+              {/* Branch breakdown — one chip per branch the staff worked at this month, with day count */}
+              {branchTally.size > 0 && (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8, padding: "8px 0", borderTop: "1px dashed var(--border)", borderBottom: "1px dashed var(--border)" }}>
+                  <div style={{ fontSize: 10, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.5 }}>Worked at {branchTally.size} branch{branchTally.size === 1 ? "" : "es"}:</div>
+                  {[...branchTally.entries()].sort((a, b) => b[1] - a[1]).map(([bid, cnt]) => {
+                    const bName = (branches.find(b => b.id === bid)?.name || "Branch").replace("V-CUT ", "");
+                    const isHome = bid === s.branch_id;
+                    return (
+                      <span key={bid} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 10px", borderRadius: 999, background: "var(--bg3)", border: `1px solid ${branchColour.get(bid)}`, color: "var(--text)", fontSize: 11, fontWeight: 700 }}>
+                        <span style={{ width: 8, height: 8, borderRadius: "50%", background: branchColour.get(bid) }} />
+                        {bName} · {cnt}d
+                        {isHome && <span style={{ fontSize: 9, color: "var(--text3)", fontWeight: 600, textTransform: "uppercase", letterSpacing: 1 }}>home</span>}
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
 
               {/* Weekday header */}
               <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 6, fontSize: 10, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.2, textAlign: "center" }}>
@@ -592,6 +618,7 @@ export default function StaffPage() {
                   const isToday = dateStr === todayStr;
                   const bName = st.branch_id ? short(st.branch_id) : "";
                   const hasOverride = st.source === "override";
+                  const branchDot = st.kind === "present" && st.branch_id ? branchColour.get(st.branch_id) : null;
                   return (
                     <button key={dateStr}
                       disabled={!canEdit}
@@ -613,7 +640,10 @@ export default function StaffPage() {
                       }}>
                       <div style={{ display: "flex", width: "100%", justifyContent: "space-between", alignItems: "center", fontSize: 12, fontWeight: 800 }}>
                         <span>{Number(dateStr.slice(8, 10))}</span>
-                        {hasOverride && <span title="Manually edited" style={{ fontSize: 8, color: "var(--accent)" }}>✎</span>}
+                        <div style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
+                          {branchDot && <span title={branches.find(b => b.id === st.branch_id)?.name || ""} style={{ width: 7, height: 7, borderRadius: "50%", background: branchDot }} />}
+                          {hasOverride && <span title="Manually edited" style={{ fontSize: 8, color: "var(--accent)" }}>✎</span>}
+                        </div>
                       </div>
                       {bName && <div style={{ fontSize: 9, fontWeight: 700, opacity: 0.9, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%" }}>{bName}</div>}
                       {st.kind === "leave" && <div style={{ fontSize: 9, fontWeight: 700, opacity: 0.85 }}>LEAVE</div>}

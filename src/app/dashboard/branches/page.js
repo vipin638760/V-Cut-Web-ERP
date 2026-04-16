@@ -766,6 +766,105 @@ export default function BranchesPage() {
           </table>
         </Card>
 
+        {/* Attendance Calendar for this branch — who worked on which day */}
+        {filterMode === "month" && (() => {
+          const [yr, mo] = filterPrefix.split("-").map(Number);
+          const daysInMonth = new Date(yr, mo, 0).getDate();
+          const firstDow = new Date(yr, mo - 1, 1).getDay();
+          const todayStr = new Date().toISOString().slice(0, 10);
+          const isCurrentMonth = NOW.getFullYear() === yr && NOW.getMonth() + 1 === mo;
+          const cutoff = isCurrentMonth
+            ? new Date(NOW.getFullYear(), NOW.getMonth(), NOW.getDate() - 1).toISOString().slice(0, 10)
+            : null;
+          const branchEntries = entries.filter(e => e.branch_id === b.id && e.date && e.date.startsWith(filterPrefix));
+          const staffById = new Map(staff.map(st => [st.id, st]));
+
+          const perDay = (dateStr) => {
+            const entry = branchEntries.find(e => e.date === dateStr);
+            if (!entry) return { present: [], loan: [], approvedLeaves: [] };
+            const present = [], loan = [];
+            (entry.staff_billing || []).forEach(sb => {
+              if (sb.present === false) return;
+              const staffRec = staffById.get(sb.staff_id);
+              const item = { id: sb.staff_id, name: staffRec?.name || sb.staff_name || "Staff", loan: !!sb.loan_flag };
+              if (sb.loan_flag) loan.push(item); else present.push(item);
+            });
+            const approvedLeaves = leaves.filter(l => l.date === dateStr && (l.status === "approved" || !l.status) && staffById.get(l.staff_id)?.branch_id === b.id)
+              .map(l => ({ id: l.staff_id, name: staffById.get(l.staff_id)?.name || "Staff", type: l.type }));
+            return { present, loan, approvedLeaves };
+          };
+
+          const blanks = Array(firstDow).fill(null);
+          const days = Array.from({ length: daysInMonth }, (_, i) => `${filterPrefix}-${String(i + 1).padStart(2, "0")}`);
+
+          return (
+            <Card style={{ marginTop: 16, padding: 20 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap: "wrap", gap: 10 }}>
+                <div style={{ fontSize: 14, fontWeight: 800, color: "var(--gold)", letterSpacing: 0.5 }}>Attendance Calendar · {periodLabel(filterMode, filterYear, filterMonth)}</div>
+                <div style={{ fontSize: 11, color: "var(--text3)", display: "flex", gap: 10, flexWrap: "wrap" }}>
+                  <span><span style={{ display: "inline-block", width: 8, height: 8, borderRadius: 2, background: "var(--green)", marginRight: 4 }} />Home</span>
+                  <span><span style={{ display: "inline-block", width: 8, height: 8, borderRadius: 2, background: "var(--orange)", marginRight: 4 }} />Loan</span>
+                  <span><span style={{ display: "inline-block", width: 8, height: 8, borderRadius: 2, background: "var(--blue, #60a5fa)", marginRight: 4 }} />Leave</span>
+                </div>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 6, fontSize: 10, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.2, textAlign: "center", marginBottom: 6 }}>
+                {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(d => <div key={d}>{d}</div>)}
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 6 }}>
+                {blanks.map((_, i) => <div key={`b${i}`} />)}
+                {days.map(dateStr => {
+                  const isFuture = cutoff && dateStr > cutoff;
+                  const { present, loan, approvedLeaves } = perDay(dateStr);
+                  const total = present.length + loan.length;
+                  const isToday = dateStr === todayStr;
+                  const sampleNames = [...present, ...loan].slice(0, 3).map(x => x.name.split(" ")[0]).join(", ");
+                  const tooltip = [
+                    ...present.map(x => `• ${x.name}`),
+                    ...loan.map(x => `• ${x.name} (loan)`),
+                    ...approvedLeaves.map(x => `• ${x.name} — LEAVE`),
+                  ].join("\n");
+                  return (
+                    <div key={dateStr} title={tooltip || ""}
+                      style={{
+                        aspectRatio: "1 / 1",
+                        padding: 6,
+                        borderRadius: 10,
+                        background: isFuture ? "transparent" : total > 0 ? "rgba(74,222,128,0.08)" : "var(--bg4)",
+                        border: `1px solid ${isToday ? "var(--accent)" : total > 0 ? "rgba(74,222,128,0.3)" : "var(--border)"}`,
+                        color: "var(--text)",
+                        display: "flex",
+                        flexDirection: "column",
+                        justifyContent: "space-between",
+                        opacity: isFuture ? 0.4 : 1,
+                        fontFamily: "var(--font-headline, var(--font-outfit))",
+                        cursor: "default",
+                      }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, fontWeight: 800 }}>
+                        <span>{Number(dateStr.slice(8, 10))}</span>
+                        {total > 0 && (
+                          <span style={{ display: "inline-flex", gap: 2 }}>
+                            {present.length > 0 && <span style={{ fontSize: 10, padding: "0 4px", borderRadius: 4, background: "rgba(74,222,128,0.18)", color: "var(--green)" }}>{present.length}</span>}
+                            {loan.length > 0 && <span style={{ fontSize: 10, padding: "0 4px", borderRadius: 4, background: "rgba(251,146,60,0.18)", color: "var(--orange)" }}>+{loan.length}</span>}
+                          </span>
+                        )}
+                      </div>
+                      {sampleNames && <div style={{ fontSize: 9, fontWeight: 600, color: "var(--text2)", opacity: 0.9, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{sampleNames}{total > 3 ? ` +${total - 3}` : ""}</div>}
+                      {!sampleNames && !isFuture && <div style={{ fontSize: 9, color: "var(--text3)" }}>—</div>}
+                      {approvedLeaves.length > 0 && <div style={{ fontSize: 9, color: "var(--blue, #60a5fa)", fontWeight: 700 }}>🌴 {approvedLeaves.length}</div>}
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div style={{ fontSize: 10, color: "var(--text3)", marginTop: 12, lineHeight: 1.5 }}>
+                Green count = home-branch staff present · Orange count = loaned-in stylists · Hover a cell for the roster.
+                {cutoff && <> Current month shows data up to <strong>{cutoff}</strong>.</>}
+              </div>
+            </Card>
+          );
+        })()}
+
         {/* Audit Log Modal */}
         {logView && (
           <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.75)", backdropFilter: "blur(8px)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
