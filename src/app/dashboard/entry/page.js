@@ -465,16 +465,16 @@ export default function EntryPage() {
     }
   };
 
-  // Staff marked present but with zero billing / material / tips AND no approved leave for the date.
-  // These are likely either truly absent (needs leave filed) or an oversight.
+  // Staff showing Present in the UI but with zero billing / material / tips.
+  // Warn regardless of whether a leave record already exists: if the row is still ticked
+  // Present while a leave is on file for today, that's a contradictory state the user
+  // needs to resolve (uncheck Present or remove the stale leave). Keep the warning
+  // in sync with what's visible on screen.
   const zeroWorkPresent = [...branchStaff, ...loanStaffList].filter(s => {
     const r = staffRows[s.id] || {};
     if (r.present === false) return false;
     const hasWork = (Number(r.billing) || 0) > 0 || (Number(r.material) || 0) > 0 || (Number(r.tips) || 0) > 0;
-    if (hasWork) return false;
-    const approvedLeave = leaves.find(l => l.staff_id === s.id && l.date === selDate && (l.status === "approved" || !l.status));
-    if (approvedLeave) return false;
-    return true;
+    return !hasWork;
   });
 
   const handleSave = async (e, opts = {}) => {
