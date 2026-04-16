@@ -527,10 +527,10 @@ export default function POSPage() {
 
   // ── Appointment booking handlers ──
   const saveAppointment = async (form) => {
-    const { staff_id, staff_name, customer, services, start, duration, notes } = form;
+    const { staff_id, staff_name, customer, services, start, duration, notes, editingId } = form;
     if (!start || !staff_id) return;
     const end = addMinutes(start, Number(duration) || 30);
-    await addDoc(collection(db, "appointments"), {
+    const payload = {
       branch_id: selBranch,
       branch_name: (branchesById.get(selBranch)?.name || "").replace("V-CUT ", ""),
       date: selDate,
@@ -541,18 +541,65 @@ export default function POSPage() {
       customer_phone: customer?.phone || null,
       services: services || [],
       notes: notes || "",
-      status: "booked",
-      created_by: currentUser?.name || "user",
-      created_by_id: currentUser?.id || "",
-      created_at: new Date().toISOString(),
-    });
-    setBookingModal(null);
-    toast({ title: "Appointment Booked", message: `${customer?.name || "Walk-in"} · ${start}–${end} with ${staff_name}.`, type: "success" });
+    };
+    if (editingId) {
+      await updateDoc(doc(db, "appointments", editingId), {
+        ...payload,
+        updated_by: currentUser?.name || "user",
+        updated_at: new Date().toISOString(),
+      });
+      setBookingModal(null);
+      toast({ title: "Appointment Updated", message: `${customer?.name || "Walk-in"} · ${start}–${end} with ${staff_name}.`, type: "success" });
+    } else {
+      await addDoc(collection(db, "appointments"), {
+        ...payload,
+        status: "booked",
+        created_by: currentUser?.name || "user",
+        created_by_id: currentUser?.id || "",
+        created_at: new Date().toISOString(),
+      });
+      setBookingModal(null);
+      toast({ title: "Appointment Booked", message: `${customer?.name || "Walk-in"} · ${start}–${end} with ${staff_name}.`, type: "success" });
+    }
   };
 
   const cancelAppointment = async (apt) => {
     if (!apt?.id) return;
     await updateDoc(doc(db, "appointments", apt.id), { status: "cancelled", cancelled_at: new Date().toISOString() });
+    setAptDetailModal(null);
+  };
+
+  // Open the booking modal pre-populated with an existing appointment for edit.
+  const openEditBooking = (apt) => {
+    if (!apt) return;
+    const parseMin = (t) => {
+      if (!t) return 0;
+      const m = String(t).match(/(\d+)/);
+      return m ? Number(m[1]) : 0;
+    };
+    const start = apt.start;
+    const end = apt.end;
+    const [sh, sm] = (start || "0:0").split(":").map(Number);
+    const [eh, em] = (end || "0:0").split(":").map(Number);
+    const currentDuration = ((eh * 60 + em) - (sh * 60 + sm)) || 30;
+    const servicesTotalMin = (apt.services || []).reduce((s, sv) => s + (parseMin(sv.time) || 30), 0);
+    // If the saved duration matches the services total, treat duration as auto; else as an override.
+    const durationOverride = servicesTotalMin > 0 ? currentDuration !== servicesTotalMin : true;
+    setBookingModal({
+      editingId: apt.id,
+      staff_id: apt.staff_id,
+      staff_name: apt.staff_name,
+      start,
+      duration: currentDuration,
+      durationOverride,
+      customer: apt.customer_id || apt.customer_name
+        ? { id: apt.customer_id || null, name: apt.customer_name || "Walk-in", phone: apt.customer_phone || "" }
+        : null,
+      customerSearch: "",
+      newCustomer: null,
+      services: apt.services || [],
+      notes: apt.notes || "",
+    });
     setAptDetailModal(null);
   };
 
@@ -3496,7 +3543,9 @@ export default function POSPage() {
           style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", backdropFilter: "blur(6px)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
           <div onClick={e => e.stopPropagation()}
             style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 18, width: "100%", maxWidth: 620, padding: 24, boxShadow: "0 24px 60px -12px rgba(0,0,0,0.7)", maxHeight: "88vh", overflowY: "auto" }}>
-            <div style={{ fontSize: 10, fontWeight: 800, color: "var(--accent)", textTransform: "uppercase", letterSpacing: 2 }}>New Appointment</div>
+            <div style={{ fontSize: 10, fontWeight: 800, color: "var(--accent)", textTransform: "uppercase", letterSpacing: 2 }}>
+              {bookingModal.editingId ? "Edit Appointment" : "New Appointment"}
+            </div>
             <div style={{ fontSize: 17, fontWeight: 800, color: "var(--text)", marginTop: 4 }}>
               {bookingModal.staff_name} · {bookingModal.start}
             </div>
@@ -3662,7 +3711,7 @@ export default function POSPage() {
               <button
                 onClick={() => saveAppointment({ ...bookingModal, duration: effectiveDuration })}
                 style={{ flex: 1.3, padding: 12, background: "linear-gradient(135deg, var(--accent), var(--gold2))", border: "none", color: "#000", borderRadius: 10, fontSize: 11, fontWeight: 900, letterSpacing: 1, textTransform: "uppercase", cursor: "pointer" }}>
-                Book Appointment
+                {bookingModal.editingId ? "Save Changes" : "Book Appointment"}
               </button>
             </div>
           </div>
@@ -3689,18 +3738,24 @@ export default function POSPage() {
             <div style={{ display: "flex", gap: 8, marginTop: 18, flexWrap: "wrap" }}>
               {aptDetailModal.status !== "cancelled" && (
                 <button onClick={() => loadAppointmentIntoCart(aptDetailModal)}
-                  style={{ flex: 1, padding: 12, background: "linear-gradient(135deg, var(--accent), var(--gold2))", border: "none", color: "#000", borderRadius: 10, fontSize: 11, fontWeight: 900, letterSpacing: 1, textTransform: "uppercase", cursor: "pointer" }}>
+                  style={{ flex: "1 1 140px", padding: 12, background: "linear-gradient(135deg, var(--accent), var(--gold2))", border: "none", color: "#000", borderRadius: 10, fontSize: 11, fontWeight: 900, letterSpacing: 1, textTransform: "uppercase", cursor: "pointer" }}>
                   Load to Cart
                 </button>
               )}
               {aptDetailModal.status !== "cancelled" && (
+                <button onClick={() => openEditBooking(aptDetailModal)}
+                  style={{ flex: "1 1 90px", padding: 12, background: "rgba(var(--accent-rgb),0.08)", border: "1px solid rgba(var(--accent-rgb),0.35)", color: "var(--accent)", borderRadius: 10, fontSize: 11, fontWeight: 800, letterSpacing: 1, textTransform: "uppercase", cursor: "pointer" }}>
+                  ✎ Edit
+                </button>
+              )}
+              {aptDetailModal.status !== "cancelled" && (
                 <button onClick={() => cancelAppointment(aptDetailModal)}
-                  style={{ flex: 1, padding: 12, background: "rgba(248,113,113,0.1)", border: "1px solid rgba(248,113,113,0.3)", color: "var(--red)", borderRadius: 10, fontSize: 11, fontWeight: 800, letterSpacing: 1, textTransform: "uppercase", cursor: "pointer" }}>
+                  style={{ flex: "1 1 90px", padding: 12, background: "rgba(248,113,113,0.1)", border: "1px solid rgba(248,113,113,0.3)", color: "var(--red)", borderRadius: 10, fontSize: 11, fontWeight: 800, letterSpacing: 1, textTransform: "uppercase", cursor: "pointer" }}>
                   Cancel
                 </button>
               )}
               <button onClick={() => setAptDetailModal(null)}
-                style={{ flex: 1, padding: 12, background: "var(--bg3)", border: "1px solid var(--border2)", color: "var(--text2)", borderRadius: 10, fontSize: 11, fontWeight: 800, letterSpacing: 1, textTransform: "uppercase", cursor: "pointer" }}>
+                style={{ flex: "1 1 90px", padding: 12, background: "var(--bg3)", border: "1px solid var(--border2)", color: "var(--text2)", borderRadius: 10, fontSize: 11, fontWeight: 800, letterSpacing: 1, textTransform: "uppercase", cursor: "pointer" }}>
                 Close
               </button>
             </div>
