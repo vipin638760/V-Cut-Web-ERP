@@ -950,7 +950,9 @@ export default function DashboardPage() {
                 </div>
               </Card>
             ) : (
-              <DraggableCardGrid branchData={branchData} isAdmin={isAdmin} isYearly={isYearly} factor={factor} cardOrder={cardOrder} setCardOrder={setCardOrder} dragId={dragId} onCardClick={(bid) => router.push(`/dashboard/branches?branchId=${bid}`)} />
+              <DraggableCardGrid branchData={branchData} isAdmin={isAdmin} isYearly={isYearly} factor={factor} cardOrder={cardOrder} setCardOrder={setCardOrder} dragId={dragId}
+                onCardClick={(bid) => router.push(`/dashboard/branches?branchId=${bid}`)}
+                onCalendarClick={(bid) => router.push(`/dashboard/branches?branchId=${bid}&calendar=1`)} />
             )}
           </div>
         )}
@@ -1004,7 +1006,7 @@ function KPICard({ label, value, color, sub }) {
 }
 
 // ─── Draggable Branch Card Grid ───────────────────────────────────────────────
-function DraggableCardGrid({ branchData, isAdmin, isYearly, factor, cardOrder, setCardOrder, dragId, onCardClick }) {
+function DraggableCardGrid({ branchData, isAdmin, isYearly, factor, cardOrder, setCardOrder, dragId, onCardClick, onCalendarClick }) {
   const [dragOver, setDragOver] = useState(null);
   const [dragging, setDragging] = useState(null);
   const wasDragged = useRef(false);
@@ -1101,8 +1103,13 @@ function DraggableCardGrid({ branchData, isAdmin, isYearly, factor, cardOrder, s
           >
             {/* Header */}
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
-              <div>
-                <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text)", marginBottom: 4, fontFamily: "var(--font-headline, var(--font-outfit))" }}>{b.name}</div>
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-headline, var(--font-outfit))", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{b.name}</div>
+                  <button onClick={ev => { ev.stopPropagation(); onCalendarClick?.(b.id); }}
+                    title="Attendance calendar"
+                    style={{ background: "rgba(var(--accent-rgb),0.1)", border: "1px solid rgba(var(--accent-rgb),0.35)", color: "var(--accent)", borderRadius: 6, padding: "2px 8px", cursor: "pointer", fontSize: 13, lineHeight: 1, flexShrink: 0 }}>📅</button>
+                </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                   <span style={{ fontSize: 9, fontWeight: 600, padding: "2px 7px", borderRadius: 6, textTransform: "uppercase", letterSpacing: ".5px",
                     background: b.type === "unisex" ? "rgba(168,85,247,0.06)" : "rgba(96,165,250,0.06)",

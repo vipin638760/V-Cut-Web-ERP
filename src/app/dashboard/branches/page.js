@@ -80,14 +80,24 @@ export default function BranchesPage() {
     const mode = params.get("mode");
     const yr   = params.get("year");
     const mo   = params.get("month");
+    const cal  = params.get("calendar");
 
     if (bid)  setSelectedBranch(bid);
     if (mode) setFilterMode(mode);
     if (yr)   setFilterYear(Number(yr));
     if (mo)   setFilterMonth(Number(mo));
+    if (bid && cal === "1") {
+      // Default to the active filter month, or the current month if not set.
+      const prefix = (mode === "year")
+        ? `${yr || NOW.getFullYear()}-${String(NOW.getMonth() + 1).padStart(2, "0")}`
+        : `${yr || NOW.getFullYear()}-${String(mo || NOW.getMonth() + 1).padStart(2, "0")}`;
+      setAttendanceCalendar(bid);
+      setAttendanceMonth(prefix);
+      setAttendanceSelectedDay(null);
+    }
 
     // Optional: Clean URL params to avoid re-syncing on refresh if user changes it
-    if (bid || mode || yr || mo) {
+    if (bid || mode || yr || mo || cal) {
       const newUrl = window.location.pathname;
       window.history.replaceState({}, "", newUrl);
     }

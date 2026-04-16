@@ -841,14 +841,24 @@ export default function StaffPage() {
                         {overall === 'active' ? <Pill label="Active" color="green" /> : <Pill label="Inactive" color="red" />}
                       </div>
                       {(monthSt.status === 'partial' || monthSt.status === 'active') && (
-                        <button type="button"
-                          onClick={() => setAttendanceModal({ staff: s, month: filterMode === "month" ? filterPrefix : `${filterYear}-${String(NOW.getMonth() + 1).padStart(2, "0")}` })}
-                          title="Open attendance calendar"
-                          style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", fontSize: 10, color: monthSt.status === 'partial' ? "var(--orange)" : "var(--text3)", fontWeight: 600, textAlign: "left", textDecoration: "underline dotted" }}>
-                          {monthSt.status === 'partial'
-                            ? `Partial: ${monthSt.daysWorked} working days${monthSt.toDate ? " · to date" : ""} · view calendar`
-                            : `📅 ${monthSt.daysWorked} working days${monthSt.toDate ? " · to date" : ""}`}
-                        </button>
+                        <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                          <button type="button"
+                            onClick={() => setAttendanceModal({ staff: s, month: filterMode === "month" ? filterPrefix : `${filterYear}-${String(NOW.getMonth() + 1).padStart(2, "0")}` })}
+                            title="Open attendance calendar"
+                            style={{
+                              background: "rgba(var(--accent-rgb),0.1)",
+                              border: "1px solid rgba(var(--accent-rgb),0.35)",
+                              color: "var(--accent)",
+                              borderRadius: 6,
+                              padding: "2px 8px",
+                              cursor: "pointer",
+                              fontSize: 13,
+                              lineHeight: 1,
+                            }}>📅</button>
+                          <span style={{ fontSize: 10, color: monthSt.status === 'partial' ? "var(--orange)" : "var(--text3)", fontWeight: 700 }}>
+                            {monthSt.status === 'partial' ? "Partial · " : ""}{monthSt.daysWorked} working day{monthSt.daysWorked === 1 ? "" : "s"}{monthSt.toDate ? " · to date" : ""}
+                          </span>
+                        </div>
                       )}
                     </div>
                   </TD>
