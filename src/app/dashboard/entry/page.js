@@ -404,8 +404,7 @@ export default function EntryPage() {
       acc.totalTips              += Number(r.tips)            || 0;
       acc.totalStaffIncCombined  += Number(r.staff_total_inc) || 0;
     }
-    // Add shared service contributions
-    acc.totalBilling += sharedContributions.totalBilling;
+    // Add shared incentive contributions (billing is already in the entered amounts)
     acc.totalIncentive += sharedContributions.totalIncentive;
     acc.totalStaffIncCombined += sharedContributions.totalIncentive;
     return acc;
@@ -555,12 +554,11 @@ export default function EntryPage() {
           ...branchStaff.map(s => {
             const shBilling = sharedContributions.billing[s.id] || 0;
             const shIncentive = sharedContributions.incentive[s.id] || 0;
-            const baseBilling = (staffRows[s.id]?.billing || 0) + shBilling;
             const baseInc = (staffRows[s.id]?.incentive || 0) + shIncentive;
             const baseTotalInc = (staffRows[s.id]?.staff_total_inc || 0) + shIncentive;
             return {
               staff_id: s.id,
-              billing: baseBilling,
+              billing: staffRows[s.id]?.billing || 0,
               material: staffRows[s.id]?.material || 0,
               incentive: baseInc,
               mat_incentive: staffRows[s.id]?.mat_incentive || 0,
@@ -578,12 +576,11 @@ export default function EntryPage() {
           ...loanStaffList.map(s => {
             const shBilling = sharedContributions.billing[s.id] || 0;
             const shIncentive = sharedContributions.incentive[s.id] || 0;
-            const baseBilling = (staffRows[s.id]?.billing || 0) + shBilling;
             const baseInc = (staffRows[s.id]?.incentive || 0) + shIncentive;
             const baseTotalInc = (staffRows[s.id]?.staff_total_inc || 0) + shIncentive;
             return {
               staff_id: s.id,
-              billing: baseBilling,
+              billing: staffRows[s.id]?.billing || 0,
               material: staffRows[s.id]?.material || 0,
               incentive: baseInc,
               mat_incentive: staffRows[s.id]?.mat_incentive || 0,
@@ -1387,7 +1384,7 @@ export default function EntryPage() {
                         const shBilling = sharedContributions.billing[s.id] || 0;
                         const shIncentive = sharedContributions.incentive[s.id] || 0;
                         const staffTInc = Math.round(inc + matInc + (Number(r.tips) || 0) + shIncentive);
-                        const total = Math.round((Number(r.billing) || 0) + shBilling + (Number(r.material) || 0) + (Number(r.tips) || 0));
+                        const total = Math.round((Number(r.billing) || 0) + (Number(r.material) || 0) + (Number(r.tips) || 0));
                         const tipIn = r.tip_in || "online";
                         const tipPaid = r.tip_paid || "cash";
                         const disabledStyle = !isPresent ? { opacity: 0.4, pointerEvents: "none" } : {};
@@ -1418,7 +1415,7 @@ export default function EntryPage() {
                               {shBilling > 0 ? INR(shBilling) : "—"}
                             </td>
                             <td style={{ padding: "6px 14px", textAlign: "right", fontWeight: 800, color: "var(--accent)", fontSize: 13 }}>
-                              {INR((Number(r.billing) || 0) + shBilling)}
+                              {INR(Math.max(0, (Number(r.billing) || 0) - shBilling))}
                             </td>
                             <td style={{ padding: "6px 14px", textAlign: "right", ...disabledStyle }}>
                               <input type="number" placeholder="0" min="0" disabled={!isPresent} value={r.material || ""} onChange={e => updateStaffRow(s.id, "material", e.target.value)} style={{ ...inp, borderColor: "var(--green)", color: "var(--green)", fontWeight: 600 }} onFocus={e => e.target.style.borderColor = "var(--gold)"} onBlur={e => e.target.style.borderColor = "var(--green)"} />
@@ -1457,9 +1454,9 @@ export default function EntryPage() {
                       <tr style={{ background: "var(--bg3)", fontWeight: 700, color: "var(--gold)", borderTop: "2px solid var(--border2)" }}>
                         <td style={{ padding: "10px 14px" }}></td>
                         <td style={{ padding: "10px 14px" }}>TOTALS</td>
-                        <td style={{ padding: "10px 14px", textAlign: "right", color: "var(--green)" }}>{INR(totalBilling - sharedContributions.totalBilling)}</td>
+                        <td style={{ padding: "10px 14px", textAlign: "right", color: "var(--green)" }}>{INR(totalBilling)}</td>
                         <td style={{ padding: "10px 14px", textAlign: "right", color: "var(--blue, #60a5fa)" }}>{sharedContributions.totalBilling > 0 ? INR(sharedContributions.totalBilling) : "—"}</td>
-                        <td style={{ padding: "10px 14px", textAlign: "right", color: "var(--accent)", fontWeight: 800 }}>{INR(totalBilling)}</td>
+                        <td style={{ padding: "10px 14px", textAlign: "right", color: "var(--accent)", fontWeight: 800 }}>{INR(Math.max(0, totalBilling - sharedContributions.totalBilling))}</td>
                         <td style={{ padding: "10px 14px", textAlign: "right", color: "var(--green)" }}>{INR(totalMatSale)}</td>
                         <td style={{ padding: "10px 14px", textAlign: "right", color: "var(--text3)" }}></td>
                         <td style={{ padding: "10px 14px", textAlign: "right", color: "var(--red)" }}>{INR(totalIncentive - totalTips - sharedContributions.totalIncentive)}</td>
