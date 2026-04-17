@@ -5,32 +5,38 @@ import { db } from "@/lib/firebase";
 import { Icon } from "./ui";
 
 /**
- * Bell in the top bar. Subscribes to pending approvals and renders a dropdown
- * where admin/accountant can approve or reject each request.
- *
- * Approval doc shape (approvals collection):
- *   type: "pos_discount"
- *   status: "pending" | "approved" | "rejected"
- *   requested_by, requested_by_id, requested_at
- *   branch_id, branch_name, customer_id, customer_name
- *   draft_invoice_id
- *   requested_pct, base_pct, reason
- *   reviewed_by, reviewed_by_id, reviewed_at
+ * Bell in the top bar. Subscribes to pending approvals, leaves, staff setup,
+ * and advance requests — renders a unified dropdown for admin/accountant.
  */
 export default function BellNotifications({ currentUser }) {
-  const [pending, setPending] = useState([]);
+  const [approvals, setApprovals] = useState([]);
+  const [pendingLeaves, setPendingLeaves] = useState([]);
+  const [pendingStaff, setPendingStaff] = useState([]);
+  const [pendingAdvances, setPendingAdvances] = useState([]);
   const [open, setOpen] = useState(false);
   const wrapRef = useRef(null);
 
   useEffect(() => {
     if (!db) return;
-    const q = query(collection(db, "approvals"), where("status", "==", "pending"));
-    const unsub = onSnapshot(q, sn => {
-      const list = sn.docs.map(d => ({ ...d.data(), id: d.id }));
-      list.sort((a, b) => (b.requested_at || "").localeCompare(a.requested_at || ""));
-      setPending(list);
-    });
-    return () => unsub();
+    const unsubs = [
+      // POS discount approvals
+      onSnapshot(query(collection(db, "approvals"), where("status", "==", "pending")), sn => {
+        setApprovals(sn.docs.map(d => ({ ...d.data(), id: d.id, _kind: "approval" })));
+      }),
+      // Pending leave requests
+      onSnapshot(query(collection(db, "leaves"), where("status", "==", "pending")), sn => {
+        setPendingLeaves(sn.docs.map(d => ({ ...d.data(), id: d.id, _kind: "leave" })));
+      }),
+      // Staff added by accountant awaiting admin setup
+      onSnapshot(query(collection(db, "staff"), where("pending_setup", "==", true)), sn => {
+        setPendingStaff(sn.docs.map(d => ({ ...d.data(), id: d.id, _kind: "staff_setup" })));
+      }),
+      // Pending payroll advance requests
+      onSnapshot(query(collection(db, "staff_advances"), where("status", "==", "pending")), sn => {
+        setPendingAdvances(sn.docs.map(d => ({ ...d.data(), id: d.id, _kind: "advance" })));
+      }),
+    ];
+    return () => unsubs.forEach(u => u());
   }, []);
 
   useEffect(() => {
@@ -42,16 +48,16 @@ export default function BellNotifications({ currentUser }) {
     return () => window.removeEventListener("click", onClick);
   }, [open]);
 
-  const approve = async (a) => {
-    await updateDoc(doc(db, "approvals", a.id), {
+  const approveDoc = async (col, id) => {
+    await updateDoc(doc(db, col, id), {
       status: "approved",
       reviewed_by: currentUser?.name || "admin",
       reviewed_by_id: currentUser?.id || "",
       reviewed_at: new Date().toISOString(),
     });
   };
-  const reject = async (a) => {
-    await updateDoc(doc(db, "approvals", a.id), {
+  const rejectDoc = async (col, id) => {
+    await updateDoc(doc(db, col, id), {
       status: "rejected",
       reviewed_by: currentUser?.name || "admin",
       reviewed_by_id: currentUser?.id || "",
@@ -59,11 +65,17 @@ export default function BellNotifications({ currentUser }) {
     });
   };
 
-  const count = pending.length;
+  // Build unified notification list
+  const all = [...approvals, ...pendingLeaves, ...pendingStaff, ...pendingAdvances];
+  all.sort((a, b) => (b.requested_at || b.created_at || b.date || "").localeCompare(a.requested_at || a.created_at || a.date || ""));
+  const count = all.length;
+
+  const kindLabel = (k) => ({ approval: "Discount", leave: "Leave", staff_setup: "Staff Setup", advance: "Advance" }[k] || k);
+  const kindColor = (k) => ({ approval: "var(--orange)", leave: "var(--blue, #60a5fa)", staff_setup: "var(--accent)", advance: "var(--gold)" }[k] || "var(--text3)");
 
   return (
     <div ref={wrapRef} style={{ position: "relative" }}>
-      <button onClick={() => setOpen(o => !o)} title="Pending approvals"
+      <button onClick={() => setOpen(o => !o)} title="Pending notifications"
         style={{
           position: "relative", width: 34, height: 34, borderRadius: 10,
           background: count > 0 ? "rgba(var(--accent-rgb),0.12)" : "var(--bg4)",
@@ -87,15 +99,23 @@ export default function BellNotifications({ currentUser }) {
 
       {open && (
         <div style={{
-          position: "absolute", top: "calc(100% + 8px)", right: 0, width: 360, zIndex: 1000,
+          position: "absolute", top: "calc(100% + 8px)", right: 0, width: 380, zIndex: 1000,
           background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 14,
           boxShadow: "0 20px 40px -10px rgba(0,0,0,0.5)", overflow: "hidden",
         }}>
           <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--border)", background: "linear-gradient(90deg, rgba(var(--accent-rgb),0.08), transparent)" }}>
             <div style={{ fontSize: 10, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 2 }}>Notifications</div>
             <div style={{ fontSize: 14, fontWeight: 800, color: "var(--text)" }}>
-              {count === 0 ? "You're all caught up" : `${count} pending approval${count === 1 ? "" : "s"}`}
+              {count === 0 ? "You're all caught up" : `${count} pending`}
             </div>
+            {count > 0 && (
+              <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
+                {approvals.length > 0 && <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: "rgba(251,146,60,0.12)", color: "var(--orange)" }}>{approvals.length} Discount</span>}
+                {pendingLeaves.length > 0 && <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: "rgba(96,165,250,0.12)", color: "var(--blue, #60a5fa)" }}>{pendingLeaves.length} Leave</span>}
+                {pendingStaff.length > 0 && <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: "rgba(0,188,212,0.12)", color: "var(--accent)" }}>{pendingStaff.length} Staff Setup</span>}
+                {pendingAdvances.length > 0 && <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: "rgba(255,215,0,0.12)", color: "var(--gold)" }}>{pendingAdvances.length} Advance</span>}
+              </div>
+            )}
           </div>
 
           <div style={{ maxHeight: 420, overflowY: "auto" }}>
@@ -105,20 +125,23 @@ export default function BellNotifications({ currentUser }) {
                 No pending requests.
               </div>
             )}
-            {pending.map(a => (
-              <div key={a.id} style={{ padding: "12px 16px", borderBottom: "1px solid var(--border)" }}>
+            {all.map(a => (
+              <div key={`${a._kind}-${a.id}`} style={{ padding: "12px 16px", borderBottom: "1px solid var(--border)" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
                   <span style={{
                     fontSize: 9, fontWeight: 800, padding: "2px 7px", borderRadius: 5,
-                    background: "rgba(251,146,60,0.12)", color: "var(--orange)",
-                    border: "1px solid rgba(251,146,60,0.3)",
+                    background: `color-mix(in srgb, ${kindColor(a._kind)} 12%, transparent)`,
+                    color: kindColor(a._kind),
+                    border: `1px solid color-mix(in srgb, ${kindColor(a._kind)} 30%, transparent)`,
                     textTransform: "uppercase", letterSpacing: 1,
-                  }}>{a.type === "pos_discount" ? "Discount" : a.type}</span>
+                  }}>{kindLabel(a._kind)}</span>
                   <span style={{ fontSize: 10, color: "var(--text3)", fontWeight: 600 }}>
-                    {a.requested_by || "—"}{a.branch_name ? ` · ${a.branch_name}` : ""}
+                    {a.requested_by || a.staff_name || a.name || "—"}{a.branch_name ? ` · ${a.branch_name}` : ""}
                   </span>
                 </div>
-                {a.type === "pos_discount" ? (
+
+                {/* Discount approval */}
+                {a._kind === "approval" && (
                   <>
                     <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text)" }}>
                       {a.requested_pct}% off requested
@@ -127,19 +150,57 @@ export default function BellNotifications({ currentUser }) {
                     {a.customer_name && <div style={{ fontSize: 11, color: "var(--text2)", marginTop: 2 }}>Customer: {a.customer_name}</div>}
                     {a.reason && <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 4, fontStyle: "italic" }}>&ldquo;{a.reason}&rdquo;</div>}
                   </>
-                ) : (
-                  <div style={{ fontSize: 12, color: "var(--text2)" }}>{JSON.stringify(a)}</div>
                 )}
-                <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
-                  <button onClick={() => approve(a)}
-                    style={{ flex: 1, padding: "6px 10px", background: "rgba(74,222,128,0.12)", border: "1px solid rgba(74,222,128,0.35)", color: "var(--green)", borderRadius: 6, fontSize: 10, fontWeight: 800, letterSpacing: 1, textTransform: "uppercase", cursor: "pointer" }}>
-                    Approve
-                  </button>
-                  <button onClick={() => reject(a)}
-                    style={{ flex: 1, padding: "6px 10px", background: "rgba(248,113,113,0.1)", border: "1px solid rgba(248,113,113,0.3)", color: "var(--red)", borderRadius: 6, fontSize: 10, fontWeight: 800, letterSpacing: 1, textTransform: "uppercase", cursor: "pointer" }}>
-                    Reject
-                  </button>
-                </div>
+
+                {/* Leave request */}
+                {a._kind === "leave" && (
+                  <>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text)" }}>
+                      {a.staff_name || a.name || "Staff"} — {a.leave_type || a.type || "Leave"}
+                    </div>
+                    <div style={{ fontSize: 11, color: "var(--text2)", marginTop: 2 }}>
+                      {a.date || "—"}{a.days && a.days > 1 ? ` (${a.days} days)` : ""}
+                    </div>
+                    {a.reason && <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 4, fontStyle: "italic" }}>&ldquo;{a.reason}&rdquo;</div>}
+                  </>
+                )}
+
+                {/* Staff setup */}
+                {a._kind === "staff_setup" && (
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text)" }}>
+                    {a.name || "New Staff"} — needs salary & incentive setup
+                    <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 2 }}>Added by accountant · {a.role || "—"}</div>
+                  </div>
+                )}
+
+                {/* Advance request */}
+                {a._kind === "advance" && (
+                  <>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text)" }}>
+                      {a.staff_name || "Staff"} — ₹{Number(a.amount || 0).toLocaleString("en-IN")} advance
+                    </div>
+                    {a.reason && <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 4, fontStyle: "italic" }}>&ldquo;{a.reason}&rdquo;</div>}
+                  </>
+                )}
+
+                {/* Action buttons — not for staff_setup (handled on staff page) */}
+                {a._kind !== "staff_setup" && (
+                  <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
+                    <button onClick={() => approveDoc(a._kind === "approval" ? "approvals" : a._kind === "leave" ? "leaves" : "staff_advances", a.id)}
+                      style={{ flex: 1, padding: "6px 10px", background: "rgba(74,222,128,0.12)", border: "1px solid rgba(74,222,128,0.35)", color: "var(--green)", borderRadius: 6, fontSize: 10, fontWeight: 800, letterSpacing: 1, textTransform: "uppercase", cursor: "pointer" }}>
+                      Approve
+                    </button>
+                    <button onClick={() => rejectDoc(a._kind === "approval" ? "approvals" : a._kind === "leave" ? "leaves" : "staff_advances", a.id)}
+                      style={{ flex: 1, padding: "6px 10px", background: "rgba(248,113,113,0.1)", border: "1px solid rgba(248,113,113,0.3)", color: "var(--red)", borderRadius: 6, fontSize: 10, fontWeight: 800, letterSpacing: 1, textTransform: "uppercase", cursor: "pointer" }}>
+                      Reject
+                    </button>
+                  </div>
+                )}
+                {a._kind === "staff_setup" && (
+                  <div style={{ marginTop: 8, fontSize: 10, color: "var(--text3)", fontStyle: "italic" }}>
+                    Go to Staff page → Pending Setup to configure
+                  </div>
+                )}
               </div>
             ))}
           </div>
