@@ -255,10 +255,15 @@ export default function BranchesPage() {
   };
 
   // ── Recalculate entries for a branch in a date range ──
+  const [recalcProgress, setRecalcProgress] = useState({ current: 0, total: 0 });
+  const [recalcDone, setRecalcDone] = useState(false); // true when finished
+
   const handleRecalculate = async () => {
     if (!recalcModal || recalcBusy) return;
     setRecalcBusy(true);
     setRecalcLog([]);
+    setRecalcDone(false);
+    setRecalcProgress({ current: 0, total: 0 });
     const log = [];
     try {
       const branchId = recalcModal.branch_id;
@@ -294,16 +299,23 @@ export default function BranchesPage() {
       const branchEntries = entries.filter(e => e.branch_id === branchId && e.date >= recalcFrom && e.date <= recalcTo);
 
       if (branchEntries.length === 0) {
-        log.push("No entries found in the selected range.");
+        log.push({ type: "info", text: "No entries found in the selected range." });
         setRecalcLog(log);
+        setRecalcDone(true);
         setRecalcBusy(false);
+        toast({ title: "Nothing to Sync", message: "No entries exist in the selected date range.", type: "warning" });
         return;
       }
 
+      setRecalcProgress({ current: 0, total: branchEntries.length });
+
       let updated = 0;
-      for (const entry of branchEntries) {
+      for (let i = 0; i < branchEntries.length; i++) {
+        const entry = branchEntries[i];
+        setRecalcProgress({ current: i + 1, total: branchEntries.length });
         const changes = {};
         let changed = false;
+        const details = [];
 
         // Recalculate staff_billing incentives
         if (entry.staff_billing?.length > 0) {
@@ -332,6 +344,7 @@ export default function BranchesPage() {
           });
           changes.staff_billing = newBilling;
           changed = true;
+          details.push("incentives recalculated");
         }
 
         // Update material expense from allocations
@@ -339,6 +352,7 @@ export default function BranchesPage() {
         if (matExp > 0 && matExp !== (Number(entry.mat_expense) || 0)) {
           changes.mat_expense = matExp;
           changed = true;
+          details.push(`material: ${INR(Number(entry.mat_expense) || 0)} → ${INR(matExp)}`);
         }
 
         // Update other expenses from daily_expenses
@@ -346,6 +360,7 @@ export default function BranchesPage() {
         if (dailyExp > 0 && dailyExp !== (Number(entry.others) || 0)) {
           changes.others = dailyExp;
           changed = true;
+          details.push(`expenses: ${INR(Number(entry.others) || 0)} → ${INR(dailyExp)}`);
         }
 
         // Recalculate cash_in_hand
@@ -377,18 +392,24 @@ export default function BranchesPage() {
           changes.recalculated_by = currentUser?.name || "user";
           await updateDoc(doc(db, "entries", entry.id), changes);
           updated++;
-          log.push(`${entry.date}: updated (inc: ${changes.staff_billing ? "recalculated" : "unchanged"}, mat: ${changes.mat_expense !== undefined ? INR(changes.mat_expense) : "—"}, exp: ${changes.others !== undefined ? INR(changes.others) : "—"})`);
+          log.push({ type: "synced", text: `${entry.date}: synced`, details });
         } else {
-          log.push(`${entry.date}: no changes needed`);
+          log.push({ type: "skip", text: `${entry.date}: already in sync` });
         }
+        setRecalcLog([...log]);
       }
 
-      toast({ title: "Recalculated", message: `${updated} of ${branchEntries.length} entries updated.`, type: "success" });
-      setRecalcLog(log);
+      setRecalcDone(true);
+      if (updated === 0) {
+        toast({ title: "Already in Sync", message: `All ${branchEntries.length} entries are up to date. Nothing to sync.`, type: "info" });
+      } else {
+        toast({ title: "Sync Complete", message: `${updated} of ${branchEntries.length} entries synced successfully.`, type: "success" });
+      }
     } catch (err) {
       toast({ title: "Error", message: err.message, type: "error" });
-      log.push(`Error: ${err.message}`);
-      setRecalcLog(log);
+      log.push({ type: "error", text: `Error: ${err.message}`, details: [] });
+      setRecalcLog([...log]);
+      setRecalcDone(true);
     } finally {
       setRecalcBusy(false);
     }
@@ -1438,7 +1459,8 @@ export default function BranchesPage() {
       {/* Recalculate Modal */}
       {recalcModal && (
         <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.55)", backdropFilter: "blur(6px)", zIndex: 1100, display: "flex", justifyContent: "center", alignItems: "center", padding: 16 }}>
-          <div style={{ width: "100%", maxWidth: 520, background: "var(--bg2)", borderRadius: 16, overflow: "hidden", boxShadow: "0 24px 80px rgba(0,0,0,0.5)" }}>
+          <div style={{ width: "100%", maxWidth: 560, background: "var(--bg2)", borderRadius: 16, overflow: "hidden", boxShadow: "0 24px 80px rgba(0,0,0,0.5)" }}>
+            <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
             <div style={{ padding: "20px 24px", borderBottom: "1px solid var(--border)" }}>
               <div style={{ fontSize: 17, fontWeight: 800, color: "var(--text)" }}>Recalculate — {recalcModal.branch_name}</div>
               <div style={{ fontSize: 12, color: "var(--text3)", marginTop: 4 }}>
@@ -1449,33 +1471,114 @@ export default function BranchesPage() {
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                 <div>
                   <label style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>From Date</label>
-                  <input type="date" value={recalcFrom} onChange={e => setRecalcFrom(e.target.value)}
-                    style={{ width: "100%", padding: "10px 12px", borderRadius: 8, background: "var(--bg4)", border: "1px solid var(--border2)", color: "var(--text)", fontSize: 13, marginTop: 4 }} />
+                  <input type="date" value={recalcFrom} onChange={e => setRecalcFrom(e.target.value)} disabled={recalcBusy}
+                    style={{ width: "100%", padding: "10px 12px", borderRadius: 8, background: "var(--bg4)", border: "1px solid var(--border2)", color: "var(--text)", fontSize: 13, marginTop: 4, opacity: recalcBusy ? 0.5 : 1 }} />
                 </div>
                 <div>
                   <label style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>To Date</label>
-                  <input type="date" value={recalcTo} onChange={e => setRecalcTo(e.target.value)}
-                    style={{ width: "100%", padding: "10px 12px", borderRadius: 8, background: "var(--bg4)", border: "1px solid var(--border2)", color: "var(--text)", fontSize: 13, marginTop: 4 }} />
+                  <input type="date" value={recalcTo} onChange={e => setRecalcTo(e.target.value)} disabled={recalcBusy}
+                    style={{ width: "100%", padding: "10px 12px", borderRadius: 8, background: "var(--bg4)", border: "1px solid var(--border2)", color: "var(--text)", fontSize: 13, marginTop: 4, opacity: recalcBusy ? 0.5 : 1 }} />
                 </div>
               </div>
 
+              {/* Progress bar while busy */}
+              {recalcBusy && recalcProgress.total > 0 && (
+                <div>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: "var(--accent)" }}>Syncing entries…</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)" }}>{recalcProgress.current} / {recalcProgress.total}</span>
+                  </div>
+                  <div style={{ width: "100%", height: 6, borderRadius: 3, background: "var(--bg4)", overflow: "hidden" }}>
+                    <div style={{ height: "100%", borderRadius: 3, background: "linear-gradient(90deg, var(--accent), var(--gold2))", transition: "width 0.3s ease", width: `${Math.round((recalcProgress.current / recalcProgress.total) * 100)}%` }} />
+                  </div>
+                </div>
+              )}
+
+              {/* Done summary banner */}
+              {recalcDone && recalcLog.length > 0 && (() => {
+                const synced = recalcLog.filter(l => l.type === "synced").length;
+                const skipped = recalcLog.filter(l => l.type === "skip").length;
+                const errors = recalcLog.filter(l => l.type === "error").length;
+                const isAllInSync = synced === 0 && errors === 0;
+                return (
+                  <div style={{
+                    padding: "12px 16px", borderRadius: 10, display: "flex", alignItems: "center", gap: 12,
+                    background: errors > 0 ? "rgba(248,113,113,0.08)" : isAllInSync ? "rgba(96,165,250,0.08)" : "rgba(74,222,128,0.08)",
+                    border: `1px solid ${errors > 0 ? "rgba(248,113,113,0.2)" : isAllInSync ? "rgba(96,165,250,0.2)" : "rgba(74,222,128,0.2)"}`,
+                  }}>
+                    <div style={{
+                      width: 36, height: 36, borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+                      background: errors > 0 ? "rgba(248,113,113,0.15)" : isAllInSync ? "rgba(96,165,250,0.15)" : "rgba(74,222,128,0.15)",
+                    }}>
+                      {errors > 0 ? (
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#f87171" strokeWidth="2.5"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+                      ) : isAllInSync ? (
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" strokeWidth="2.5"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                      ) : (
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4ade80" strokeWidth="2.5"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                      )}
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 800, color: errors > 0 ? "var(--red)" : isAllInSync ? "var(--blue, #60a5fa)" : "var(--green)" }}>
+                        {errors > 0 ? "Sync Failed" : isAllInSync ? "Already in Sync" : "Sync Complete"}
+                      </div>
+                      <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 2 }}>
+                        {errors > 0 ? "An error occurred during sync."
+                          : isAllInSync ? `All ${skipped} entries are already up to date.`
+                          : `${synced} synced, ${skipped} already up to date`}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Sync log */}
               {recalcLog.length > 0 && (
-                <div style={{ maxHeight: 200, overflowY: "auto", padding: 12, borderRadius: 8, background: "var(--bg3)", border: "1px solid var(--border)", fontSize: 11, fontFamily: "monospace" }}>
+                <div style={{ maxHeight: 220, overflowY: "auto", borderRadius: 10, background: "var(--bg3)", border: "1px solid var(--border)", fontSize: 11 }}>
+                  <div style={{ padding: "8px 12px", borderBottom: "1px solid var(--border)", fontSize: 10, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, position: "sticky", top: 0, background: "var(--bg3)", zIndex: 1 }}>
+                    Sync Log
+                  </div>
                   {recalcLog.map((l, i) => (
-                    <div key={i} style={{ padding: "2px 0", color: l.includes("updated") ? "var(--green)" : l.includes("Error") ? "var(--red)" : "var(--text3)" }}>{l}</div>
+                    <div key={i} style={{ padding: "6px 12px", borderBottom: "1px solid rgba(255,255,255,0.03)", display: "flex", alignItems: "flex-start", gap: 8 }}>
+                      <span style={{ flexShrink: 0, marginTop: 1 }}>
+                        {l.type === "synced" ? (
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#4ade80" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                        ) : l.type === "error" ? (
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#f87171" strokeWidth="2.5"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+                        ) : l.type === "info" ? (
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" strokeWidth="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                        ) : (
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--text3)" strokeWidth="2"><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                        )}
+                      </span>
+                      <div style={{ flex: 1 }}>
+                        <span style={{ fontFamily: "monospace", color: l.type === "synced" ? "var(--green)" : l.type === "error" ? "var(--red)" : l.type === "info" ? "var(--blue, #60a5fa)" : "var(--text3)" }}>{l.text}</span>
+                        {l.details?.length > 0 && (
+                          <div style={{ fontSize: 10, color: "var(--text3)", marginTop: 2 }}>
+                            {l.details.join(" · ")}
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   ))}
                 </div>
               )}
 
               <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 4 }}>
-                <button onClick={() => { setRecalcModal(null); setRecalcLog([]); }} disabled={recalcBusy}
+                <button onClick={() => { setRecalcModal(null); setRecalcLog([]); setRecalcDone(false); }} disabled={recalcBusy}
                   style={{ padding: "10px 18px", borderRadius: 10, background: "var(--bg4)", color: "var(--text3)", border: "1px solid var(--border2)", fontWeight: 600, fontSize: 12, cursor: recalcBusy ? "wait" : "pointer" }}>
-                  {recalcLog.length > 0 ? "Close" : "Cancel"}
+                  {recalcDone ? "Close" : "Cancel"}
                 </button>
-                <button onClick={handleRecalculate} disabled={recalcBusy}
-                  style={{ padding: "10px 20px", borderRadius: 10, background: "linear-gradient(135deg,var(--accent),var(--gold2))", color: "#000", border: "none", fontWeight: 800, fontSize: 12, cursor: recalcBusy ? "wait" : "pointer", opacity: recalcBusy ? 0.6 : 1, display: "inline-flex", alignItems: "center", gap: 6 }}>
-                  <Icon name="check" size={13} /> {recalcBusy ? "Recalculating…" : "Recalculate"}
-                </button>
+                {!recalcDone && (
+                  <button onClick={handleRecalculate} disabled={recalcBusy}
+                    style={{ padding: "10px 20px", borderRadius: 10, background: "linear-gradient(135deg,var(--accent),var(--gold2))", color: "#000", border: "none", fontWeight: 800, fontSize: 12, cursor: recalcBusy ? "wait" : "pointer", opacity: recalcBusy ? 0.6 : 1, display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    {recalcBusy ? (
+                      <><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ animation: "spin 1s linear infinite" }}><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg> Syncing…</>
+                    ) : (
+                      <><Icon name="check" size={13} /> Recalculate</>
+                    )}
+                  </button>
+                )}
               </div>
             </div>
           </div>
