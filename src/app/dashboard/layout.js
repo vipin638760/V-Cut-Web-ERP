@@ -20,6 +20,7 @@ const NAV = {
     { id: "staff",     l: "Staff Management",      icon: "users" },
     { id: "materials", l: "Materials",             icon: "wallet" },
     { id: "material-master", l: "Material Master", icon: "grid" },
+    { id: "daily-expenses", l: "Daily Expenses",     icon: "wallet" },
     { id: "expenses",  l: "Operational Expenses",  icon: "trending" },
     { id: "pl",        l: "P&L Analytics",         icon: "pie" },
     { id: "leaves",    l: "Leave Management",      icon: "checkCircle" },
@@ -37,6 +38,7 @@ const NAV = {
     { id: "staff",     l: "Staff Management",      icon: "users" },
     { id: "materials", l: "Materials",             icon: "wallet" },
     { id: "material-master", l: "Material Master", icon: "grid" },
+    { id: "daily-expenses", l: "Daily Expenses",     icon: "wallet" },
     { id: "leaves",    l: "Leave Management",      icon: "checkCircle" },
   ],
   employee: [

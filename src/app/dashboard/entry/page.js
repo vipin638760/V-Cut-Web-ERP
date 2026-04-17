@@ -99,6 +99,8 @@ export default function EntryPage() {
   const [sharedServices, setSharedServices] = useState([]); // [{ id, service_name, amount, sale_staff_id, incentive_staff_ids: [] }]
   const [sharedForm, setSharedForm] = useState(null); // { service_name, amount, sale_staff_id, incentive_staff_ids: [] } or null
   const [templatePicker, setTemplatePicker] = useState(false); // show format choice
+  const [dailyExpenses, setDailyExpenses] = useState([]); // from daily_expenses collection for selBranch+selDate
+  const [showExpBreakdown, setShowExpBreakdown] = useState(false);
   const [generatingTemplate, setGeneratingTemplate] = useState(false);
   
   // Track original values to allow updates to existing duplicates
@@ -267,6 +269,19 @@ export default function EntryPage() {
     });
     return () => unsub();
   }, [selBranch, selDate]);
+
+  // Daily expenses for current branch+date — shown as breakdown under Other Expenses
+  useEffect(() => {
+    if (!db || !selBranch || !selDate) { setDailyExpenses([]); return; }
+    const q = query(collection(db, "daily_expenses"), where("branch_id", "==", selBranch), where("date", "==", selDate));
+    const unsub = onSnapshot(q,
+      sn => setDailyExpenses(sn.docs.map(d => ({ ...d.data(), id: d.id }))),
+      () => setDailyExpenses([])
+    );
+    return () => unsub();
+  }, [selBranch, selDate]);
+
+  const dailyExpTotal = dailyExpenses.reduce((s, e) => s + (Number(e.amount) || 0), 0);
 
   // Branch lookup — memoized so per-row resolution in tables/exports is O(1) instead of O(n).
   const branchesById = useMemo(() => {
@@ -1651,7 +1666,23 @@ export default function EntryPage() {
               {/* Expenses */}
               <div style={{ height: 1, background: "linear-gradient(90deg,transparent,var(--border2),transparent)", margin: "16px 0" }} />
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(200px,1fr))", gap: 12, marginBottom: 16 }}>
-                <FG label="Other Expenses (₹)" expense><input type="number" placeholder="0" min="0" value={otherExp} onChange={e => setOtherExp(e.target.value)} /></FG>
+                <FG label={<span style={{ display: "flex", alignItems: "center", gap: 6 }}>Other Expenses (₹){dailyExpenses.length > 0 && <button type="button" onClick={() => setShowExpBreakdown(v => !v)} title="Show daily expense breakdown" style={{ background: "none", border: "none", cursor: "pointer", color: "var(--accent)", fontSize: 14, padding: 0, lineHeight: 1 }}>ℹ️</button>}</span>} expense>
+                  <input type="number" placeholder="0" min="0" value={otherExp} onChange={e => setOtherExp(e.target.value)} />
+                  {dailyExpTotal > 0 && <div style={{ fontSize: 10, color: "var(--blue, #60a5fa)", fontWeight: 700, marginTop: 4 }}>Daily expenses: {INR(dailyExpTotal)}</div>}
+                  {showExpBreakdown && dailyExpenses.length > 0 && (
+                    <div style={{ marginTop: 8, padding: 10, borderRadius: 8, background: "var(--bg3)", border: "1px solid var(--border)", fontSize: 11 }}>
+                      {dailyExpenses.map(e => (
+                        <div key={e.id} style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", borderBottom: "1px solid var(--border)" }}>
+                          <span style={{ color: "var(--text2)" }}>{e.expense_type}</span>
+                          <span style={{ fontWeight: 700, color: "var(--red)" }}>{INR(e.amount)}</span>
+                        </div>
+                      ))}
+                      <div style={{ display: "flex", justifyContent: "space-between", padding: "4px 0", fontWeight: 800, marginTop: 4 }}>
+                        <span>Total</span><span style={{ color: "var(--red)" }}>{INR(dailyExpTotal)}</span>
+                      </div>
+                    </div>
+                  )}
+                </FG>
                 <FG label="Petrol / Travel (₹)" expense><input type="number" placeholder="0" min="0" value={petrol} onChange={e => setPetrol(e.target.value)} /></FG>
                 <FG label="Cash in Hand (Expected)">
                   <div style={{ padding: "12px 16px", borderRadius: 10, border: `2px solid ${cashInHand >= 0 ? "var(--green)" : "var(--red)"}`, background: "var(--bg3)", fontSize: 18, fontWeight: 700, color: cashInHand >= 0 ? "var(--green)" : "var(--red)" }}>{INR(cashInHand)}</div>
