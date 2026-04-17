@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState, useMemo } from "react";
-import { collection, onSnapshot, query, orderBy } from "firebase/firestore";
+import { collection, onSnapshot, getDocs, query, where, orderBy } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
 import { INR } from "@/lib/calculations";
@@ -25,30 +25,34 @@ export default function IncentiveCalculatorPage() {
 
   const currentUser = useCurrentUser() || {};
 
+  // Load branches + staff once (lightweight)
   useEffect(() => {
     if (!db) return;
     const unsubs = [
-      onSnapshot(query(collection(db, "entries"), orderBy("date", "desc")), sn => {
-        setEntries(sn.docs.map(d => ({ ...d.data(), id: d.id })));
-        setLoading(false);
-      }),
       onSnapshot(collection(db, "branches"), sn => setBranches(sn.docs.map(d => ({ ...d.data(), id: d.id })))),
-      onSnapshot(collection(db, "staff"), sn => setStaff(sn.docs.map(d => ({ ...d.data(), id: d.id })))),
+      onSnapshot(collection(db, "staff"), sn => { setStaff(sn.docs.map(d => ({ ...d.data(), id: d.id }))); setLoading(false); }),
     ];
     return () => unsubs.forEach(u => u());
   }, []);
 
+  // Fetch entries on-demand when date range changes (avoids loading entire collection)
+  useEffect(() => {
+    if (!db || !dateFrom || !dateTo) return;
+    setLoading(true);
+    const q = query(collection(db, "entries"), where("date", ">=", dateFrom), where("date", "<=", dateTo));
+    getDocs(q).then(sn => {
+      setEntries(sn.docs.map(d => ({ ...d.data(), id: d.id })));
+    }).catch(() => {}).finally(() => setLoading(false));
+  }, [dateFrom, dateTo]);
+
   const branchesById = useMemo(() => new Map(branches.map(b => [b.id, b])), [branches]);
   const staffById = useMemo(() => new Map(staff.map(s => [s.id, s])), [staff]);
 
-  // Filter entries by date range and optional branch
+  // Filter entries by optional branch (date range already applied in query)
   const filtered = useMemo(() => {
-    return entries.filter(e => {
-      if (e.date < dateFrom || e.date > dateTo) return false;
-      if (branchFilter && e.branch_id !== branchFilter) return false;
-      return true;
-    });
-  }, [entries, dateFrom, dateTo, branchFilter]);
+    if (!branchFilter) return entries;
+    return entries.filter(e => e.branch_id === branchFilter);
+  }, [entries, branchFilter]);
 
   // Aggregate incentive data per staff from staff_billing arrays
   const incentiveData = useMemo(() => {
