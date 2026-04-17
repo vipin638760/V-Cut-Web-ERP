@@ -827,7 +827,7 @@ export default function StaffPage() {
               <TH>Role & Status</TH>
               <TH>Goal Progress</TH>
               {!isAccountant && <TH right>{filterMode === 'year' ? 'Yearly Salary' : 'Monthly Salary'}</TH>}
-              {canEdit && <TH right sticky>Actions</TH>}
+              {canEdit && <TH sticky style={{ textAlign: "center" }}>Actions</TH>}
             </tr>
           </thead>
           <tbody>
@@ -901,8 +901,8 @@ export default function StaffPage() {
                     </TD>
                   )}
                   {canEdit && (
-                    <TD sticky right>
-                      <div style={{ display: "flex", alignItems: "center", gap: 6, justifyContent: "flex-end", flexWrap: "wrap" }}>
+                    <TD sticky>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, justifyContent: "center" }}>
                         <IconBtn name="edit" onClick={() => handleEdit(s)} variant="secondary" title="Edit Staff" />
                         {(monthSt.status === 'partial' || monthSt.status === 'active') && (
                           <button type="button"
@@ -912,16 +912,18 @@ export default function StaffPage() {
                         )}
                         {!isAccountant && <IconBtn name="log" onClick={() => setHistoryModal(s)} variant="secondary" title="History Log" />}
                         {overall === 'active' && (
-                          <button onClick={() => openTransfer(s)} title="Transfer to another branch"
-                            style={{ padding: "6px 10px", borderRadius: 8, background: "rgba(96,165,250,0.12)", border: "1px solid rgba(96,165,250,0.3)", color: "var(--blue, #60a5fa)", fontSize: 11, fontWeight: 800, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>
-                            ↪ Transfer
-                          </button>
-                        )}
-                        {overall === 'active' && activeTransfer && (
-                          <button onClick={() => handleEndTransfer(activeTransfer)} title="Return to home branch"
-                            style={{ padding: "6px 10px", borderRadius: 8, background: "var(--green-bg)", border: "1px solid rgba(74,222,128,0.3)", color: "var(--green)", fontSize: 11, fontWeight: 800, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>
-                            ↩ Return
-                          </button>
+                          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                            <button onClick={() => openTransfer(s)} title="Transfer to another branch"
+                              style={{ padding: "6px 10px", borderRadius: 8, background: "rgba(96,165,250,0.12)", border: "1px solid rgba(96,165,250,0.3)", color: "var(--blue, #60a5fa)", fontSize: 11, fontWeight: 800, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4, width: "100%" }}>
+                              ↪ Transfer
+                            </button>
+                            {activeTransfer && (
+                              <button onClick={() => handleEndTransfer(activeTransfer)} title="Return to home branch"
+                                style={{ padding: "6px 10px", borderRadius: 8, background: "var(--green-bg)", border: "1px solid rgba(74,222,128,0.3)", color: "var(--green)", fontSize: 11, fontWeight: 800, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4, width: "100%" }}>
+                                ↩ Return
+                              </button>
+                            )}
+                          </div>
                         )}
                         <IconBtn name={overall === 'active' ? 'close' : 'check'} onClick={() => handleToggleStatus(s, !(overall === 'active'))} variant={overall === 'active' ? 'danger' : 'success'} title={overall === 'active' ? "Mark as Exited" : "Activate"} />
                         {!isAccountant && <IconBtn name="del" onClick={() => handleDelete(s.id)} variant="danger" title="Delete" />}
