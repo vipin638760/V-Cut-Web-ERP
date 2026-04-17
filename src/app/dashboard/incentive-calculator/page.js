@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState, useMemo } from "react";
-import { collection, onSnapshot, getDocs, query, where, orderBy } from "firebase/firestore";
+import { collection, onSnapshot, query, where, orderBy } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
 import { INR } from "@/lib/calculations";
@@ -30,19 +30,26 @@ export default function IncentiveCalculatorPage() {
     if (!db) return;
     const unsubs = [
       onSnapshot(collection(db, "branches"), sn => setBranches(sn.docs.map(d => ({ ...d.data(), id: d.id })))),
-      onSnapshot(collection(db, "staff"), sn => { setStaff(sn.docs.map(d => ({ ...d.data(), id: d.id }))); setLoading(false); }),
+      onSnapshot(collection(db, "staff"), sn => setStaff(sn.docs.map(d => ({ ...d.data(), id: d.id })))),
     ];
     return () => unsubs.forEach(u => u());
   }, []);
 
-  // Fetch entries on-demand when date range changes (avoids loading entire collection)
+  // Entries subscription scoped to date range (same pattern as daily entry page)
   useEffect(() => {
     if (!db || !dateFrom || !dateTo) return;
     setLoading(true);
-    const q = query(collection(db, "entries"), where("date", ">=", dateFrom), where("date", "<=", dateTo));
-    getDocs(q).then(sn => {
+    const q = query(
+      collection(db, "entries"),
+      where("date", ">=", dateFrom),
+      where("date", "<=", dateTo),
+      orderBy("date", "desc"),
+    );
+    const unsub = onSnapshot(q, sn => {
       setEntries(sn.docs.map(d => ({ ...d.data(), id: d.id })));
-    }).catch(() => {}).finally(() => setLoading(false));
+      setLoading(false);
+    }, () => { setLoading(false); });
+    return () => unsub();
   }, [dateFrom, dateTo]);
 
   const branchesById = useMemo(() => new Map(branches.map(b => [b.id, b])), [branches]);
