@@ -339,8 +339,8 @@ export default function DailyExpensesPage() {
         </div>
       </Modal>
 
-      <ConfirmDialog />
-      <ToastContainer />
+      {ConfirmDialog}
+      {ToastContainer}
     </div>
   );
 }
