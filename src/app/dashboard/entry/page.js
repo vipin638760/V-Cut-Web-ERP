@@ -95,6 +95,8 @@ export default function EntryPage() {
   const [rangeTo, setRangeTo] = useState("");
   const [uploadPreview, setUploadPreview] = useState(null); // { rows: [...], errors: [...], valid: [...] }
   const [serviceLogsByStaff, setServiceLogsByStaff] = useState({}); // { [staff_id]: { billing, tips, material, count, closed } }
+  const [sharedServices, setSharedServices] = useState([]); // [{ id, service_name, amount, sale_staff_id, incentive_staff_ids: [] }]
+  const [sharedForm, setSharedForm] = useState(null); // { service_name, amount, sale_staff_id, incentive_staff_ids: [] } or null
   const [templatePicker, setTemplatePicker] = useState(false); // show format choice
   const [generatingTemplate, setGeneratingTemplate] = useState(false);
   
@@ -146,6 +148,7 @@ export default function EntryPage() {
     }
     setStaffRows(rows);
     setLoanStaffIds(loans);
+    setSharedServices(e.shared_services || []);
     if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -364,9 +367,32 @@ export default function EntryPage() {
     });
   };
 
-  // Removed old GST recalculation useEffect as it is now global based on Online Income
+  // ── Shared Services: per-staff billing + incentive contributions ──
+  const sharedContributions = useMemo(() => {
+    const billing = {};   // { staffId: amount added to billing }
+    const incentive = {}; // { staffId: incentive earned }
+    sharedServices.forEach(ss => {
+      const amt = Number(ss.amount) || 0;
+      if (amt <= 0) return;
+      billing[ss.sale_staff_id] = (billing[ss.sale_staff_id] || 0) + amt;
+      (ss.incentive_staff_ids || []).forEach(sid => {
+        const s = staff.find(x => x.id === sid);
+        const b = branchesById.get(selBranch);
+        let incRate = 10;
+        if (globalSettings) {
+          incRate = b?.type === 'unisex' ? (globalSettings.unisex_inc ?? 10) : (globalSettings.mens_inc ?? 10);
+        } else if (s?.incentive_pct !== undefined) {
+          incRate = s.incentive_pct;
+        }
+        incentive[sid] = (incentive[sid] || 0) + Math.round(amt * incRate / 100);
+      });
+    });
+    const totalBilling = Object.values(billing).reduce((s, v) => s + v, 0);
+    const totalIncentive = Object.values(incentive).reduce((s, v) => s + v, 0);
+    return { billing, incentive, totalBilling, totalIncentive };
+  }, [sharedServices, staff, selBranch, globalSettings, branchesById]);
 
-  // Totals — single pass over staffRows, memoized so unrelated keystrokes don't rerun it.
+  // Totals — single pass over staffRows + shared service contributions.
   const { totalBilling, totalMatSale, totalIncentive, totalTips, totalStaffIncCombined } = useMemo(() => {
     const acc = { totalBilling: 0, totalMatSale: 0, totalIncentive: 0, totalTips: 0, totalStaffIncCombined: 0 };
     const rows = Object.values(staffRows);
@@ -378,8 +404,12 @@ export default function EntryPage() {
       acc.totalTips              += Number(r.tips)            || 0;
       acc.totalStaffIncCombined  += Number(r.staff_total_inc) || 0;
     }
+    // Add shared service contributions
+    acc.totalBilling += sharedContributions.totalBilling;
+    acc.totalIncentive += sharedContributions.totalIncentive;
+    acc.totalStaffIncCombined += sharedContributions.totalIncentive;
     return acc;
-  }, [staffRows]);
+  }, [staffRows, sharedContributions]);
   
   // Online is the manual input; Cash auto-fills to absorb the remainder of total sales.
   const globalTotalSales = totalBilling + totalMatSale;
@@ -522,35 +552,54 @@ export default function EntryPage() {
         petrol: Number(petrol) || 0,
         cash_in_hand: cashInHand,
         staff_billing: [
-          ...branchStaff.map(s => ({
-            staff_id: s.id,
-            billing: staffRows[s.id]?.billing || 0,
-            material: staffRows[s.id]?.material || 0,
-            incentive: staffRows[s.id]?.incentive || 0,
-            mat_incentive: staffRows[s.id]?.mat_incentive || 0,
-            tips: staffRows[s.id]?.tips || 0,
-            tip_in: staffRows[s.id]?.tip_in || "online",
-            tip_paid: staffRows[s.id]?.tip_paid || "cash",
-            present: staffRows[s.id]?.present !== false,
-            staff_total_inc: staffRows[s.id]?.staff_total_inc || 0,
-            home_branch_id: selBranch,
-            loan_flag: false,
-          })),
-          ...loanStaffList.map(s => ({
-            staff_id: s.id,
-            billing: staffRows[s.id]?.billing || 0,
-            material: staffRows[s.id]?.material || 0,
-            incentive: staffRows[s.id]?.incentive || 0,
-            mat_incentive: staffRows[s.id]?.mat_incentive || 0,
-            tips: staffRows[s.id]?.tips || 0,
-            tip_in: staffRows[s.id]?.tip_in || "online",
-            tip_paid: staffRows[s.id]?.tip_paid || "cash",
-            present: staffRows[s.id]?.present !== false,
-            staff_total_inc: staffRows[s.id]?.staff_total_inc || 0,
-            home_branch_id: homeBranchOf(s),
-            loan_flag: true,
-          })),
+          ...branchStaff.map(s => {
+            const shBilling = sharedContributions.billing[s.id] || 0;
+            const shIncentive = sharedContributions.incentive[s.id] || 0;
+            const baseBilling = (staffRows[s.id]?.billing || 0) + shBilling;
+            const baseInc = (staffRows[s.id]?.incentive || 0) + shIncentive;
+            const baseTotalInc = (staffRows[s.id]?.staff_total_inc || 0) + shIncentive;
+            return {
+              staff_id: s.id,
+              billing: baseBilling,
+              material: staffRows[s.id]?.material || 0,
+              incentive: baseInc,
+              mat_incentive: staffRows[s.id]?.mat_incentive || 0,
+              tips: staffRows[s.id]?.tips || 0,
+              tip_in: staffRows[s.id]?.tip_in || "online",
+              tip_paid: staffRows[s.id]?.tip_paid || "cash",
+              present: staffRows[s.id]?.present !== false,
+              staff_total_inc: baseTotalInc,
+              shared_billing: shBilling || undefined,
+              shared_incentive: shIncentive || undefined,
+              home_branch_id: selBranch,
+              loan_flag: false,
+            };
+          }),
+          ...loanStaffList.map(s => {
+            const shBilling = sharedContributions.billing[s.id] || 0;
+            const shIncentive = sharedContributions.incentive[s.id] || 0;
+            const baseBilling = (staffRows[s.id]?.billing || 0) + shBilling;
+            const baseInc = (staffRows[s.id]?.incentive || 0) + shIncentive;
+            const baseTotalInc = (staffRows[s.id]?.staff_total_inc || 0) + shIncentive;
+            return {
+              staff_id: s.id,
+              billing: baseBilling,
+              material: staffRows[s.id]?.material || 0,
+              incentive: baseInc,
+              mat_incentive: staffRows[s.id]?.mat_incentive || 0,
+              tips: staffRows[s.id]?.tips || 0,
+              tip_in: staffRows[s.id]?.tip_in || "online",
+              tip_paid: staffRows[s.id]?.tip_paid || "cash",
+              present: staffRows[s.id]?.present !== false,
+              staff_total_inc: baseTotalInc,
+              shared_billing: shBilling || undefined,
+              shared_incentive: shIncentive || undefined,
+              home_branch_id: homeBranchOf(s),
+              loan_flag: true,
+            };
+          }),
         ],
+        shared_services: sharedServices.length > 0 ? sharedServices : [],
         actual_cash: actualCashNum,
         cash_diff: cashDiff,
         tips_in_cash: tipsInCash,
@@ -616,6 +665,7 @@ export default function EntryPage() {
       setSelBranch(""); setOnlineInc(""); setMatExp(""); setOtherExp(""); setPetrol(""); setActualCash("");
       setStaffRows({});
       setLoanStaffIds(new Set());
+      setSharedServices([]);
       setEditId(null);
       setGstPct(globalGst);
     } catch (err) {
@@ -1226,7 +1276,7 @@ export default function EntryPage() {
           {/* Branch + Date */}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(200px,1fr))", gap: 12, marginBottom: 16 }}>
             <FG label="Branch">
-              <select value={selBranch} onChange={e => { setSelBranch(e.target.value); setStaffRows({}); setLoanStaffIds(new Set()); setOnlineInc(""); setMatExp(""); setOtherExp(""); setPetrol(""); setEditId(null); if(!editId) setGstPct(globalGst); }}>
+              <select value={selBranch} onChange={e => { setSelBranch(e.target.value); setStaffRows({}); setLoanStaffIds(new Set()); setSharedServices([]); setOnlineInc(""); setMatExp(""); setOtherExp(""); setPetrol(""); setEditId(null); if(!editId) setGstPct(globalGst); }}>
                 <option value="">Select branch...</option>
                 {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
               </select>
@@ -1334,8 +1384,10 @@ export default function EntryPage() {
                         const incPct = (s.incentive_pct ?? 10) / 100;
                         const matInc = Math.round((r.material || 0) * 0.05);
                         const inc = Math.round(r.incentive !== undefined ? Number(r.incentive) || 0 : (r.billing || 0) * incPct);
-                        const staffTInc = Math.round(inc + matInc + (Number(r.tips) || 0));
-                        const total = Math.round((Number(r.billing) || 0) + (Number(r.material) || 0) + (Number(r.tips) || 0));
+                        const shBilling = sharedContributions.billing[s.id] || 0;
+                        const shIncentive = sharedContributions.incentive[s.id] || 0;
+                        const staffTInc = Math.round(inc + matInc + (Number(r.tips) || 0) + shIncentive);
+                        const total = Math.round((Number(r.billing) || 0) + shBilling + (Number(r.material) || 0) + (Number(r.tips) || 0));
                         const tipIn = r.tip_in || "online";
                         const tipPaid = r.tip_paid || "cash";
                         const disabledStyle = !isPresent ? { opacity: 0.4, pointerEvents: "none" } : {};
@@ -1361,6 +1413,7 @@ export default function EntryPage() {
                             </td>
                             <td style={{ padding: "6px 14px", textAlign: "right", ...disabledStyle }}>
                               <input type="number" placeholder="0" min="0" disabled={!isPresent} value={r.billing || ""} onChange={e => updateStaffRow(s.id, "billing", e.target.value)} style={{ ...inp, borderColor: "var(--green)" }} onFocus={e => e.target.style.borderColor = "var(--gold)"} onBlur={e => e.target.style.borderColor = "var(--green)"} />
+                              {shBilling > 0 && <div style={{ fontSize: 9, color: "var(--blue, #60a5fa)", fontWeight: 700, marginTop: 2 }}>+{INR(shBilling)} shared</div>}
                             </td>
                             <td style={{ padding: "6px 14px", textAlign: "right", ...disabledStyle }}>
                               <input type="number" placeholder="0" min="0" disabled={!isPresent} value={r.material || ""} onChange={e => updateStaffRow(s.id, "material", e.target.value)} style={{ ...inp, borderColor: "var(--green)", color: "var(--green)", fontWeight: 600 }} onFocus={e => e.target.style.borderColor = "var(--gold)"} onBlur={e => e.target.style.borderColor = "var(--green)"} />
@@ -1370,6 +1423,7 @@ export default function EntryPage() {
                             </td>
                             <td style={{ padding: "6px 14px", textAlign: "right" }}>
                               <input type="text" readOnly value={INR(inc)} title="Auto-calculated (Incentive %)" style={{ ...inp, borderColor: "var(--red)", background: "rgba(255,255,255,0.03)", color: "var(--red)", cursor: "not-allowed", fontWeight: 700 }} />
+                              {shIncentive > 0 && <div style={{ fontSize: 9, color: "var(--blue, #60a5fa)", fontWeight: 700, marginTop: 2 }}>+{INR(shIncentive)} shared</div>}
                             </td>
                             <td style={{ padding: "6px 14px", textAlign: "right", ...disabledStyle }}>
                               <input type="number" placeholder="0" min="0" disabled={!isPresent} value={r.tips || ""} onChange={e => updateStaffRow(s.id, "tips", e.target.value)} style={{ ...inp, borderColor: "var(--red)", color: "var(--red)", fontWeight: 600 }} onFocus={e => e.target.style.borderColor = "var(--gold)"} onBlur={e => e.target.style.borderColor = "var(--red)"} />
@@ -1409,6 +1463,145 @@ export default function EntryPage() {
                   </table>
                 </div>
               ) : <div style={{ color: "var(--text3)", fontSize: 13, marginBottom: 16 }}>No active staff in this branch for the selected date.</div>}
+
+              {/* ── Shared Services (multi-staff billing split) ── */}
+              {canEdit && selBranch && (
+                <div style={{ marginBottom: 16 }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
+                    <div style={{ fontSize: 11, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 2 }}>
+                      Shared Services
+                      {sharedServices.length > 0 && (
+                        <span style={{ marginLeft: 10, padding: "2px 8px", borderRadius: 6, background: "rgba(96,165,250,0.12)", border: "1px solid rgba(96,165,250,0.35)", color: "var(--blue, #60a5fa)", fontSize: 10, letterSpacing: 1 }}>
+                          {sharedServices.length}
+                        </span>
+                      )}
+                    </div>
+                    <button type="button" onClick={() => setSharedForm({ service_name: "", amount: "", sale_staff_id: "", incentive_staff_ids: [] })}
+                      style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: 10, border: "1px solid var(--blue, #60a5fa)", background: "rgba(96,165,250,0.08)", color: "var(--blue, #60a5fa)", fontSize: 11, fontWeight: 800, letterSpacing: 1, textTransform: "uppercase", cursor: "pointer" }}>
+                      <Icon name="plus" size={12} /> Add Shared Service
+                    </button>
+                  </div>
+
+                  {sharedServices.length > 0 && (
+                    <div style={{ overflowX: "auto", marginBottom: 12 }}>
+                      <table style={{ width: "100%", minWidth: 700, borderCollapse: "collapse", fontSize: 12 }}>
+                        <thead>
+                          <tr style={{ background: "var(--bg4)" }}>
+                            {["Service", "Amount", "Sale To", "Incentive To", "Incentive Breakdown", ""].map((h, i) => (
+                              <th key={i} style={{ textAlign: i === 1 || i === 4 ? "right" : "left", padding: "8px 12px", fontSize: 10, fontWeight: 700, color: "var(--text2)", textTransform: "uppercase", letterSpacing: 1, borderBottom: "2px solid var(--blue, #60a5fa)", whiteSpace: "nowrap" }}>{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {sharedServices.map((ss, idx) => {
+                            const saleStaff = staff.find(x => x.id === ss.sale_staff_id);
+                            const incBreakdown = (ss.incentive_staff_ids || []).map(sid => {
+                              const s = staff.find(x => x.id === sid);
+                              const b = branchesById.get(selBranch);
+                              let rate = 10;
+                              if (globalSettings) rate = b?.type === 'unisex' ? (globalSettings.unisex_inc ?? 10) : (globalSettings.mens_inc ?? 10);
+                              else if (s?.incentive_pct !== undefined) rate = s.incentive_pct;
+                              const inc = Math.round((Number(ss.amount) || 0) * rate / 100);
+                              return { name: s?.name || "?", rate, inc };
+                            });
+                            const totalInc = incBreakdown.reduce((s, x) => s + x.inc, 0);
+                            return (
+                              <tr key={ss.id || idx} style={{ borderBottom: "1px solid var(--border)" }}>
+                                <td style={{ padding: "8px 12px", fontWeight: 600 }}>{ss.service_name || "—"}</td>
+                                <td style={{ padding: "8px 12px", textAlign: "right", fontWeight: 700, color: "var(--accent)" }}>{INR(Number(ss.amount) || 0)}</td>
+                                <td style={{ padding: "8px 12px" }}>
+                                  <span style={{ padding: "2px 8px", borderRadius: 6, background: "rgba(74,222,128,0.12)", border: "1px solid rgba(74,222,128,0.3)", color: "var(--green)", fontSize: 10, fontWeight: 700 }}>
+                                    {saleStaff?.name || "—"}
+                                  </span>
+                                </td>
+                                <td style={{ padding: "8px 12px" }}>
+                                  <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                                    {incBreakdown.map((ib, i) => (
+                                      <span key={i} style={{ padding: "2px 8px", borderRadius: 6, background: "rgba(96,165,250,0.12)", border: "1px solid rgba(96,165,250,0.3)", color: "var(--blue, #60a5fa)", fontSize: 10, fontWeight: 700 }}>
+                                        {ib.name} ({ib.rate}%)
+                                      </span>
+                                    ))}
+                                  </div>
+                                </td>
+                                <td style={{ padding: "8px 12px", textAlign: "right", fontWeight: 700, color: "var(--gold)" }}>
+                                  {incBreakdown.map(ib => INR(ib.inc)).join(" + ")} = {INR(totalInc)}
+                                </td>
+                                <td style={{ padding: "8px 12px", textAlign: "center" }}>
+                                  <button type="button" onClick={() => setSharedServices(prev => prev.filter((_, i) => i !== idx))}
+                                    style={{ background: "transparent", border: "none", color: "var(--red)", cursor: "pointer", fontSize: 14, fontWeight: 800 }}>✕</button>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+
+                  {/* Add/Edit Shared Service Form */}
+                  {sharedForm && (
+                    <div style={{ padding: 16, borderRadius: 12, background: "var(--bg3)", border: "1px solid var(--border2)", marginBottom: 12 }}>
+                      <div style={{ fontSize: 13, fontWeight: 800, color: "var(--text)", marginBottom: 12 }}>Add Shared Service</div>
+                      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 2fr", gap: 12, marginBottom: 12 }}>
+                        <div>
+                          <label style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Service Name</label>
+                          <input type="text" placeholder="e.g. Facial, Massage" value={sharedForm.service_name} onChange={e => setSharedForm(f => ({ ...f, service_name: e.target.value }))}
+                            style={{ width: "100%", padding: "8px 12px", borderRadius: 8, background: "var(--bg4)", border: "1px solid var(--border2)", color: "var(--text)", fontSize: 13, outline: "none", marginTop: 4 }} />
+                        </div>
+                        <div>
+                          <label style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Amount (₹)</label>
+                          <input type="number" placeholder="0" min="0" value={sharedForm.amount} onChange={e => setSharedForm(f => ({ ...f, amount: e.target.value }))}
+                            style={{ width: "100%", padding: "8px 12px", borderRadius: 8, background: "var(--bg4)", border: "1px solid var(--accent)", color: "var(--accent)", fontSize: 13, fontWeight: 700, outline: "none", marginTop: 4 }} />
+                        </div>
+                        <div>
+                          <label style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Sale Tagged To</label>
+                          <select value={sharedForm.sale_staff_id} onChange={e => setSharedForm(f => ({ ...f, sale_staff_id: e.target.value }))}
+                            style={{ width: "100%", padding: "8px 12px", borderRadius: 8, background: "var(--bg4)", border: "1px solid var(--green)", color: "var(--text)", fontSize: 13, outline: "none", marginTop: 4 }}>
+                            <option value="">Select staff…</option>
+                            {tableStaff.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                          </select>
+                        </div>
+                      </div>
+                      <div style={{ marginBottom: 12 }}>
+                        <label style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Incentive Applicable To (select staff who get incentive)</label>
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 6 }}>
+                          {tableStaff.map(s => {
+                            const checked = (sharedForm.incentive_staff_ids || []).includes(s.id);
+                            return (
+                              <label key={s.id} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 12px", borderRadius: 8, background: checked ? "rgba(96,165,250,0.15)" : "var(--bg4)", border: `1px solid ${checked ? "rgba(96,165,250,0.5)" : "var(--border2)"}`, cursor: "pointer", fontSize: 12, fontWeight: 600, color: checked ? "var(--blue, #60a5fa)" : "var(--text3)", transition: "all 0.15s" }}>
+                                <input type="checkbox" checked={checked} onChange={e => {
+                                  setSharedForm(f => ({
+                                    ...f,
+                                    incentive_staff_ids: e.target.checked
+                                      ? [...(f.incentive_staff_ids || []), s.id]
+                                      : (f.incentive_staff_ids || []).filter(id => id !== s.id)
+                                  }));
+                                }} style={{ accentColor: "var(--blue, #60a5fa)" }} />
+                                {s.name}
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+                        <button type="button" onClick={() => setSharedForm(null)}
+                          style={{ padding: "8px 16px", borderRadius: 8, background: "var(--bg4)", color: "var(--text3)", border: "1px solid var(--border2)", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Cancel</button>
+                        <button type="button" onClick={() => {
+                          if (!sharedForm.amount || !sharedForm.sale_staff_id || (sharedForm.incentive_staff_ids || []).length === 0) {
+                            toast({ title: "Incomplete", message: "Enter amount, select sale staff, and check at least one incentive staff.", type: "warning" });
+                            return;
+                          }
+                          setSharedServices(prev => [...prev, { ...sharedForm, id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6) }]);
+                          setSharedForm(null);
+                        }}
+                          style={{ padding: "8px 18px", borderRadius: 8, background: "linear-gradient(135deg,var(--accent),var(--gold2))", color: "#000", border: "none", fontSize: 12, fontWeight: 800, cursor: "pointer" }}>
+                          Add Service
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Expenses */}
               <div style={{ height: 1, background: "linear-gradient(90deg,transparent,var(--border2),transparent)", margin: "16px 0" }} />
@@ -1473,7 +1666,7 @@ export default function EntryPage() {
                   <Icon name="save" size={16} />
                   {saving ? "Saving..." : editId ? "Update Entry" : "Save to Database"}
                 </button>
-                <button type="button" onClick={() => { setSelBranch(""); setOnlineInc(""); setMatExp(""); setOtherExp(""); setPetrol(""); setStaffRows({}); setLoanStaffIds(new Set()); setSaveStatus(""); setEditId(null); }}
+                <button type="button" onClick={() => { setSelBranch(""); setOnlineInc(""); setMatExp(""); setOtherExp(""); setPetrol(""); setStaffRows({}); setLoanStaffIds(new Set()); setSharedServices([]); setSaveStatus(""); setEditId(null); }}
                   style={{ padding: "10px 18px", borderRadius: 10, fontSize: 13, background: "var(--bg4)", color: "var(--text2)", border: "1px solid var(--border2)", cursor: "pointer", fontWeight: 600 }}>
                   {editId ? "Cancel Edit" : "Clear"}
                 </button>
