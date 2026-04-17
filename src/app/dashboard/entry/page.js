@@ -560,8 +560,8 @@ export default function EntryPage() {
               tip_paid: staffRows[s.id]?.tip_paid || "cash",
               present: staffRows[s.id]?.present !== false,
               staff_total_inc: baseTotalInc,
-              shared_billing: shBilling || undefined,
-              shared_incentive: shIncentive || undefined,
+              ...(shBilling > 0 ? { shared_billing: shBilling } : {}),
+              ...(shIncentive > 0 ? { shared_incentive: shIncentive } : {}),
               home_branch_id: selBranch,
               loan_flag: false,
             };
@@ -582,8 +582,8 @@ export default function EntryPage() {
               tip_paid: staffRows[s.id]?.tip_paid || "cash",
               present: staffRows[s.id]?.present !== false,
               staff_total_inc: baseTotalInc,
-              shared_billing: shBilling || undefined,
-              shared_incentive: shIncentive || undefined,
+              ...(shBilling > 0 ? { shared_billing: shBilling } : {}),
+              ...(shIncentive > 0 ? { shared_incentive: shIncentive } : {}),
               home_branch_id: homeBranchOf(s),
               loan_flag: true,
             };
