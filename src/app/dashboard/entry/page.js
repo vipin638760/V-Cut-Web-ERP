@@ -143,6 +143,7 @@ export default function EntryPage() {
            tip_paid: sb.tip_paid || "cash",
            present: sb.present !== false,
            staff_total_inc: sb.staff_total_inc || 0,
+           ...(sb.incentive_taken !== undefined ? { incentive_taken: sb.incentive_taken } : {}),
         };
         if (sb.loan_flag) loans.add(sb.staff_id);
       });
@@ -335,7 +336,7 @@ export default function EntryPage() {
     setStaffRows(prev => {
       const row = prev[sid] || {};
       // Pass-through fields that don't trigger recalculation
-      if (field === "tip_in" || field === "tip_paid" || field === "present" || field === "leave_type" || field === "leave_reason") {
+      if (field === "tip_in" || field === "tip_paid" || field === "present" || field === "leave_type" || field === "leave_reason" || field === "incentive_taken") {
         return { ...prev, [sid]: { ...row, [field]: value } };
       }
       const billing = field === "billing" ? Number(value) : (row.billing || 0);
@@ -387,22 +388,33 @@ export default function EntryPage() {
   }, [sharedServices, staff, selBranch, globalSettings, branchesById]);
 
   // Totals — single pass over staffRows + shared service contributions.
-  const { totalBilling, totalMatSale, totalIncentive, totalTips, totalStaffIncCombined } = useMemo(() => {
-    const acc = { totalBilling: 0, totalMatSale: 0, totalIncentive: 0, totalTips: 0, totalStaffIncCombined: 0 };
-    const rows = Object.values(staffRows);
-    for (let i = 0; i < rows.length; i++) {
-      const r = rows[i] || {};
+  const { totalBilling, totalMatSale, totalIncentive, totalIncentiveTaken, totalTips, totalStaffIncCombined } = useMemo(() => {
+    const acc = { totalBilling: 0, totalMatSale: 0, totalIncentive: 0, totalIncentiveTaken: 0, totalTips: 0, totalStaffIncCombined: 0 };
+    const sids = Object.keys(staffRows);
+    for (let i = 0; i < sids.length; i++) {
+      const sid = sids[i];
+      const r = staffRows[sid] || {};
+      const rowInc = (Number(r.incentive) || 0) + (Number(r.mat_incentive) || 0);
+      const shInc = sharedContributions.incentive[sid] || 0;
+      const fullInc = rowInc + shInc;
       acc.totalBilling           += Number(r.billing)         || 0;
       acc.totalMatSale           += Number(r.material)        || 0;
-      acc.totalIncentive         += (Number(r.incentive) || 0) + (Number(r.mat_incentive) || 0);
+      acc.totalIncentive         += fullInc;
       acc.totalTips              += Number(r.tips)            || 0;
-      acc.totalStaffIncCombined  += Number(r.staff_total_inc) || 0;
+      acc.totalStaffIncCombined  += (Number(r.staff_total_inc) || 0) + shInc;
+      // Determine if incentive is taken — use stored value, or auto-default from branch+role
+      let taken = r.incentive_taken;
+      if (taken === undefined) {
+        const s = staff.find(x => x.id === sid);
+        const b = branchesById.get(selBranch);
+        const isUnisex = (b?.type || "").toLowerCase() === "unisex";
+        const role = (s?.role || "").toLowerCase();
+        taken = isUnisex ? (role.includes("hairdresser") || role.includes("hair dresser")) : true;
+      }
+      if (taken) acc.totalIncentiveTaken += fullInc;
     }
-    // Add shared incentive contributions (billing is already in the entered amounts)
-    acc.totalIncentive += sharedContributions.totalIncentive;
-    acc.totalStaffIncCombined += sharedContributions.totalIncentive;
     return acc;
-  }, [staffRows, sharedContributions]);
+  }, [staffRows, sharedContributions, staff, selBranch, branchesById]);
   
   // Online is the manual input; Cash auto-fills to absorb the remainder of total sales.
   const globalTotalSales = totalBilling + totalMatSale;
@@ -424,8 +436,8 @@ export default function EntryPage() {
     return { tipsInCash: inCash, tipsPaidCash: outCash };
   }, [staffRows]);
 
-  // Cash drawer balance: cash sales + cash tips received − cash tips paid − incentive − expenses
-  const cashInHand = totalCash + tipsInCash - tipsPaidCash - totalIncentive - (Number(otherExp) || 0) - (Number(petrol) || 0);
+  // Cash drawer balance: only deduct incentives that were actually taken (ticked)
+  const cashInHand = totalCash + tipsInCash - tipsPaidCash - totalIncentiveTaken - (Number(otherExp) || 0) - (Number(petrol) || 0);
 
   // Reconciliation: actual counted cash vs expected cash-in-hand
   const actualCashNum = actualCash === "" ? null : Number(actualCash);
@@ -550,17 +562,23 @@ export default function EntryPage() {
             const shIncentive = sharedContributions.incentive[s.id] || 0;
             const baseInc = (staffRows[s.id]?.incentive || 0) + shIncentive;
             const baseTotalInc = (staffRows[s.id]?.staff_total_inc || 0) + shIncentive;
+            const r = staffRows[s.id] || {};
+            const branch = branchesById.get(selBranch);
+            const isUnisex = (branch?.type || "").toLowerCase() === "unisex";
+            const role = (s.role || "").toLowerCase();
+            const taken = r.incentive_taken !== undefined ? r.incentive_taken : (isUnisex ? (role.includes("hairdresser") || role.includes("hair dresser")) : true);
             return {
               staff_id: s.id,
-              billing: staffRows[s.id]?.billing || 0,
-              material: staffRows[s.id]?.material || 0,
+              billing: r.billing || 0,
+              material: r.material || 0,
               incentive: baseInc,
-              mat_incentive: staffRows[s.id]?.mat_incentive || 0,
-              tips: staffRows[s.id]?.tips || 0,
-              tip_in: staffRows[s.id]?.tip_in || "online",
-              tip_paid: staffRows[s.id]?.tip_paid || "cash",
-              present: staffRows[s.id]?.present !== false,
+              mat_incentive: r.mat_incentive || 0,
+              tips: r.tips || 0,
+              tip_in: r.tip_in || "online",
+              tip_paid: r.tip_paid || "cash",
+              present: r.present !== false,
               staff_total_inc: baseTotalInc,
+              incentive_taken: taken,
               ...(shBilling > 0 ? { shared_billing: shBilling } : {}),
               ...(shIncentive > 0 ? { shared_incentive: shIncentive } : {}),
               home_branch_id: selBranch,
@@ -572,17 +590,20 @@ export default function EntryPage() {
             const shIncentive = sharedContributions.incentive[s.id] || 0;
             const baseInc = (staffRows[s.id]?.incentive || 0) + shIncentive;
             const baseTotalInc = (staffRows[s.id]?.staff_total_inc || 0) + shIncentive;
+            const r = staffRows[s.id] || {};
+            const taken = r.incentive_taken !== undefined ? r.incentive_taken : true;
             return {
               staff_id: s.id,
-              billing: staffRows[s.id]?.billing || 0,
-              material: staffRows[s.id]?.material || 0,
+              billing: r.billing || 0,
+              material: r.material || 0,
               incentive: baseInc,
-              mat_incentive: staffRows[s.id]?.mat_incentive || 0,
-              tips: staffRows[s.id]?.tips || 0,
-              tip_in: staffRows[s.id]?.tip_in || "online",
-              tip_paid: staffRows[s.id]?.tip_paid || "cash",
-              present: staffRows[s.id]?.present !== false,
+              mat_incentive: r.mat_incentive || 0,
+              tips: r.tips || 0,
+              tip_in: r.tip_in || "online",
+              tip_paid: r.tip_paid || "cash",
+              present: r.present !== false,
               staff_total_inc: baseTotalInc,
+              incentive_taken: taken,
               ...(shBilling > 0 ? { shared_billing: shBilling } : {}),
               ...(shIncentive > 0 ? { shared_incentive: shIncentive } : {}),
               home_branch_id: homeBranchOf(s),
@@ -1361,7 +1382,7 @@ export default function EntryPage() {
                   <table style={{ width: "100%", minWidth: 1100, borderCollapse: "collapse" }}>
                     <thead>
                       <tr style={{ background: "var(--bg4)" }}>
-                        {["Present", "Staff", "Billing (₹)", "Shared Sale", "Individual Billing", "Mat Sale", "Mat Inc (5%auto)", "Incentive", "Shared Inc", "Tips (₹)", "Tip In/Out", "Staff Total Inc", "Staff Total"].map((h, i) => (
+                        {["Present", "Staff", "Billing (₹)", "Shared Sale", "Individual Billing", "Mat Sale", "Mat Inc (5%auto)", "Incentive", "Shared Inc", "Inc Taken", "Tips (₹)", "Tip In/Out", "Staff Total Inc", "Staff Total"].map((h, i) => (
                           <th key={i} style={{ textAlign: i === 0 || i === 1 ? "left" : "right", padding: "10px 14px", fontSize: 11, fontWeight: 700, color: "var(--text2)", textTransform: "uppercase", letterSpacing: 1, borderBottom: "2px solid var(--gold)", whiteSpace: "nowrap" }}>{h}</th>
                         ))}
                       </tr>
@@ -1375,6 +1396,12 @@ export default function EntryPage() {
                         const incPct = (s.incentive_pct ?? 10) / 100;
                         const matInc = Math.round((r.material || 0) * 0.05);
                         const inc = Math.round(r.incentive !== undefined ? Number(r.incentive) || 0 : (r.billing || 0) * incPct);
+                        // Auto-default incentive_taken: mens shop = all daily, unisex = only mens hairdresser daily
+                        const branch = branchesById.get(selBranch);
+                        const isUnisex = (branch?.type || "").toLowerCase() === "unisex";
+                        const role = (s.role || "").toLowerCase();
+                        const defaultTaken = isUnisex ? (role.includes("hairdresser") || role.includes("hair dresser")) : true;
+                        const incTaken = r.incentive_taken !== undefined ? r.incentive_taken : defaultTaken;
                         const shBilling = sharedContributions.billing[s.id] || 0;
                         const shIncentive = sharedContributions.incentive[s.id] || 0;
                         const staffTInc = Math.round(inc + matInc + (Number(r.tips) || 0) + shIncentive);
@@ -1423,6 +1450,16 @@ export default function EntryPage() {
                             <td style={{ padding: "6px 14px", textAlign: "right", fontWeight: 700, color: shIncentive > 0 ? "var(--blue, #60a5fa)" : "var(--text3)", fontSize: 12 }}>
                               {shIncentive > 0 ? INR(shIncentive) : "—"}
                             </td>
+                            <td style={{ padding: "6px 14px", textAlign: "center" }}>
+                              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
+                                <input type="checkbox" checked={incTaken} onChange={e => updateStaffRow(s.id, "incentive_taken", e.target.checked)}
+                                  style={{ width: 16, height: 16, accentColor: incTaken ? "var(--green)" : "var(--red)", cursor: "pointer" }}
+                                  title={incTaken ? "Daily collector — incentive deducted from cash" : "Period collector — incentive accumulates"} />
+                                <span style={{ fontSize: 8, fontWeight: 700, color: incTaken ? "var(--green)" : "var(--orange)", textTransform: "uppercase" }}>
+                                  {incTaken ? "Taken" : "Pending"}
+                                </span>
+                              </div>
+                            </td>
                             <td style={{ padding: "6px 14px", textAlign: "right", ...disabledStyle }}>
                               <input type="number" placeholder="0" min="0" disabled={!isPresent} value={r.tips || ""} onChange={e => updateStaffRow(s.id, "tips", e.target.value)} style={{ ...inp, borderColor: "var(--red)", color: "var(--red)", fontWeight: 600 }} onFocus={e => e.target.style.borderColor = "var(--gold)"} onBlur={e => e.target.style.borderColor = "var(--red)"} />
                             </td>
@@ -1455,6 +1492,10 @@ export default function EntryPage() {
                         <td style={{ padding: "10px 14px", textAlign: "right", color: "var(--text3)" }}></td>
                         <td style={{ padding: "10px 14px", textAlign: "right", color: "var(--red)" }}>{INR(totalIncentive - totalTips - sharedContributions.totalIncentive)}</td>
                         <td style={{ padding: "10px 14px", textAlign: "right", color: "var(--blue, #60a5fa)" }}>{sharedContributions.totalIncentive > 0 ? INR(sharedContributions.totalIncentive) : "—"}</td>
+                        <td style={{ padding: "10px 14px", textAlign: "center", fontSize: 10 }}>
+                          <span style={{ color: "var(--green)" }}>{INR(totalIncentiveTaken)}</span>
+                          {totalIncentive > totalIncentiveTaken && <div style={{ color: "var(--orange)", fontSize: 9 }}>Pending: {INR(totalIncentive - totalIncentiveTaken)}</div>}
+                        </td>
                         <td style={{ padding: "10px 14px", textAlign: "right", color: "var(--red)" }}>{INR(totalTips)}</td>
                         <td style={{ padding: "10px 14px", textAlign: "right", color: "var(--text3)", fontSize: 10 }}>cash↑ {INR(tipsInCash)} • cash↓ {INR(tipsPaidCash)}</td>
                         <td style={{ padding: "10px 14px", textAlign: "right", color: "var(--gold)" }}>{INR(totalStaffIncCombined)}</td>
