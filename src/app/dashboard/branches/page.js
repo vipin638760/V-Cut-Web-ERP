@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState, useRef } from "react";
-import { collection, onSnapshot, query, orderBy, deleteDoc, doc, addDoc, updateDoc } from "firebase/firestore";
+import { collection, onSnapshot, query, orderBy, where, getDocs, deleteDoc, doc, addDoc, updateDoc, writeBatch } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
 import { INR, branchIncomeInPeriod, makeFilterPrefix, periodLabel, proRataSalary, staffLeavesInMonth, staffStatusForMonth, MASK } from "@/lib/calculations";
@@ -46,6 +46,13 @@ export default function BranchesPage() {
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState(null);
   const [form, setForm] = useState({ name: "", type: "mens", location: "", shop_rent: "", room_rent: "", salary_budget: "", wifi: "", shop_elec: "", room_elec: "" });
+
+  // Recalculate modal
+  const [recalcModal, setRecalcModal] = useState(null); // { branch_id, branch_name }
+  const [recalcFrom, setRecalcFrom] = useState(() => { const d = new Date(); d.setDate(1); return d.toISOString().slice(0, 10); });
+  const [recalcTo, setRecalcTo] = useState(() => new Date().toISOString().slice(0, 10));
+  const [recalcBusy, setRecalcBusy] = useState(false);
+  const [recalcLog, setRecalcLog] = useState([]);
 
   const currentUser = useCurrentUser() || {};
   const isAdmin = currentUser?.role === "admin";
@@ -245,6 +252,146 @@ export default function BranchesPage() {
         catch (err) { confirm({ title: "Error", message: err.message, confirmText: "OK", cancelText: "Close", type: "danger", onConfirm: () => {} }); }
       }
     });
+  };
+
+  // ── Recalculate entries for a branch in a date range ──
+  const handleRecalculate = async () => {
+    if (!recalcModal || recalcBusy) return;
+    setRecalcBusy(true);
+    setRecalcLog([]);
+    const log = [];
+    try {
+      const branchId = recalcModal.branch_id;
+      const branch = branches.find(b => b.id === branchId);
+      const isUnisex = (branch?.type || "").toLowerCase() === "unisex";
+      const ceilTo10 = (n) => Math.ceil(n / 10) * 10;
+
+      // Get staff incentive rate
+      const getRate = (sid) => {
+        const s = staff.find(x => x.id === sid);
+        if (s?.incentive_pct !== undefined && s.incentive_pct !== null) return Number(s.incentive_pct);
+        if (globalSettings) return isUnisex ? (globalSettings.unisex_inc ?? 10) : (globalSettings.mens_inc ?? 10);
+        return 10;
+      };
+
+      // Get daily expenses for a branch+date
+      const getDailyExp = async (date) => {
+        try {
+          const q = query(collection(db, "daily_expenses"), where("branch_id", "==", branchId), where("date", "==", date));
+          const sn = await getDocs(q);
+          return sn.docs.reduce((s, d) => s + (Number(d.data().amount) || 0), 0);
+        } catch { return 0; }
+      };
+
+      // Get material allocations for branch+date
+      const getMatExp = (date) => {
+        return materialAllocations
+          .filter(a => a.branch_id === branchId && a.date === date)
+          .reduce((s, a) => s + (Number(a.total) || 0), 0);
+      };
+
+      // Find entries in range
+      const branchEntries = entries.filter(e => e.branch_id === branchId && e.date >= recalcFrom && e.date <= recalcTo);
+
+      if (branchEntries.length === 0) {
+        log.push("No entries found in the selected range.");
+        setRecalcLog(log);
+        setRecalcBusy(false);
+        return;
+      }
+
+      let updated = 0;
+      for (const entry of branchEntries) {
+        const changes = {};
+        let changed = false;
+
+        // Recalculate staff_billing incentives
+        if (entry.staff_billing?.length > 0) {
+          const newBilling = entry.staff_billing.map(sb => {
+            const billing = Number(sb.billing) || 0;
+            const material = Number(sb.material) || 0;
+            const tips = Number(sb.tips) || 0;
+            const rate = getRate(sb.staff_id);
+            const newInc = ceilTo10(billing * rate / 100);
+            const newMatInc = ceilTo10(material * 0.05);
+
+            // Auto-default incentive_taken
+            const s = staff.find(x => x.id === sb.staff_id);
+            const role = (s?.role || "").toLowerCase();
+            const defaultTaken = isUnisex ? (role.includes("hairdresser") || role.includes("hair dresser")) : true;
+            const taken = sb.incentive_taken !== undefined ? sb.incentive_taken : defaultTaken;
+
+            const newTotalInc = Math.round(newInc + newMatInc + tips);
+            return {
+              ...sb,
+              incentive: newInc,
+              mat_incentive: newMatInc,
+              staff_total_inc: newTotalInc,
+              incentive_taken: taken,
+            };
+          });
+          changes.staff_billing = newBilling;
+          changed = true;
+        }
+
+        // Update material expense from allocations
+        const matExp = getMatExp(entry.date);
+        if (matExp > 0 && matExp !== (Number(entry.mat_expense) || 0)) {
+          changes.mat_expense = matExp;
+          changed = true;
+        }
+
+        // Update other expenses from daily_expenses
+        const dailyExp = await getDailyExp(entry.date);
+        if (dailyExp > 0 && dailyExp !== (Number(entry.others) || 0)) {
+          changes.others = dailyExp;
+          changed = true;
+        }
+
+        // Recalculate cash_in_hand
+        if (changed && changes.staff_billing) {
+          const totalBilling = changes.staff_billing.reduce((s, sb) => s + (Number(sb.billing) || 0), 0);
+          const totalMatSale = changes.staff_billing.reduce((s, sb) => s + (Number(sb.material) || 0), 0);
+          const totalSales = totalBilling + totalMatSale;
+          const online = Number(entry.online) || 0;
+          const cash = Math.max(0, totalSales - online);
+          const takenInc = changes.staff_billing.reduce((s, sb) => {
+            if (sb.incentive_taken === false) return s;
+            return s + (Number(sb.incentive) || 0) + (Number(sb.mat_incentive) || 0);
+          }, 0);
+          const tipsPaidCash = changes.staff_billing.reduce((s, sb) => {
+            const t = Number(sb.tips) || 0;
+            return (sb.tip_paid || "cash") === "cash" ? s + t : s;
+          }, 0);
+          const tipsInCash = changes.staff_billing.reduce((s, sb) => {
+            const t = Number(sb.tips) || 0;
+            return (sb.tip_in || "online") === "cash" ? s + t : s;
+          }, 0);
+          const oth = changes.others !== undefined ? changes.others : (Number(entry.others) || 0);
+          const pet = Number(entry.petrol) || 0;
+          changes.cash_in_hand = cash + tipsInCash - tipsPaidCash - takenInc - oth - pet;
+        }
+
+        if (changed) {
+          changes.recalculated_at = new Date().toISOString();
+          changes.recalculated_by = currentUser?.name || "user";
+          await updateDoc(doc(db, "entries", entry.id), changes);
+          updated++;
+          log.push(`${entry.date}: updated (inc: ${changes.staff_billing ? "recalculated" : "unchanged"}, mat: ${changes.mat_expense !== undefined ? INR(changes.mat_expense) : "—"}, exp: ${changes.others !== undefined ? INR(changes.others) : "—"})`);
+        } else {
+          log.push(`${entry.date}: no changes needed`);
+        }
+      }
+
+      toast({ title: "Recalculated", message: `${updated} of ${branchEntries.length} entries updated.`, type: "success" });
+      setRecalcLog(log);
+    } catch (err) {
+      toast({ title: "Error", message: err.message, type: "error" });
+      log.push(`Error: ${err.message}`);
+      setRecalcLog(log);
+    } finally {
+      setRecalcBusy(false);
+    }
   };
 
   if (loading) return <VLoader fullscreen label="Loading branches" />;
@@ -713,6 +860,10 @@ export default function BranchesPage() {
           {b.location && <span style={{ fontSize: 12, color: "var(--text3)" }}>📍 {b.location}</span>}
           {canEdit && (
             <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+              <button onClick={() => { setRecalcModal({ branch_id: b.id, branch_name: b.name }); setRecalcLog([]); }}
+                style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: 8, background: "rgba(96,165,250,0.12)", border: "1px solid rgba(96,165,250,0.3)", color: "var(--blue, #60a5fa)", cursor: "pointer", fontWeight: 600, fontSize: 12 }}>
+                <Icon name="check" size={14} /> Recalculate
+              </button>
               <button onClick={() => handleEdit(b)} style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: 8, background: "var(--bg4)", border: "1px solid var(--border2)", color: "var(--text2)", cursor: "pointer", fontWeight: 600, fontSize: 12 }}>
                 <Icon name="edit" size={14} /> Edit
               </button>
@@ -1283,6 +1434,54 @@ export default function BranchesPage() {
         />
       )}
       {attendanceModalEl}
+
+      {/* Recalculate Modal */}
+      {recalcModal && (
+        <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.55)", backdropFilter: "blur(6px)", zIndex: 1100, display: "flex", justifyContent: "center", alignItems: "center", padding: 16 }}>
+          <div style={{ width: "100%", maxWidth: 520, background: "var(--bg2)", borderRadius: 16, overflow: "hidden", boxShadow: "0 24px 80px rgba(0,0,0,0.5)" }}>
+            <div style={{ padding: "20px 24px", borderBottom: "1px solid var(--border)" }}>
+              <div style={{ fontSize: 17, fontWeight: 800, color: "var(--text)" }}>Recalculate — {recalcModal.branch_name}</div>
+              <div style={{ fontSize: 12, color: "var(--text3)", marginTop: 4 }}>
+                Recalculates incentives (ceil-to-10, per-staff rate, daily/period defaults), updates material expense from allocations, and other expenses from daily expenses.
+              </div>
+            </div>
+            <div style={{ padding: "16px 24px", display: "flex", flexDirection: "column", gap: 14 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <div>
+                  <label style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>From Date</label>
+                  <input type="date" value={recalcFrom} onChange={e => setRecalcFrom(e.target.value)}
+                    style={{ width: "100%", padding: "10px 12px", borderRadius: 8, background: "var(--bg4)", border: "1px solid var(--border2)", color: "var(--text)", fontSize: 13, marginTop: 4 }} />
+                </div>
+                <div>
+                  <label style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>To Date</label>
+                  <input type="date" value={recalcTo} onChange={e => setRecalcTo(e.target.value)}
+                    style={{ width: "100%", padding: "10px 12px", borderRadius: 8, background: "var(--bg4)", border: "1px solid var(--border2)", color: "var(--text)", fontSize: 13, marginTop: 4 }} />
+                </div>
+              </div>
+
+              {recalcLog.length > 0 && (
+                <div style={{ maxHeight: 200, overflowY: "auto", padding: 12, borderRadius: 8, background: "var(--bg3)", border: "1px solid var(--border)", fontSize: 11, fontFamily: "monospace" }}>
+                  {recalcLog.map((l, i) => (
+                    <div key={i} style={{ padding: "2px 0", color: l.includes("updated") ? "var(--green)" : l.includes("Error") ? "var(--red)" : "var(--text3)" }}>{l}</div>
+                  ))}
+                </div>
+              )}
+
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 4 }}>
+                <button onClick={() => { setRecalcModal(null); setRecalcLog([]); }} disabled={recalcBusy}
+                  style={{ padding: "10px 18px", borderRadius: 10, background: "var(--bg4)", color: "var(--text3)", border: "1px solid var(--border2)", fontWeight: 600, fontSize: 12, cursor: recalcBusy ? "wait" : "pointer" }}>
+                  {recalcLog.length > 0 ? "Close" : "Cancel"}
+                </button>
+                <button onClick={handleRecalculate} disabled={recalcBusy}
+                  style={{ padding: "10px 20px", borderRadius: 10, background: "linear-gradient(135deg,var(--accent),var(--gold2))", color: "#000", border: "none", fontWeight: 800, fontSize: 12, cursor: recalcBusy ? "wait" : "pointer", opacity: recalcBusy ? 0.6 : 1, display: "inline-flex", alignItems: "center", gap: 6 }}>
+                  <Icon name="check" size={13} /> {recalcBusy ? "Recalculating…" : "Recalculate"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {ConfirmDialog}
       {ToastContainer}
     </div>
