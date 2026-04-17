@@ -14,6 +14,7 @@ import { Icon, IconBtn, Pill, Card, PeriodWidget, TH, TD, StatCard, ProgressBar,
 
 
 const NOW = new Date();
+const toTitleCase = (s) => (s || "").toLowerCase().replace(/(?:^|\s)\S/g, c => c.toUpperCase());
 
 export default function StaffPage() {
   const [staff, setStaff] = useState([]);
@@ -794,7 +795,7 @@ export default function StaffPage() {
                     const b = branches.find(x => x.id === s.branch_id);
                     return (
                       <tr key={s.id} style={{ background: "rgba(251,146,60,0.03)" }}>
-                        <TD style={{ fontWeight: 700 }}>{s.name}</TD>
+                        <TD style={{ fontWeight: 700 }}>{toTitleCase(s.name)}</TD>
                         <TD>{b?.name || "—"}</TD>
                         <TD>{s.role || "—"}</TD>
                         <TD style={{ color: "var(--text3)" }}>{s.mobile || "—"}</TD>
@@ -848,9 +849,14 @@ export default function StaffPage() {
                 <tr key={s.id} style={{ opacity: overall === "inactive" ? 0.6 : 1, transition: "background 0.2s" }}>
                   <TD>
                     <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                      <div style={{ width: 40, height: 40, borderRadius: 12, background: "var(--bg4)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, fontWeight: 800, color: "var(--accent)", border: "1px solid var(--border)" }}>{s.name[0]}</div>
+                      <div style={{ position: "relative" }}>
+                        <div style={{ width: 40, height: 40, borderRadius: 12, background: "var(--bg4)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, fontWeight: 800, color: "var(--accent)", border: "1px solid var(--border)" }}>{(s.name || "?")[0].toUpperCase()}</div>
+                        <span title={overall === "active" ? "Active" : "Inactive"} style={{ position: "absolute", bottom: -2, right: -2, width: 10, height: 10, borderRadius: "50%", background: overall === "active" ? "#4ade80" : "#f87171", border: "2px solid var(--bg2)" }} />
+                      </div>
                       <div>
-                        <div style={{ fontWeight: 700, fontSize: 14 }}>{s.name}</div>
+                        <div style={{ fontWeight: 700, fontSize: 14, display: "flex", alignItems: "center", gap: 6 }}>
+                          {toTitleCase(s.name)}
+                        </div>
                         <div style={{ fontSize: 11, color: "var(--text3)", display: "flex", alignItems: "center", gap: 5 }}>
                           <Icon name="log" size={10} /> {b?.name || "No Branch"} • {s.mobile || "No Mobile"}
                         </div>
@@ -867,7 +873,6 @@ export default function StaffPage() {
                     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                         <Pill label={s.role || "Trainee"} color={s.role === 'Captain' ? 'purple' : 'blue'} />
-                        {overall === 'active' ? <Pill label="Active" color="green" /> : <Pill label="Inactive" color="red" />}
                       </div>
                       {(monthSt.status === 'partial' || monthSt.status === 'active') && (
                         <span style={{ fontSize: 10, color: monthSt.status === 'partial' ? "var(--orange)" : "var(--text3)", fontWeight: 700 }}>
@@ -897,7 +902,8 @@ export default function StaffPage() {
                   )}
                   {canEdit && (
                     <TD sticky right>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "flex-end" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, justifyContent: "flex-end", flexWrap: "wrap" }}>
+                        <IconBtn name="edit" onClick={() => handleEdit(s)} variant="secondary" title="Edit Staff" />
                         {(monthSt.status === 'partial' || monthSt.status === 'active') && (
                           <button type="button"
                             onClick={() => setAttendanceModal({ staff: s, month: filterMode === "month" ? filterPrefix : `${filterYear}-${String(NOW.getMonth() + 1).padStart(2, "0")}` })}
@@ -906,26 +912,18 @@ export default function StaffPage() {
                         )}
                         {!isAccountant && <IconBtn name="log" onClick={() => setHistoryModal(s)} variant="secondary" title="History Log" />}
                         {overall === 'active' && (
-                          activeTransfer ? (
-                            <>
-                              <button onClick={() => handleEndTransfer(activeTransfer)} title="Return to home branch"
-                                style={{ padding: "6px 10px", borderRadius: 8, background: "var(--green-bg)", border: "1px solid rgba(74,222,128,0.3)", color: "var(--green)", fontSize: 11, fontWeight: 800, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>
-                                ↩ Return
-                              </button>
-                              <button onClick={() => openTransfer(s)} title="Transfer to another branch"
-                                style={{ padding: "6px 10px", borderRadius: 8, background: "rgba(96,165,250,0.12)", border: "1px solid rgba(96,165,250,0.3)", color: "var(--blue, #60a5fa)", fontSize: 11, fontWeight: 800, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>
-                                ↪ Transfer
-                              </button>
-                            </>
-                          ) : (
-                            <button onClick={() => openTransfer(s)} title="Transfer to another branch"
-                              style={{ padding: "6px 10px", borderRadius: 8, background: "rgba(96,165,250,0.12)", border: "1px solid rgba(96,165,250,0.3)", color: "var(--blue, #60a5fa)", fontSize: 11, fontWeight: 800, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>
-                              ↪ Transfer
-                            </button>
-                          )
+                          <button onClick={() => openTransfer(s)} title="Transfer to another branch"
+                            style={{ padding: "6px 10px", borderRadius: 8, background: "rgba(96,165,250,0.12)", border: "1px solid rgba(96,165,250,0.3)", color: "var(--blue, #60a5fa)", fontSize: 11, fontWeight: 800, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>
+                            ↪ Transfer
+                          </button>
+                        )}
+                        {overall === 'active' && activeTransfer && (
+                          <button onClick={() => handleEndTransfer(activeTransfer)} title="Return to home branch"
+                            style={{ padding: "6px 10px", borderRadius: 8, background: "var(--green-bg)", border: "1px solid rgba(74,222,128,0.3)", color: "var(--green)", fontSize: 11, fontWeight: 800, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>
+                            ↩ Return
+                          </button>
                         )}
                         <IconBtn name={overall === 'active' ? 'close' : 'check'} onClick={() => handleToggleStatus(s, !(overall === 'active'))} variant={overall === 'active' ? 'danger' : 'success'} title={overall === 'active' ? "Mark as Exited" : "Activate"} />
-                        <IconBtn name="edit" onClick={() => handleEdit(s)} variant="secondary" title="Edit Staff" />
                         {!isAccountant && <IconBtn name="del" onClick={() => handleDelete(s.id)} variant="danger" title="Delete" />}
                       </div>
                     </TD>
