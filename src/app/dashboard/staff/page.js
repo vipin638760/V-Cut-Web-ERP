@@ -637,7 +637,11 @@ export default function StaffPage() {
                 {days.map(dateStr => {
                   const st = dayStatus(dateStr);
                   const isFuture = dateStr > todayStr;
-                  const effectiveKind = isFuture && st.kind === "absent" ? "future" : st.kind;
+                  const isBeforeJoin = st.kind === "before";
+                  const isAfterExit = st.kind === "after";
+                  const isJoinDay = joinDate && dateStr === joinDate;
+                  const isInactive = isFuture && st.kind === "absent" || isBeforeJoin || isAfterExit;
+                  const effectiveKind = isInactive ? (isBeforeJoin ? "before" : isAfterExit ? "after" : "future") : st.kind;
                   const c = colorFor(effectiveKind);
                   const isToday = dateStr === todayStr;
                   const bName = st.branch_id ? short(st.branch_id) : "";
@@ -645,18 +649,18 @@ export default function StaffPage() {
                   const branchDot = st.kind === "present" && st.branch_id ? branchColour.get(st.branch_id) : null;
                   return (
                     <button key={dateStr}
-                      disabled={!canEdit || effectiveKind === "future"}
-                      onClick={() => { if (effectiveKind === "future") return; setEditingDay(dateStr); setDayDraft({ present: st.kind === "present" || st.kind === "leave" ? (st.kind === "present") : false, branch_id: st.branch_id || s.branch_id || "", note: st.note || "" }); }}
+                      disabled={!canEdit || isInactive}
+                      onClick={() => { if (isInactive) return; setEditingDay(dateStr); setDayDraft({ present: st.kind === "present" || st.kind === "leave" ? (st.kind === "present") : false, branch_id: st.branch_id || s.branch_id || "", note: st.note || "" }); }}
                       style={{
                         position: "relative",
                         aspectRatio: "1 / 1",
                         padding: 6,
                         borderRadius: 10,
-                        background: effectiveKind === "future" ? "transparent" : c.bg,
-                        border: isToday ? "2px solid var(--accent)" : branchDot ? `2px solid ${branchDot}` : `1px solid ${c.border}`,
-                        color: effectiveKind === "future" ? "var(--text3)" : c.text,
-                        cursor: effectiveKind === "future" ? "default" : canEdit ? "pointer" : "default",
-                        opacity: effectiveKind === "future" ? 0.35 : 1,
+                        background: isInactive ? "transparent" : c.bg,
+                        border: isToday ? "2px solid var(--accent)" : isJoinDay ? "2px solid var(--green)" : branchDot ? `2px solid ${branchDot}` : `1px solid ${c.border}`,
+                        color: isInactive ? "var(--text3)" : c.text,
+                        cursor: isInactive ? "default" : canEdit ? "pointer" : "default",
+                        opacity: isBeforeJoin || isAfterExit ? 0.25 : isFuture && st.kind === "absent" ? 0.35 : 1,
                         display: "flex",
                         flexDirection: "column",
                         alignItems: "flex-start",
@@ -669,9 +673,10 @@ export default function StaffPage() {
                           {hasOverride && <span title="Manually edited" style={{ fontSize: 8, color: "var(--accent)" }}>✎</span>}
                         </div>
                       </div>
-                      {bName && effectiveKind !== "future" && <div style={{ fontSize: 9, fontWeight: 800, color: branchDot || c.text, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%" }}>{bName}</div>}
+                      {isJoinDay && <div style={{ fontSize: 8, fontWeight: 800, color: "#4ade80", textTransform: "uppercase", letterSpacing: 0.5 }}>JOINED</div>}
+                      {bName && !isInactive && <div style={{ fontSize: 9, fontWeight: 800, color: branchDot || c.text, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%" }}>{bName}</div>}
                       {st.kind === "leave" && <div style={{ fontSize: 9, fontWeight: 800, color: "#60a5fa" }}>LEAVE</div>}
-                      {st.kind === "absent" && !isFuture && st.source === "default" && <div style={{ fontSize: 9, fontWeight: 700, opacity: 0.75 }}>—</div>}
+                      {st.kind === "absent" && !isFuture && !isBeforeJoin && !isAfterExit && st.source === "default" && <div style={{ fontSize: 9, fontWeight: 700, opacity: 0.75 }}>—</div>}
                     </button>
                   );
                 })}
