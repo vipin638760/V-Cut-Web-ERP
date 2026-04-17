@@ -340,25 +340,15 @@ export default function EntryPage() {
       const billing = field === "billing" ? Number(value) : (row.billing || 0);
       const material = field === "material" ? Number(value) : (row.material || 0);
       const tips = field === "tips" ? Number(value) : (row.tips || 0);
-      const s = staff.find(x => x.id === sid);
-      const b = branchesById.get(selBranch);
-      
-      // Global division-based incentive rate
-      let incRateRaw = 10;
-      if (globalSettings) {
-        if (b?.type === 'unisex') incRateRaw = globalSettings.unisex_inc ?? 10;
-        else incRateRaw = globalSettings.mens_inc ?? 10;
-      } else if (s?.incentive_pct !== undefined) {
-        incRateRaw = s.incentive_pct;
-      }
-      
-      const incPct = incRateRaw / 100;
+
+      // Staff profile rate first, then global branch rate
+      const incPct = staffIncRate(sid) / 100;
       const matPct = 0.05;
-      
+
       const incentive = field === "billing"
-        ? Math.round(billing * incPct)
-        : Math.round((field === "incentive" ? Number(value) : (row.incentive !== undefined ? Number(row.incentive) || 0 : Math.round(billing * incPct))) || 0);
-      const mat_incentive = Math.round(material * matPct);
+        ? ceilTo10(billing * incPct)
+        : (field === "incentive" ? ceilTo10(Number(value) || 0) : (row.incentive !== undefined ? Number(row.incentive) || 0 : ceilTo10(billing * incPct)));
+      const mat_incentive = ceilTo10(material * matPct);
 
       const staffTotalInc = Math.round(incentive + mat_incentive + tips);
 
