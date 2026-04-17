@@ -452,7 +452,7 @@ export default function EntryPage() {
   }, [staffRows]);
 
   // Cash drawer balance: only deduct incentives that were actually taken (ticked)
-  const cashInHand = totalCash + tipsInCash - tipsPaidCash - totalIncentiveTaken - (Number(otherExp) || 0) - (Number(petrol) || 0);
+  const cashInHand = totalCash + tipsInCash - tipsPaidCash - totalIncentiveTaken - (Number(otherExp) || 0) - dailyExpTotal;
 
   // Reconciliation: actual counted cash vs expected cash-in-hand
   const actualCashNum = actualCash === "" ? null : Number(actualCash);
@@ -569,7 +569,7 @@ export default function EntryPage() {
         cash: totalCash,
         mat_expense: Number(matExp) || 0,
         others: Number(otherExp) || 0,
-        petrol: Number(petrol) || 0,
+        petrol: 0, // now tracked via daily_expenses
         cash_in_hand: cashInHand,
         staff_billing: [
           ...branchStaff.map(s => {
@@ -689,7 +689,7 @@ export default function EntryPage() {
       }
 
       // Clear form
-      setSelBranch(""); setOnlineInc(""); setMatExp(""); setOtherExp(""); setPetrol(""); setActualCash("");
+      setSelBranch(""); setOnlineInc(""); setMatExp(""); setOtherExp(""); setActualCash("");
       setStaffRows({});
       setLoanStaffIds(new Set());
       setSharedServices([]);
@@ -1303,7 +1303,7 @@ export default function EntryPage() {
           {/* Branch + Date */}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(200px,1fr))", gap: 12, marginBottom: 16 }}>
             <FG label="Branch">
-              <select value={selBranch} onChange={e => { setSelBranch(e.target.value); setStaffRows({}); setLoanStaffIds(new Set()); setSharedServices([]); setOnlineInc(""); setMatExp(""); setOtherExp(""); setPetrol(""); setEditId(null); if(!editId) setGstPct(globalGst); }}>
+              <select value={selBranch} onChange={e => { setSelBranch(e.target.value); setStaffRows({}); setLoanStaffIds(new Set()); setSharedServices([]); setOnlineInc(""); setMatExp(""); setOtherExp(""); setEditId(null); if(!editId) setGstPct(globalGst); }}>
                 <option value="">Select branch...</option>
                 {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
               </select>
@@ -1683,7 +1683,7 @@ export default function EntryPage() {
                     </div>
                   )}
                 </FG>
-                <FG label="Petrol / Travel (₹)" expense><input type="number" placeholder="0" min="0" value={petrol} onChange={e => setPetrol(e.target.value)} /></FG>
+                {/* Petrol removed — now tracked via Daily Expenses page */}
                 <FG label="Cash in Hand (Expected)">
                   <div style={{ padding: "12px 16px", borderRadius: 10, border: `2px solid ${cashInHand >= 0 ? "var(--green)" : "var(--red)"}`, background: "var(--bg3)", fontSize: 18, fontWeight: 700, color: cashInHand >= 0 ? "var(--green)" : "var(--red)" }}>{INR(cashInHand)}</div>
                 </FG>
@@ -1742,7 +1742,7 @@ export default function EntryPage() {
                   <Icon name="save" size={16} />
                   {saving ? "Saving..." : editId ? "Update Entry" : "Save to Database"}
                 </button>
-                <button type="button" onClick={() => { setSelBranch(""); setOnlineInc(""); setMatExp(""); setOtherExp(""); setPetrol(""); setStaffRows({}); setLoanStaffIds(new Set()); setSharedServices([]); setSaveStatus(""); setEditId(null); }}
+                <button type="button" onClick={() => { setSelBranch(""); setOnlineInc(""); setMatExp(""); setOtherExp(""); setStaffRows({}); setLoanStaffIds(new Set()); setSharedServices([]); setSaveStatus(""); setEditId(null); }}
                   style={{ padding: "10px 18px", borderRadius: 10, fontSize: 13, background: "var(--bg4)", color: "var(--text2)", border: "1px solid var(--border2)", cursor: "pointer", fontWeight: 600 }}>
                   {editId ? "Cancel Edit" : "Clear"}
                 </button>
