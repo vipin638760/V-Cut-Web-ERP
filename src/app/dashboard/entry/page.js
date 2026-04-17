@@ -1367,7 +1367,7 @@ export default function EntryPage() {
                   <table style={{ width: "100%", minWidth: 1100, borderCollapse: "collapse" }}>
                     <thead>
                       <tr style={{ background: "var(--bg4)" }}>
-                        {["Present", "Staff", "Billing (₹)", "Shared Sale", "Net Billing", "Mat Sale", "Mat Inc (5%auto)", "Incentive", "Shared Inc", "Tips (₹)", "Tip In/Out", "Staff Total Inc", "Staff Total"].map((h, i) => (
+                        {["Present", "Staff", "Billing (₹)", "Shared Sale", "Individual Billing", "Mat Sale", "Mat Inc (5%auto)", "Incentive", "Shared Inc", "Tips (₹)", "Tip In/Out", "Staff Total Inc", "Staff Total"].map((h, i) => (
                           <th key={i} style={{ textAlign: i === 0 || i === 1 ? "left" : "right", padding: "10px 14px", fontSize: 11, fontWeight: 700, color: "var(--text2)", textTransform: "uppercase", letterSpacing: 1, borderBottom: "2px solid var(--gold)", whiteSpace: "nowrap" }}>{h}</th>
                         ))}
                       </tr>
