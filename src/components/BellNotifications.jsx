@@ -16,19 +16,40 @@ export default function BellNotifications({ currentUser }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef(null);
 
+  // Original approvals subscription (known working)
   useEffect(() => {
     if (!db) return;
-    const unsubs = [];
-    const safeSub = (q, setter) => {
-      try {
-        unsubs.push(onSnapshot(q, sn => setter(sn.docs.map(d => ({ ...d.data(), id: d.id }))), () => {}));
-      } catch { /* collection may not exist yet */ }
-    };
-    safeSub(query(collection(db, "approvals"), where("status", "==", "pending")), list => setApprovals(list.map(d => ({ ...d, _kind: "approval" }))));
-    safeSub(query(collection(db, "leaves"), where("status", "==", "pending")), list => setPendingLeaves(list.map(d => ({ ...d, _kind: "leave" }))));
-    safeSub(query(collection(db, "staff"), where("pending_setup", "==", true)), list => setPendingStaff(list.map(d => ({ ...d, _kind: "staff_setup" }))));
-    safeSub(query(collection(db, "staff_advances"), where("status", "==", "pending")), list => setPendingAdvances(list.map(d => ({ ...d, _kind: "advance" }))));
-    return () => unsubs.forEach(u => u());
+    const q = query(collection(db, "approvals"), where("status", "==", "pending"));
+    const unsub = onSnapshot(q, sn => {
+      setApprovals(sn.docs.map(d => ({ ...d.data(), id: d.id, _kind: "approval" })));
+    });
+    return () => unsub();
+  }, []);
+
+  // Additional subscriptions — each in its own useEffect so a failure in one doesn't block others
+  useEffect(() => {
+    if (!db) return;
+    try {
+      const q = query(collection(db, "leaves"), where("status", "==", "pending"));
+      const unsub = onSnapshot(q, sn => setPendingLeaves(sn.docs.map(d => ({ ...d.data(), id: d.id, _kind: "leave" }))), () => {});
+      return () => unsub();
+    } catch { return; }
+  }, []);
+  useEffect(() => {
+    if (!db) return;
+    try {
+      const q = query(collection(db, "staff"), where("pending_setup", "==", true));
+      const unsub = onSnapshot(q, sn => setPendingStaff(sn.docs.map(d => ({ ...d.data(), id: d.id, _kind: "staff_setup" }))), () => {});
+      return () => unsub();
+    } catch { return; }
+  }, []);
+  useEffect(() => {
+    if (!db) return;
+    try {
+      const q = query(collection(db, "staff_advances"), where("status", "==", "pending"));
+      const unsub = onSnapshot(q, sn => setPendingAdvances(sn.docs.map(d => ({ ...d.data(), id: d.id, _kind: "advance" }))), () => {});
+      return () => unsub();
+    } catch { return; }
   }, []);
 
   useEffect(() => {
