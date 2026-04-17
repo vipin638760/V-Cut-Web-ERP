@@ -1163,10 +1163,10 @@ export default function MaterialMasterPage() {
           const active = sort.key === k;
           const arrow = !active ? "↕" : sort.dir === "asc" ? "↑" : "↓";
           return (
-            <TH right={right} style={{ cursor: "pointer", userSelect: "none" }} onClick={() => toggleSort(k)}>
-              <span style={{ display: "inline-flex", alignItems: "center", gap: 6, color: active ? "var(--accent)" : undefined }}>
+            <TH right={right} style={{ cursor: "pointer", userSelect: "none", fontWeight: 900, letterSpacing: 0.5, textTransform: "uppercase", fontSize: 10 }} onClick={() => toggleSort(k)}>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 6, color: active ? "var(--accent)" : "var(--text2)" }}>
                 {children}
-                <span style={{ fontSize: 10, opacity: active ? 1 : 0.4 }}>{arrow}</span>
+                <span style={{ fontSize: 9, opacity: active ? 1 : 0.35 }}>{arrow}</span>
               </span>
             </TH>
           );
@@ -1273,14 +1273,14 @@ export default function MaterialMasterPage() {
                 </button>
               </div>
               <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 13 }}>
-                <thead>
+                <thead style={{ background: "linear-gradient(135deg, var(--bg4) 0%, rgba(0,188,212,0.10) 50%, var(--bg4) 100%)", boxShadow: "inset 0 -2px 0 var(--accent)" }}>
                   <tr>
                     {isAdmin && (
-                      <TH style={{ width: 36 }}>
+                      <TH style={{ width: 36, fontWeight: 900, letterSpacing: 0.5, textTransform: "uppercase", fontSize: 10, color: "var(--accent)" }}>
                         <input type="checkbox" checked={allSelected} ref={el => { if (el) el.indeterminate = !allSelected && someSelected; }} onChange={toggleAll} style={{ cursor: "pointer", accentColor: "var(--red)" }} />
                       </TH>
                     )}
-                    <TH style={{ width: 40 }}>#</TH>
+                    <TH style={{ width: 40, fontWeight: 900, letterSpacing: 0.5, textTransform: "uppercase", fontSize: 10, color: "var(--accent)" }}>#</TH>
                     <SortableTH k="name">Material</SortableTH>
                     <SortableTH k="group">Group</SortableTH>
                     <SortableTH k="unit">Unit</SortableTH>
@@ -1291,7 +1291,7 @@ export default function MaterialMasterPage() {
                     <SortableTH k="base_price" right>Base Price</SortableTH>
                     <SortableTH k="current_price" right>Price (incl. GST)</SortableTH>
                     <SortableTH k="last_updated">Last Updated</SortableTH>
-                    <TH right style={{ width: 80 }}>History</TH>
+                    <TH right style={{ width: 80, fontWeight: 900, letterSpacing: 0.5, textTransform: "uppercase", fontSize: 10, color: "var(--accent)" }}>History</TH>
                   </tr>
                 </thead>
                 <tbody>
