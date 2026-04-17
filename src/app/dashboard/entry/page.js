@@ -1367,10 +1367,10 @@ export default function EntryPage() {
               )}
               {tableStaff.length > 0 ? (
                 <div style={{ overflowX: "auto", marginBottom: 16 }}>
-                  <table style={{ width: "100%", minWidth: 900, borderCollapse: "collapse" }}>
+                  <table style={{ width: "100%", minWidth: 1100, borderCollapse: "collapse" }}>
                     <thead>
                       <tr style={{ background: "var(--bg4)" }}>
-                        {["Present", "Staff", "Billing (₹)", "Mat Sale", "Mat Inc (5%auto)", "Incentive", "Tips (₹)", "Tip In/Out", "Staff Total Inc", "Staff Total"].map((h, i) => (
+                        {["Present", "Staff", "Billing (₹)", "Shared Sale", "Net Billing", "Mat Sale", "Mat Inc (5%auto)", "Incentive", "Shared Inc", "Tips (₹)", "Tip In/Out", "Staff Total Inc", "Staff Total"].map((h, i) => (
                           <th key={i} style={{ textAlign: i === 0 || i === 1 ? "left" : "right", padding: "10px 14px", fontSize: 11, fontWeight: 700, color: "var(--text2)", textTransform: "uppercase", letterSpacing: 1, borderBottom: "2px solid var(--gold)", whiteSpace: "nowrap" }}>{h}</th>
                         ))}
                       </tr>
@@ -1413,7 +1413,12 @@ export default function EntryPage() {
                             </td>
                             <td style={{ padding: "6px 14px", textAlign: "right", ...disabledStyle }}>
                               <input type="number" placeholder="0" min="0" disabled={!isPresent} value={r.billing || ""} onChange={e => updateStaffRow(s.id, "billing", e.target.value)} style={{ ...inp, borderColor: "var(--green)" }} onFocus={e => e.target.style.borderColor = "var(--gold)"} onBlur={e => e.target.style.borderColor = "var(--green)"} />
-                              {shBilling > 0 && <div style={{ fontSize: 9, color: "var(--blue, #60a5fa)", fontWeight: 700, marginTop: 2 }}>+{INR(shBilling)} shared</div>}
+                            </td>
+                            <td style={{ padding: "6px 14px", textAlign: "right", fontWeight: 700, color: shBilling > 0 ? "var(--blue, #60a5fa)" : "var(--text3)", fontSize: 12 }}>
+                              {shBilling > 0 ? INR(shBilling) : "—"}
+                            </td>
+                            <td style={{ padding: "6px 14px", textAlign: "right", fontWeight: 800, color: "var(--accent)", fontSize: 13 }}>
+                              {INR((Number(r.billing) || 0) + shBilling)}
                             </td>
                             <td style={{ padding: "6px 14px", textAlign: "right", ...disabledStyle }}>
                               <input type="number" placeholder="0" min="0" disabled={!isPresent} value={r.material || ""} onChange={e => updateStaffRow(s.id, "material", e.target.value)} style={{ ...inp, borderColor: "var(--green)", color: "var(--green)", fontWeight: 600 }} onFocus={e => e.target.style.borderColor = "var(--gold)"} onBlur={e => e.target.style.borderColor = "var(--green)"} />
@@ -1423,7 +1428,9 @@ export default function EntryPage() {
                             </td>
                             <td style={{ padding: "6px 14px", textAlign: "right" }}>
                               <input type="text" readOnly value={INR(inc)} title="Auto-calculated (Incentive %)" style={{ ...inp, borderColor: "var(--red)", background: "rgba(255,255,255,0.03)", color: "var(--red)", cursor: "not-allowed", fontWeight: 700 }} />
-                              {shIncentive > 0 && <div style={{ fontSize: 9, color: "var(--blue, #60a5fa)", fontWeight: 700, marginTop: 2 }}>+{INR(shIncentive)} shared</div>}
+                            </td>
+                            <td style={{ padding: "6px 14px", textAlign: "right", fontWeight: 700, color: shIncentive > 0 ? "var(--blue, #60a5fa)" : "var(--text3)", fontSize: 12 }}>
+                              {shIncentive > 0 ? INR(shIncentive) : "—"}
                             </td>
                             <td style={{ padding: "6px 14px", textAlign: "right", ...disabledStyle }}>
                               <input type="number" placeholder="0" min="0" disabled={!isPresent} value={r.tips || ""} onChange={e => updateStaffRow(s.id, "tips", e.target.value)} style={{ ...inp, borderColor: "var(--red)", color: "var(--red)", fontWeight: 600 }} onFocus={e => e.target.style.borderColor = "var(--gold)"} onBlur={e => e.target.style.borderColor = "var(--red)"} />
@@ -1450,10 +1457,13 @@ export default function EntryPage() {
                       <tr style={{ background: "var(--bg3)", fontWeight: 700, color: "var(--gold)", borderTop: "2px solid var(--border2)" }}>
                         <td style={{ padding: "10px 14px" }}></td>
                         <td style={{ padding: "10px 14px" }}>TOTALS</td>
-                        <td style={{ padding: "10px 14px", textAlign: "right", color: "var(--green)" }}>{INR(totalBilling)}</td>
+                        <td style={{ padding: "10px 14px", textAlign: "right", color: "var(--green)" }}>{INR(totalBilling - sharedContributions.totalBilling)}</td>
+                        <td style={{ padding: "10px 14px", textAlign: "right", color: "var(--blue, #60a5fa)" }}>{sharedContributions.totalBilling > 0 ? INR(sharedContributions.totalBilling) : "—"}</td>
+                        <td style={{ padding: "10px 14px", textAlign: "right", color: "var(--accent)", fontWeight: 800 }}>{INR(totalBilling)}</td>
                         <td style={{ padding: "10px 14px", textAlign: "right", color: "var(--green)" }}>{INR(totalMatSale)}</td>
                         <td style={{ padding: "10px 14px", textAlign: "right", color: "var(--text3)" }}></td>
-                        <td style={{ padding: "10px 14px", textAlign: "right", color: "var(--red)" }}>{INR(totalIncentive - totalTips)}</td>
+                        <td style={{ padding: "10px 14px", textAlign: "right", color: "var(--red)" }}>{INR(totalIncentive - totalTips - sharedContributions.totalIncentive)}</td>
+                        <td style={{ padding: "10px 14px", textAlign: "right", color: "var(--blue, #60a5fa)" }}>{sharedContributions.totalIncentive > 0 ? INR(sharedContributions.totalIncentive) : "—"}</td>
                         <td style={{ padding: "10px 14px", textAlign: "right", color: "var(--red)" }}>{INR(totalTips)}</td>
                         <td style={{ padding: "10px 14px", textAlign: "right", color: "var(--text3)", fontSize: 10 }}>cash↑ {INR(tipsInCash)} • cash↓ {INR(tipsPaidCash)}</td>
                         <td style={{ padding: "10px 14px", textAlign: "right", color: "var(--gold)" }}>{INR(totalStaffIncCombined)}</td>
@@ -1487,8 +1497,8 @@ export default function EntryPage() {
                       <table style={{ width: "100%", minWidth: 700, borderCollapse: "collapse", fontSize: 12 }}>
                         <thead>
                           <tr style={{ background: "var(--bg4)" }}>
-                            {["Service", "Amount", "Sale To", "Incentive To", "Incentive Breakdown", ""].map((h, i) => (
-                              <th key={i} style={{ textAlign: i === 1 || i === 4 ? "right" : "left", padding: "8px 12px", fontSize: 10, fontWeight: 700, color: "var(--text2)", textTransform: "uppercase", letterSpacing: 1, borderBottom: "2px solid var(--blue, #60a5fa)", whiteSpace: "nowrap" }}>{h}</th>
+                            {["Sale Amount", "Sale To", "Incentive To", "Incentive Breakdown", ""].map((h, i) => (
+                              <th key={i} style={{ textAlign: i === 0 || i === 3 ? "right" : "left", padding: "8px 12px", fontSize: 10, fontWeight: 700, color: "var(--text2)", textTransform: "uppercase", letterSpacing: 1, borderBottom: "2px solid var(--blue, #60a5fa)", whiteSpace: "nowrap" }}>{h}</th>
                             ))}
                           </tr>
                         </thead>
@@ -1507,8 +1517,7 @@ export default function EntryPage() {
                             const totalInc = incBreakdown.reduce((s, x) => s + x.inc, 0);
                             return (
                               <tr key={ss.id || idx} style={{ borderBottom: "1px solid var(--border)" }}>
-                                <td style={{ padding: "8px 12px", fontWeight: 600 }}>{ss.service_name || "—"}</td>
-                                <td style={{ padding: "8px 12px", textAlign: "right", fontWeight: 700, color: "var(--accent)" }}>{INR(Number(ss.amount) || 0)}</td>
+                                <td style={{ padding: "8px 12px", textAlign: "right", fontWeight: 700, color: "var(--accent)", fontSize: 14 }}>{INR(Number(ss.amount) || 0)}</td>
                                 <td style={{ padding: "8px 12px" }}>
                                   <span style={{ padding: "2px 8px", borderRadius: 6, background: "rgba(74,222,128,0.12)", border: "1px solid rgba(74,222,128,0.3)", color: "var(--green)", fontSize: 10, fontWeight: 700 }}>
                                     {saleStaff?.name || "—"}
@@ -1542,21 +1551,16 @@ export default function EntryPage() {
                   {sharedForm && (
                     <div style={{ padding: 16, borderRadius: 12, background: "var(--bg3)", border: "1px solid var(--border2)", marginBottom: 12 }}>
                       <div style={{ fontSize: 13, fontWeight: 800, color: "var(--text)", marginBottom: 12 }}>Add Shared Service</div>
-                      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 2fr", gap: 12, marginBottom: 12 }}>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 12, marginBottom: 12 }}>
                         <div>
-                          <label style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Service Name</label>
-                          <input type="text" placeholder="e.g. Facial, Massage" value={sharedForm.service_name} onChange={e => setSharedForm(f => ({ ...f, service_name: e.target.value }))}
-                            style={{ width: "100%", padding: "8px 12px", borderRadius: 8, background: "var(--bg4)", border: "1px solid var(--border2)", color: "var(--text)", fontSize: 13, outline: "none", marginTop: 4 }} />
+                          <label style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Sale Amount (₹)</label>
+                          <input type="number" placeholder="0" min="0" value={sharedForm.amount} onChange={e => setSharedForm(f => ({ ...f, amount: e.target.value }))} autoFocus
+                            style={{ width: "100%", padding: "10px 14px", borderRadius: 8, background: "var(--bg4)", border: "2px solid var(--accent)", color: "var(--accent)", fontSize: 16, fontWeight: 800, outline: "none", marginTop: 4 }} />
                         </div>
                         <div>
-                          <label style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Amount (₹)</label>
-                          <input type="number" placeholder="0" min="0" value={sharedForm.amount} onChange={e => setSharedForm(f => ({ ...f, amount: e.target.value }))}
-                            style={{ width: "100%", padding: "8px 12px", borderRadius: 8, background: "var(--bg4)", border: "1px solid var(--accent)", color: "var(--accent)", fontSize: 13, fontWeight: 700, outline: "none", marginTop: 4 }} />
-                        </div>
-                        <div>
-                          <label style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Sale Tagged To</label>
+                          <label style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Sale Tagged To (billing credit)</label>
                           <select value={sharedForm.sale_staff_id} onChange={e => setSharedForm(f => ({ ...f, sale_staff_id: e.target.value }))}
-                            style={{ width: "100%", padding: "8px 12px", borderRadius: 8, background: "var(--bg4)", border: "1px solid var(--green)", color: "var(--text)", fontSize: 13, outline: "none", marginTop: 4 }}>
+                            style={{ width: "100%", padding: "10px 14px", borderRadius: 8, background: "var(--bg4)", border: "2px solid var(--green)", color: "var(--text)", fontSize: 13, fontWeight: 600, outline: "none", marginTop: 4 }}>
                             <option value="">Select staff…</option>
                             {tableStaff.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                           </select>
