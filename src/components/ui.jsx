@@ -311,11 +311,17 @@ export function Modal({ isOpen, onClose, title, children, width }) {
 // ── Confirm Dialog (replaces browser confirm/alert) ──
 export function useConfirm() {
   const [state, setState] = useState(null);
+  const [busy, setBusy] = useState(false);
   const confirm = ({ title, message, confirmText, cancelText, type, onConfirm }) => {
     setState({ title, message, confirmText: confirmText || "Confirm", cancelText: cancelText || "Cancel", type: type || "danger", onConfirm, resolve: null });
   };
-  const close = () => setState(null);
-  const handleConfirm = () => { state?.onConfirm?.(); close(); };
+  const close = () => { setState(null); setBusy(false); };
+  const handleConfirm = async () => {
+    if (busy) return;
+    setBusy(true);
+    try { await state?.onConfirm?.(); } catch { /* handler has its own error handling */ }
+    close();
+  };
 
   const ConfirmDialog = state ? (
     <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.55)", backdropFilter: "blur(6px)", zIndex: 1100, display: "flex", justifyContent: "center", alignItems: "center", padding: "16px" }}>
@@ -345,22 +351,23 @@ export function useConfirm() {
         <div style={{ padding: "0 24px 20px", fontSize: 13, color: "var(--text3)", textAlign: "center", lineHeight: 1.6 }} dangerouslySetInnerHTML={{ __html: state.message }} />
         {/* Actions */}
         <div style={{ padding: "0 24px 24px", display: "flex", gap: 10 }}>
-          <button onClick={close}
-            style={{ flex: 1, padding: "12px 0", borderRadius: 10, background: "var(--bg4)", color: "var(--text3)", border: "none", fontWeight: 600, fontSize: 13, cursor: "pointer", transition: "all .2s" }}>
+          <button onClick={close} disabled={busy}
+            style={{ flex: 1, padding: "12px 0", borderRadius: 10, background: "var(--bg4)", color: "var(--text3)", border: "none", fontWeight: 600, fontSize: 13, cursor: busy ? "not-allowed" : "pointer", transition: "all .2s", opacity: busy ? 0.5 : 1 }}>
             {state.cancelText}
           </button>
-          <button onClick={handleConfirm}
+          <button onClick={handleConfirm} disabled={busy}
             style={{
-              flex: 1, padding: "12px 0", borderRadius: 10, border: "none", fontWeight: 700, fontSize: 13, cursor: "pointer", transition: "all .2s",
+              flex: 1, padding: "12px 0", borderRadius: 10, border: "none", fontWeight: 700, fontSize: 13, cursor: busy ? "wait" : "pointer", transition: "all .2s", opacity: busy ? 0.7 : 1,
               background: state.type === 'danger' ? 'linear-gradient(135deg, #ef4444, #dc2626)' : state.type === 'warning' ? 'linear-gradient(135deg, #f59e0b, #d97706)' : state.type === 'success' ? 'linear-gradient(135deg, #22c55e, #16a34a)' : 'linear-gradient(135deg, var(--accent), var(--gold2))',
               color: state.type === 'danger' || state.type === 'success' ? '#fff' : '#000'
             }}>
-            {state.confirmText}
+            {busy ? "Working…" : state.confirmText}
           </button>
         </div>
       </div>
     </div>
   ) : null;
+
 
   return { confirm, ConfirmDialog };
 }

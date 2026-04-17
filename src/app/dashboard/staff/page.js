@@ -40,6 +40,7 @@ export default function StaffPage() {
   const [branchFilter, setBranchFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("active");
   const [branchTypeFilter, setBranchTypeFilter] = useState("all"); // all | mens | unisex — based on branch.type
+  const [staffSearch, setStaffSearch] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState(null);
 
@@ -116,6 +117,11 @@ export default function StaffPage() {
   }
   // For admin, hide pending-setup staff from the main table (they appear in the Pending Setup section above)
   if (isAdmin) filtered = filtered.filter(s => !s.pending_setup);
+  // Text search by name or mobile
+  if (staffSearch.trim()) {
+    const q = staffSearch.trim().toLowerCase();
+    filtered = filtered.filter(s => (s.name || "").toLowerCase().includes(q) || (s.mobile || "").includes(q));
+  }
 
   const totalActive = staff.filter(s => staffOverallStatus(s, statusRefMon) === "active").length;
   const totalInactive = staff.filter(s => staffOverallStatus(s, statusRefMon) !== "active").length;
@@ -273,6 +279,16 @@ export default function StaffPage() {
 
     const toBranch = branches.find(b => b.id === transferForm.to_branch_id);
     try {
+      // End any active transfer before creating a new one
+      const existingTransfer = getActiveTransfer(transferModal.id);
+      if (existingTransfer) {
+        await updateDoc(doc(db, "staff_transfers", existingTransfer.id), {
+          status: "completed",
+          end_date: todayStr,
+          ended_by: currentUser?.name || "user",
+          ended_at: new Date().toISOString(),
+        });
+      }
       await addDoc(collection(db, "staff_transfers"), {
         staff_id: transferModal.id,
         staff_name: transferModal.name,
@@ -353,6 +369,11 @@ export default function StaffPage() {
 
       {/* Filters & Controls */}
       <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid var(--border)", borderRadius: 16, padding: 12, marginBottom: 16, display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
+        <div style={{ position: "relative", minWidth: 200 }}>
+          <input type="text" placeholder="Search staff name or mobile…" value={staffSearch} onChange={e => setStaffSearch(e.target.value)}
+            style={{ padding: "8px 12px 8px 32px", border: "1px solid var(--border2)", borderRadius: 10, fontSize: 13, background: "var(--bg3)", color: "var(--text)", width: "100%", outline: "none" }} />
+          <span style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "var(--text3)", fontSize: 14, pointerEvents: "none" }}>🔍</span>
+        </div>
         <select value={branchFilter} onChange={e => setBranchFilter(e.target.value)}
           style={{ padding: "8px 12px", border: "1px solid var(--border2)", borderRadius: 10, fontSize: 13, background: "var(--bg3)", color: "var(--text)", minWidth: 160 }}>
           <option value="">All Branches</option>
@@ -878,10 +899,16 @@ export default function StaffPage() {
                         {!isAccountant && <IconBtn name="log" onClick={() => setHistoryModal(s)} variant="secondary" title="History Log" />}
                         {overall === 'active' && (
                           activeTransfer ? (
-                            <button onClick={() => handleEndTransfer(activeTransfer)} title="Return to home branch"
-                              style={{ padding: "6px 10px", borderRadius: 8, background: "var(--green-bg)", border: "1px solid rgba(74,222,128,0.3)", color: "var(--green)", fontSize: 11, fontWeight: 800, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>
-                              ↩ Return
-                            </button>
+                            <>
+                              <button onClick={() => handleEndTransfer(activeTransfer)} title="Return to home branch"
+                                style={{ padding: "6px 10px", borderRadius: 8, background: "var(--green-bg)", border: "1px solid rgba(74,222,128,0.3)", color: "var(--green)", fontSize: 11, fontWeight: 800, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>
+                                ↩ Return
+                              </button>
+                              <button onClick={() => openTransfer(s)} title="Transfer to another branch"
+                                style={{ padding: "6px 10px", borderRadius: 8, background: "rgba(96,165,250,0.12)", border: "1px solid rgba(96,165,250,0.3)", color: "var(--blue, #60a5fa)", fontSize: 11, fontWeight: 800, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>
+                                ↪ Transfer
+                              </button>
+                            </>
                           ) : (
                             <button onClick={() => openTransfer(s)} title="Transfer to another branch"
                               style={{ padding: "6px 10px", borderRadius: 8, background: "rgba(96,165,250,0.12)", border: "1px solid rgba(96,165,250,0.3)", color: "var(--blue, #60a5fa)", fontSize: 11, fontWeight: 800, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>
