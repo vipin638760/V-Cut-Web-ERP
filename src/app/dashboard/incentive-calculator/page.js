@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState, useMemo } from "react";
-import { collection, onSnapshot, query, where, orderBy, addDoc, writeBatch, doc } from "firebase/firestore";
+import { collection, onSnapshot, query, where, orderBy, addDoc, writeBatch, doc, deleteDoc, getDocs } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
 import { INR } from "@/lib/calculations";
@@ -315,6 +315,65 @@ export default function IncentiveCalculatorPage() {
     });
   };
 
+  // Reverse a release: delete the release doc, set incentive_taken back to false
+  const handleReverse = (release) => {
+    confirm({
+      title: "Reverse Release",
+      message: `
+        <div style="text-align:center;">
+          <div style="font-size:20px;font-weight:800;color:var(--red);margin-bottom:6px;">${INR(release.amount_released)}</div>
+          <div style="font-size:12px;color:var(--text3);">Reverse incentive release for <strong>${release.staff_name}</strong>?</div>
+          <div style="font-size:11px;color:var(--text3);margin-top:4px;">Period: ${release.period_from} to ${release.period_to}</div>
+          <div style="font-size:11px;color:var(--text3);margin-top:2px;">This will mark ${release.entries_count || "all"} entries back to PENDING.</div>
+        </div>
+      `,
+      confirmText: "Reverse",
+      type: "danger",
+      onConfirm: async () => {
+        setReleasing(true);
+        try {
+          // Find entries in the release period for this staff and set incentive_taken = false
+          const q = query(
+            collection(db, "entries"),
+            where("date", ">=", release.period_from),
+            where("date", "<=", release.period_to),
+            orderBy("date", "desc"),
+          );
+          const sn = await getDocs(q);
+          const batch = writeBatch(db);
+          let reversed = 0;
+
+          sn.docs.forEach(d => {
+            const entry = { ...d.data(), id: d.id };
+            if (!entry.staff_billing) return;
+            let changed = false;
+            const updatedBilling = entry.staff_billing.map(sb => {
+              if (sb.staff_id === release.staff_id && sb.incentive_taken === true) {
+                changed = true;
+                return { ...sb, incentive_taken: false };
+              }
+              return sb;
+            });
+            if (changed) {
+              batch.update(doc(db, "entries", entry.id), { staff_billing: updatedBilling });
+              reversed++;
+            }
+          });
+
+          // Delete the release record
+          batch.delete(doc(db, "incentive_releases", release.id));
+
+          await batch.commit();
+          toast({ title: "Reversed", message: `Release reversed for ${release.staff_name} — ${reversed} entries set back to pending.`, type: "success" });
+        } catch (err) {
+          toast({ title: "Error", message: err.message, type: "error" });
+        } finally {
+          setReleasing(false);
+        }
+      },
+    });
+  };
+
   if (loading) return <VLoader fullscreen label="Loading Incentive Data" />;
 
   return (
@@ -431,14 +490,20 @@ export default function IncentiveCalculatorPage() {
                   </tr>
                   {/* Show past releases inline */}
                   {staffReleases.length > 0 && expanded && staffReleases.map((r, ri) => (
-                    <tr key={`rel-${d.id}-${ri}`} style={{ background: "rgba(74,222,128,0.04)" }}>
-                      <td colSpan={canEdit && mode === "period" ? 11 : 10} style={{ padding: "6px 16px" }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 11, color: "var(--green)" }}>
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#4ade80" strokeWidth="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-                          <span style={{ fontWeight: 700 }}>Released {INR(r.amount_released)}</span>
+                    <tr key={`rel-${d.id}-${ri}`} style={{ background: r.reversed ? "rgba(248,113,113,0.04)" : "rgba(74,222,128,0.04)" }}>
+                      <td colSpan={canEdit && mode === "period" ? 12 : 11} style={{ padding: "6px 16px" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 11, color: r.reversed ? "var(--red)" : "var(--green)" }}>
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={r.reversed ? "#f87171" : "#4ade80"} strokeWidth="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                          <span style={{ fontWeight: 700 }}>{r.reversed ? "Reversed" : "Released"} {INR(r.amount_released)}</span>
                           <span style={{ color: "var(--text3)" }}>on {r.released_at?.slice(0, 10)}</span>
                           <span style={{ color: "var(--text3)" }}>by {r.released_by}</span>
                           <span style={{ color: "var(--text3)" }}>({r.period_from} to {r.period_to})</span>
+                          {canEdit && !r.reversed && (
+                            <button onClick={(e) => { e.stopPropagation(); handleReverse(r); }} disabled={releasing}
+                              style={{ padding: "3px 10px", borderRadius: 5, background: "rgba(248,113,113,0.12)", border: "1px solid rgba(248,113,113,0.25)", color: "var(--red)", fontSize: 9, fontWeight: 700, cursor: releasing ? "wait" : "pointer", textTransform: "uppercase", letterSpacing: 0.5, marginLeft: 4 }}>
+                              Reverse
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -488,15 +553,26 @@ export default function IncentiveCalculatorPage() {
             {staffReleases.length > 0 && (
               <div style={{ marginBottom: 12 }}>
                 {staffReleases.map((r, i) => (
-                  <div key={i} style={{ padding: "10px 14px", marginBottom: 6, borderRadius: 10, background: "rgba(74,222,128,0.06)", border: "1px solid rgba(74,222,128,0.15)", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#4ade80" strokeWidth="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-                    <span style={{ fontSize: 12, fontWeight: 800, color: "var(--green)" }}>Payment Released: {INR(r.amount_released)}</span>
+                  <div key={i} style={{ padding: "10px 14px", marginBottom: 6, borderRadius: 10, background: r.reversed ? "rgba(248,113,113,0.06)" : "rgba(74,222,128,0.06)", border: `1px solid ${r.reversed ? "rgba(248,113,113,0.15)" : "rgba(74,222,128,0.15)"}`, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={r.reversed ? "#f87171" : "#4ade80"} strokeWidth="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                    <span style={{ fontSize: 12, fontWeight: 800, color: r.reversed ? "var(--red)" : "var(--green)" }}>
+                      {r.reversed ? "Reversed" : "Payment Released"}: {INR(r.amount_released)}
+                    </span>
                     <span style={{ fontSize: 11, color: "var(--text3)" }}>|</span>
                     <span style={{ fontSize: 11, color: "var(--text3)" }}>Period: {r.period_from} to {r.period_to}</span>
                     <span style={{ fontSize: 11, color: "var(--text3)" }}>|</span>
                     <span style={{ fontSize: 11, color: "var(--text3)" }}>Sale: {INR(r.total_sale || 0)}</span>
                     <span style={{ fontSize: 11, color: "var(--text3)" }}>|</span>
                     <span style={{ fontSize: 11, color: "var(--text3)" }}>Released on {r.released_at?.slice(0, 10)} by <strong style={{ color: "var(--text2)" }}>{r.released_by}</strong></span>
+                    {canEdit && !r.reversed && (
+                      <>
+                        <span style={{ fontSize: 11, color: "var(--text3)" }}>|</span>
+                        <button onClick={() => handleReverse(r)} disabled={releasing}
+                          style={{ padding: "4px 12px", borderRadius: 6, background: "rgba(248,113,113,0.12)", border: "1px solid rgba(248,113,113,0.25)", color: "var(--red)", fontSize: 10, fontWeight: 700, cursor: releasing ? "wait" : "pointer", textTransform: "uppercase", letterSpacing: 0.5 }}>
+                          Reverse
+                        </button>
+                      </>
+                    )}
                   </div>
                 ))}
               </div>
