@@ -881,7 +881,7 @@ export default function BranchesPage() {
           {b.location && <span style={{ fontSize: 12, color: "var(--text3)" }}>📍 {b.location}</span>}
           {canEdit && (
             <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
-              <button onClick={() => { setRecalcModal({ branch_id: b.id, branch_name: b.name }); setRecalcLog([]); }}
+              <button onClick={() => { setRecalcModal({ branch_id: b.id, branch_name: b.name }); setRecalcLog([]); setRecalcDone(false); }}
                 style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: 8, background: "rgba(96,165,250,0.12)", border: "1px solid rgba(96,165,250,0.3)", color: "var(--blue, #60a5fa)", cursor: "pointer", fontWeight: 600, fontSize: 12 }}>
                 <Icon name="check" size={14} /> Recalculate
               </button>
