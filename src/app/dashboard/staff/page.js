@@ -822,12 +822,14 @@ export default function StaffPage() {
       <Card>
         <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 13 }}>
           <thead>
-            <tr>
-              <TH>Staff Identity</TH>
-              <TH>Role & Status</TH>
-              <TH>Goal Progress</TH>
-              {!isAccountant && <TH right>{filterMode === 'year' ? 'Yearly Salary' : 'Monthly Salary'}</TH>}
-              {canEdit && <TH sticky style={{ textAlign: "center" }}>Actions</TH>}
+            <tr style={{ background: "linear-gradient(135deg, var(--bg4) 0%, rgba(0,188,212,0.08) 50%, var(--bg4) 100%)" }}>
+              {(() => { const hs = { fontWeight: 900, fontSize: 12, letterSpacing: 1.5, color: "var(--text2)" }; return (<>
+              <TH style={hs}>Staff Identity</TH>
+              <TH style={hs}>Role & Status</TH>
+              <TH style={hs}>Goal Progress</TH>
+              {!isAccountant && <TH right style={hs}>{filterMode === 'year' ? 'Yearly Salary' : 'Monthly Salary'}</TH>}
+              {canEdit && <TH sticky style={{ ...hs, textAlign: "center" }}>Actions</TH>}
+              </>); })()}
             </tr>
           </thead>
           <tbody>
