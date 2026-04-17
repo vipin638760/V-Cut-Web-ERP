@@ -90,6 +90,7 @@ export default function EntryPage() {
   const [editId, setEditId] = useState(null);
   const [logView, setLogView] = useState(null);
   const [recentView, setRecentView] = useState("branch"); // "branch" | "all" | "date" | "range"
+  const [recentLimit, setRecentLimit] = useState(50);
   const [recentDate, setRecentDate] = useState(""); // defaults to selDate
   const [rangeFrom, setRangeFrom] = useState("");
   const [rangeTo, setRangeTo] = useState("");
@@ -676,8 +677,8 @@ export default function EntryPage() {
     if (recentView === "branch" && selBranch) list = filteredEntries.filter(e => e.branch_id === selBranch);
     else if (recentView === "date") list = filteredEntries.filter(e => e.date === activeRecentDate);
     else if (recentView === "range" && rangeFrom && rangeTo) list = entries.filter(e => e.date >= rangeFrom && e.date <= rangeTo);
-    return list;
-  }, [filteredEntries, recentView, selBranch, activeRecentDate, rangeFrom, rangeTo, entries]);
+    return list.slice(0, recentLimit);
+  }, [filteredEntries, recentView, selBranch, activeRecentDate, rangeFrom, rangeTo, entries, recentLimit]);
 
   const exportToExcel = async () => {
     if (visibleEntries.length === 0) return;
@@ -1698,6 +1699,15 @@ export default function EntryPage() {
                 <button key={val} onClick={() => { setRecentView(val); if (val === "date" && !recentDate) setRecentDate(selDate); if (val === "range" && !rangeFrom) { setRangeFrom(selDate); setRangeTo(selDate); } }}
                   style={{ padding: "5px 12px", borderRadius: 7, fontSize: 10, fontWeight: 700, border: "none", cursor: "pointer", transition: "all .2s", textTransform: "uppercase", letterSpacing: 0.5, background: recentView === val ? "linear-gradient(135deg, var(--accent), var(--gold2))" : "transparent", color: recentView === val ? "#000" : "var(--text3)" }}>
                   {label}
+                </button>
+              ))}
+            </div>
+            {/* Rows limit */}
+            <div style={{ display: "flex", gap: 2, background: "var(--bg4)", padding: 3, borderRadius: 10 }}>
+              {[50, 100, 200].map(n => (
+                <button key={n} onClick={() => setRecentLimit(n)}
+                  style={{ padding: "5px 10px", borderRadius: 7, fontSize: 10, fontWeight: 700, border: "none", cursor: "pointer", transition: "all .2s", background: recentLimit === n ? "var(--accent)" : "transparent", color: recentLimit === n ? "#000" : "var(--text3)" }}>
+                  {n}
                 </button>
               ))}
             </div>
