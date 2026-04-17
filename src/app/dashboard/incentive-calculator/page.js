@@ -149,6 +149,9 @@ export default function IncentiveCalculatorPage() {
 
   const [expandedStaff, setExpandedStaff] = useState(null);
 
+  // Row-level selection in breakdown (set of "staffId_date_entryId" keys)
+  const [selectedRows, setSelectedRows] = useState(new Set());
+
   // Selection helpers
   const toggleSelect = (id) => {
     setSelected(prev => {
@@ -229,6 +232,80 @@ export default function IncentiveCalculatorPage() {
           await batch.commit();
           toast({ title: "Released", message: `Incentives released for ${selStaff.length} staff — ${INR(selectedTotal)}`, type: "success" });
           setSelected(new Set());
+        } catch (err) {
+          toast({ title: "Error", message: err.message, type: "error" });
+        } finally {
+          setReleasing(false);
+        }
+      },
+    });
+  };
+
+  // Release selected individual day rows for a single staff
+  const handleReleaseRows = (staffData) => {
+    const pendingEntries = staffData.entries.filter(e => !e.taken);
+    const selEntries = pendingEntries.filter(e => selectedRows.has(`${staffData.id}_${e.date}_${e.entry_id}`));
+    if (selEntries.length === 0) return;
+    const rowTotal = selEntries.reduce((s, e) => s + e.totalInc, 0);
+    const rowSale = selEntries.reduce((s, e) => s + e.billing, 0);
+    confirm({
+      title: "Release Selected Days",
+      message: `
+        <div style="text-align:center;">
+          <div style="font-size:20px;font-weight:800;color:var(--green);margin-bottom:6px;">${INR(rowTotal)}</div>
+          <div style="font-size:12px;color:var(--text3);">Release incentives for <strong>${selEntries.length}</strong> day${selEntries.length > 1 ? "s" : ""} for <strong>${staffData.name}</strong>?</div>
+          <div style="font-size:11px;color:var(--text3);margin-top:4px;">Total sale: ${INR(rowSale)}</div>
+        </div>
+      `,
+      confirmText: "Release",
+      type: "success",
+      onConfirm: async () => {
+        setReleasing(true);
+        try {
+          const batch = writeBatch(db);
+          const now = new Date().toISOString();
+
+          // Create release record
+          const releaseRef = doc(collection(db, "incentive_releases"));
+          batch.set(releaseRef, {
+            staff_id: staffData.id,
+            staff_name: staffData.name,
+            branch_id: staffData.branch_id,
+            branch_name: branchesById.get(staffData.branch_id)?.name || "",
+            period_from: dateFrom,
+            period_to: dateTo,
+            total_sale: rowSale,
+            total_incentive: rowTotal,
+            amount_released: rowTotal,
+            days: selEntries.length,
+            released_at: now,
+            released_by: currentUser?.name || "user",
+            entries_count: selEntries.length,
+            type: "partial",
+          });
+
+          // Mark selected entries as taken
+          const entryGroups = {};
+          selEntries.forEach(e => {
+            if (!entryGroups[e.entry_id]) entryGroups[e.entry_id] = [];
+            entryGroups[e.entry_id].push(e);
+          });
+          for (const [entryId, rows] of Object.entries(entryGroups)) {
+            const entry = entries.find(e => e.id === entryId);
+            if (!entry?.staff_billing) continue;
+            const selectedDates = new Set(rows.map(r => r.date));
+            const updatedBilling = entry.staff_billing.map(sb => {
+              if (sb.staff_id === staffData.id && sb.incentive_taken === false) {
+                return { ...sb, incentive_taken: true };
+              }
+              return sb;
+            });
+            batch.update(doc(db, "entries", entryId), { staff_billing: updatedBilling });
+          }
+
+          await batch.commit();
+          toast({ title: "Released", message: `${selEntries.length} day${selEntries.length > 1 ? "s" : ""} released for ${staffData.name} — ${INR(rowTotal)}`, type: "success" });
+          setSelectedRows(new Set());
         } catch (err) {
           toast({ title: "Error", message: err.message, type: "error" });
         } finally {
@@ -334,7 +411,7 @@ export default function IncentiveCalculatorPage() {
               return (
                 <>
                   <tr key={d.id} style={{ cursor: "pointer", borderBottom: "1px solid var(--border)" }}
-                    onClick={() => setExpandedStaff(expanded ? null : d.id)}>
+                    onClick={() => { setExpandedStaff(expanded ? null : d.id); setSelectedRows(new Set()); }}>
                     {canEdit && mode === "period" && (
                       <TD style={{ textAlign: "center" }} onClick={e => { e.stopPropagation(); toggleSelect(d.id); }}>
                         <input type="checkbox" checked={selected.has(d.id)} readOnly
@@ -425,30 +502,90 @@ export default function IncentiveCalculatorPage() {
               </div>
             )}
 
+            {/* Row-level selection bar */}
+            {(() => {
+              const pendingRows = sorted.filter(e => !e.taken);
+              const selPending = pendingRows.filter(e => selectedRows.has(`${d.id}_${e.date}_${e.entry_id}`));
+              const selRowTotal = selPending.reduce((s, e) => s + e.totalInc, 0);
+              const selRowSale = selPending.reduce((s, e) => s + e.billing, 0);
+              const hasPending = pendingRows.length > 0;
+              return hasPending && canEdit && selPending.length > 0 ? (
+                <div style={{ padding: "10px 14px", marginBottom: 10, borderRadius: 10, background: "linear-gradient(135deg, rgba(74,222,128,0.08), rgba(34,211,238,0.06))", border: "1px solid rgba(74,222,128,0.2)", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 12 }}>
+                    <span style={{ fontWeight: 700, color: "var(--text)" }}>{selPending.length} day{selPending.length > 1 ? "s" : ""} selected</span>
+                    <span style={{ color: "var(--text3)" }}>|</span>
+                    <span>Sale: <strong style={{ color: "var(--blue, #60a5fa)" }}>{INR(selRowSale)}</strong></span>
+                    <span style={{ color: "var(--text3)" }}>|</span>
+                    <span>Incentive: <strong style={{ color: "var(--green)" }}>{INR(selRowTotal)}</strong></span>
+                  </div>
+                  <button onClick={() => handleReleaseRows(d)} disabled={releasing}
+                    style={{ padding: "8px 18px", borderRadius: 8, background: "linear-gradient(135deg, #22c55e, #16a34a)", color: "#fff", border: "none", fontWeight: 800, fontSize: 11, cursor: releasing ? "wait" : "pointer", opacity: releasing ? 0.6 : 1, display: "inline-flex", alignItems: "center", gap: 5 }}>
+                    {releasing ? "Releasing…" : <><Icon name="check" size={12} /> Release Selected</>}
+                  </button>
+                </div>
+              ) : null;
+            })()}
+
             <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
               <thead>
                 <tr style={{ background: "var(--bg4)" }}>
+                  {canEdit && sorted.some(e => !e.taken) && (
+                    <TH style={{ width: 36, textAlign: "center" }}>
+                      <input type="checkbox"
+                        checked={sorted.filter(e => !e.taken).length > 0 && sorted.filter(e => !e.taken).every(e => selectedRows.has(`${d.id}_${e.date}_${e.entry_id}`))}
+                        onChange={() => {
+                          const pendingKeys = sorted.filter(e => !e.taken).map(e => `${d.id}_${e.date}_${e.entry_id}`);
+                          setSelectedRows(prev => {
+                            const next = new Set(prev);
+                            const allSelected = pendingKeys.every(k => next.has(k));
+                            pendingKeys.forEach(k => allSelected ? next.delete(k) : next.add(k));
+                            return next;
+                          });
+                        }}
+                        style={{ cursor: "pointer", accentColor: "var(--accent)" }} />
+                    </TH>
+                  )}
                   <TH>Date</TH><TH>Branch</TH><TH right>Billing</TH><TH right>Mat Sale</TH><TH right>Incentive</TH><TH right>Mat Inc</TH><TH right>Total Inc</TH><TH>Status</TH>
                 </tr>
               </thead>
               <tbody>
-                {sorted.map((e, i) => (
-                  <tr key={i} style={{ borderBottom: "1px solid var(--border)" }}>
-                    <TD>{e.date}</TD>
-                    <TD>{(e.branch || "—").replace("V-CUT ", "")}</TD>
-                    <TD right>{INR(e.billing)}</TD>
-                    <TD right style={{ color: "var(--accent)" }}>{e.matSale > 0 ? INR(e.matSale) : "—"}</TD>
-                    <TD right style={{ color: "var(--gold)" }}>{INR(e.incentive)}</TD>
-                    <TD right style={{ color: "var(--accent)" }}>{e.mat_incentive > 0 ? INR(e.mat_incentive) : "—"}</TD>
-                    <TD right style={{ fontWeight: 700, color: "var(--gold)" }}>{INR(e.totalInc)}</TD>
-                    <TD>
-                      <span style={{ padding: "2px 8px", borderRadius: 6, fontSize: 10, fontWeight: 700, background: e.taken ? "rgba(74,222,128,0.12)" : "rgba(251,146,60,0.12)", color: e.taken ? "var(--green)" : "var(--orange)" }}>
-                        {e.taken ? "TAKEN" : "PENDING"}
-                      </span>
-                    </TD>
-                  </tr>
-                ))}
+                {sorted.map((e, i) => {
+                  const rowKey = `${d.id}_${e.date}_${e.entry_id}`;
+                  const hasPendingCol = sorted.some(r => !r.taken);
+                  return (
+                    <tr key={i} style={{ borderBottom: "1px solid var(--border)" }}>
+                      {canEdit && hasPendingCol && (
+                        <TD style={{ textAlign: "center" }}>
+                          {!e.taken ? (
+                            <input type="checkbox" checked={selectedRows.has(rowKey)}
+                              onChange={() => {
+                                setSelectedRows(prev => {
+                                  const next = new Set(prev);
+                                  next.has(rowKey) ? next.delete(rowKey) : next.add(rowKey);
+                                  return next;
+                                });
+                              }}
+                              style={{ cursor: "pointer", accentColor: "var(--accent)" }} />
+                          ) : null}
+                        </TD>
+                      )}
+                      <TD>{e.date}</TD>
+                      <TD>{(e.branch || "—").replace("V-CUT ", "")}</TD>
+                      <TD right>{INR(e.billing)}</TD>
+                      <TD right style={{ color: "var(--accent)" }}>{e.matSale > 0 ? INR(e.matSale) : "—"}</TD>
+                      <TD right style={{ color: "var(--gold)" }}>{INR(e.incentive)}</TD>
+                      <TD right style={{ color: "var(--accent)" }}>{e.mat_incentive > 0 ? INR(e.mat_incentive) : "—"}</TD>
+                      <TD right style={{ fontWeight: 700, color: "var(--gold)" }}>{INR(e.totalInc)}</TD>
+                      <TD>
+                        <span style={{ padding: "2px 8px", borderRadius: 6, fontSize: 10, fontWeight: 700, background: e.taken ? "rgba(74,222,128,0.12)" : "rgba(251,146,60,0.12)", color: e.taken ? "var(--green)" : "var(--orange)" }}>
+                          {e.taken ? "TAKEN" : "PENDING"}
+                        </span>
+                      </TD>
+                    </tr>
+                  );
+                })}
                 <tr style={{ background: "var(--bg3)", fontWeight: 700, borderTop: "2px solid var(--border2)" }}>
+                  {canEdit && sorted.some(e => !e.taken) && <TD></TD>}
                   <TD>TOTAL</TD><TD></TD>
                   <TD right style={{ color: "var(--blue, #60a5fa)" }}>{INR(breakdownTotalSale)}</TD>
                   <TD right style={{ color: "var(--accent)" }}>{INR(breakdownTotalMatSale)}</TD>
