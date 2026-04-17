@@ -18,24 +18,16 @@ export default function BellNotifications({ currentUser }) {
 
   useEffect(() => {
     if (!db) return;
-    const unsubs = [
-      // POS discount approvals
-      onSnapshot(query(collection(db, "approvals"), where("status", "==", "pending")), sn => {
-        setApprovals(sn.docs.map(d => ({ ...d.data(), id: d.id, _kind: "approval" })));
-      }),
-      // Pending leave requests
-      onSnapshot(query(collection(db, "leaves"), where("status", "==", "pending")), sn => {
-        setPendingLeaves(sn.docs.map(d => ({ ...d.data(), id: d.id, _kind: "leave" })));
-      }),
-      // Staff added by accountant awaiting admin setup
-      onSnapshot(query(collection(db, "staff"), where("pending_setup", "==", true)), sn => {
-        setPendingStaff(sn.docs.map(d => ({ ...d.data(), id: d.id, _kind: "staff_setup" })));
-      }),
-      // Pending payroll advance requests
-      onSnapshot(query(collection(db, "staff_advances"), where("status", "==", "pending")), sn => {
-        setPendingAdvances(sn.docs.map(d => ({ ...d.data(), id: d.id, _kind: "advance" })));
-      }),
-    ];
+    const unsubs = [];
+    const safeSub = (q, setter) => {
+      try {
+        unsubs.push(onSnapshot(q, sn => setter(sn.docs.map(d => ({ ...d.data(), id: d.id }))), () => {}));
+      } catch { /* collection may not exist yet */ }
+    };
+    safeSub(query(collection(db, "approvals"), where("status", "==", "pending")), list => setApprovals(list.map(d => ({ ...d, _kind: "approval" }))));
+    safeSub(query(collection(db, "leaves"), where("status", "==", "pending")), list => setPendingLeaves(list.map(d => ({ ...d, _kind: "leave" }))));
+    safeSub(query(collection(db, "staff"), where("pending_setup", "==", true)), list => setPendingStaff(list.map(d => ({ ...d, _kind: "staff_setup" }))));
+    safeSub(query(collection(db, "staff_advances"), where("status", "==", "pending")), list => setPendingAdvances(list.map(d => ({ ...d, _kind: "advance" }))));
     return () => unsubs.forEach(u => u());
   }, []);
 
@@ -71,7 +63,12 @@ export default function BellNotifications({ currentUser }) {
   const count = all.length;
 
   const kindLabel = (k) => ({ approval: "Discount", leave: "Leave", staff_setup: "Staff Setup", advance: "Advance" }[k] || k);
-  const kindColor = (k) => ({ approval: "var(--orange)", leave: "var(--blue, #60a5fa)", staff_setup: "var(--accent)", advance: "var(--gold)" }[k] || "var(--text3)");
+  const kindStyles = (k) => ({
+    approval: { bg: "rgba(251,146,60,0.12)", border: "rgba(251,146,60,0.3)", color: "var(--orange)" },
+    leave: { bg: "rgba(96,165,250,0.12)", border: "rgba(96,165,250,0.3)", color: "var(--blue, #60a5fa)" },
+    staff_setup: { bg: "rgba(0,188,212,0.12)", border: "rgba(0,188,212,0.3)", color: "var(--accent)" },
+    advance: { bg: "rgba(255,215,0,0.12)", border: "rgba(255,215,0,0.3)", color: "var(--gold)" },
+  }[k] || { bg: "var(--bg4)", border: "var(--border)", color: "var(--text3)" });
 
   return (
     <div ref={wrapRef} style={{ position: "relative" }}>
@@ -130,9 +127,9 @@ export default function BellNotifications({ currentUser }) {
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
                   <span style={{
                     fontSize: 9, fontWeight: 800, padding: "2px 7px", borderRadius: 5,
-                    background: `color-mix(in srgb, ${kindColor(a._kind)} 12%, transparent)`,
-                    color: kindColor(a._kind),
-                    border: `1px solid color-mix(in srgb, ${kindColor(a._kind)} 30%, transparent)`,
+                    background: kindStyles(a._kind).bg,
+                    color: kindStyles(a._kind).color,
+                    border: `1px solid ${kindStyles(a._kind).border}`,
                     textTransform: "uppercase", letterSpacing: 1,
                   }}>{kindLabel(a._kind)}</span>
                   <span style={{ fontSize: 10, color: "var(--text3)", fontWeight: 600 }}>
