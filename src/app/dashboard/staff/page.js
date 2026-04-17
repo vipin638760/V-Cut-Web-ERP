@@ -851,12 +851,10 @@ export default function StaffPage() {
                 <tr key={s.id} style={{ opacity: overall === "inactive" ? 0.6 : 1, transition: "background 0.2s" }}>
                   <TD>
                     <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                      <div style={{ position: "relative" }}>
-                        <div style={{ width: 40, height: 40, borderRadius: 12, background: "var(--bg4)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, fontWeight: 800, color: "var(--accent)", border: "1px solid var(--border)" }}>{(s.name || "?")[0].toUpperCase()}</div>
-                        <span title={overall === "active" ? "Active" : "Inactive"} style={{ position: "absolute", bottom: -2, right: -2, width: 10, height: 10, borderRadius: "50%", background: overall === "active" ? "#4ade80" : "#f87171", border: "2px solid var(--bg2)" }} />
-                      </div>
+                      <div style={{ width: 40, height: 40, borderRadius: 12, background: "var(--bg4)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, fontWeight: 800, color: "var(--accent)", border: "1px solid var(--border)" }}>{(s.name || "?")[0].toUpperCase()}</div>
                       <div>
-                        <div style={{ fontWeight: 700, fontSize: 14, display: "flex", alignItems: "center", gap: 6 }}>
+                        <div style={{ fontWeight: 700, fontSize: 14, display: "flex", alignItems: "center", gap: 7 }}>
+                          <span title={overall === "active" ? "Active" : "Inactive"} style={{ width: 10, height: 10, borderRadius: "50%", background: overall === "active" ? "#4ade80" : "#f87171", flexShrink: 0, boxShadow: overall === "active" ? "0 0 6px rgba(74,222,128,0.5)" : "0 0 6px rgba(248,113,113,0.5)" }} />
                           {toTitleCase(s.name)}
                         </div>
                         <div style={{ fontSize: 11, color: "var(--text3)", display: "flex", alignItems: "center", gap: 5 }}>
