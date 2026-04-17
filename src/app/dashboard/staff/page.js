@@ -560,12 +560,13 @@ export default function StaffPage() {
           };
 
           const colorFor = (kind) => ({
-            present: { bg: "rgba(74,222,128,0.12)", border: "rgba(74,222,128,0.4)", text: "var(--green)" },
-            absent:  { bg: "rgba(248,113,113,0.1)", border: "rgba(248,113,113,0.3)", text: "var(--red)" },
-            leave:   { bg: "rgba(96,165,250,0.12)", border: "rgba(96,165,250,0.35)", text: "var(--blue, #60a5fa)" },
+            present: { bg: "rgba(74,222,128,0.15)", border: "rgba(74,222,128,0.5)", text: "#4ade80" },
+            absent:  { bg: "rgba(248,113,113,0.12)", border: "rgba(248,113,113,0.35)", text: "#f87171" },
+            leave:   { bg: "rgba(96,165,250,0.15)", border: "rgba(96,165,250,0.45)", text: "#60a5fa" },
+            future:  { bg: "transparent", border: "var(--border)", text: "var(--text3)" },
             before:  { bg: "var(--bg4)", border: "var(--border)", text: "var(--text3)" },
             after:   { bg: "var(--bg4)", border: "var(--border)", text: "var(--text3)" },
-          }[kind] || { bg: "var(--bg4)", border: "var(--border)", text: "var(--text3)" });
+          }[kind] || { bg: "transparent", border: "var(--border)", text: "var(--text3)" });
 
           const short = (bid) => (branches.find(b => b.id === bid)?.name || "").replace("V-CUT ", "").slice(0, 8);
 
@@ -635,24 +636,27 @@ export default function StaffPage() {
                 {blanks.map((_, i) => <div key={`b${i}`} />)}
                 {days.map(dateStr => {
                   const st = dayStatus(dateStr);
-                  const c = colorFor(st.kind);
+                  const isFuture = dateStr > todayStr;
+                  const effectiveKind = isFuture && st.kind === "absent" ? "future" : st.kind;
+                  const c = colorFor(effectiveKind);
                   const isToday = dateStr === todayStr;
                   const bName = st.branch_id ? short(st.branch_id) : "";
                   const hasOverride = st.source === "override";
                   const branchDot = st.kind === "present" && st.branch_id ? branchColour.get(st.branch_id) : null;
                   return (
                     <button key={dateStr}
-                      disabled={!canEdit}
-                      onClick={() => { setEditingDay(dateStr); setDayDraft({ present: st.kind === "present" || st.kind === "leave" ? (st.kind === "present") : false, branch_id: st.branch_id || s.branch_id || "", note: st.note || "" }); }}
+                      disabled={!canEdit || effectiveKind === "future"}
+                      onClick={() => { if (effectiveKind === "future") return; setEditingDay(dateStr); setDayDraft({ present: st.kind === "present" || st.kind === "leave" ? (st.kind === "present") : false, branch_id: st.branch_id || s.branch_id || "", note: st.note || "" }); }}
                       style={{
                         position: "relative",
                         aspectRatio: "1 / 1",
                         padding: 6,
                         borderRadius: 10,
-                        background: c.bg,
-                        border: `1px solid ${isToday ? "var(--accent)" : c.border}`,
-                        color: c.text,
-                        cursor: canEdit ? "pointer" : "default",
+                        background: effectiveKind === "future" ? "transparent" : c.bg,
+                        border: isToday ? "2px solid var(--accent)" : branchDot ? `2px solid ${branchDot}` : `1px solid ${c.border}`,
+                        color: effectiveKind === "future" ? "var(--text3)" : c.text,
+                        cursor: effectiveKind === "future" ? "default" : canEdit ? "pointer" : "default",
+                        opacity: effectiveKind === "future" ? 0.35 : 1,
                         display: "flex",
                         flexDirection: "column",
                         alignItems: "flex-start",
@@ -662,13 +666,12 @@ export default function StaffPage() {
                       <div style={{ display: "flex", width: "100%", justifyContent: "space-between", alignItems: "center", fontSize: 12, fontWeight: 800 }}>
                         <span>{Number(dateStr.slice(8, 10))}</span>
                         <div style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
-                          {branchDot && <span title={branches.find(b => b.id === st.branch_id)?.name || ""} style={{ width: 7, height: 7, borderRadius: "50%", background: branchDot }} />}
                           {hasOverride && <span title="Manually edited" style={{ fontSize: 8, color: "var(--accent)" }}>✎</span>}
                         </div>
                       </div>
-                      {bName && <div style={{ fontSize: 9, fontWeight: 700, opacity: 0.9, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%" }}>{bName}</div>}
-                      {st.kind === "leave" && <div style={{ fontSize: 9, fontWeight: 700, opacity: 0.85 }}>LEAVE</div>}
-                      {st.kind === "absent" && st.source === "default" && <div style={{ fontSize: 9, fontWeight: 700, opacity: 0.75 }}>—</div>}
+                      {bName && effectiveKind !== "future" && <div style={{ fontSize: 9, fontWeight: 800, color: branchDot || c.text, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%" }}>{bName}</div>}
+                      {st.kind === "leave" && <div style={{ fontSize: 9, fontWeight: 800, color: "#60a5fa" }}>LEAVE</div>}
+                      {st.kind === "absent" && !isFuture && st.source === "default" && <div style={{ fontSize: 9, fontWeight: 700, opacity: 0.75 }}>—</div>}
                     </button>
                   );
                 })}
