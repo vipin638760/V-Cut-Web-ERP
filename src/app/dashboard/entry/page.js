@@ -368,6 +368,16 @@ export default function EntryPage() {
   };
 
   // ── Shared Services: per-staff billing + incentive contributions ──
+  // Ceiling to nearest 10: 235 → 240, 241 → 250, 200 → 200
+  const ceilTo10 = (n) => Math.ceil(n / 10) * 10;
+  // Staff incentive rate: prefer staff profile incentive_pct, fall back to global branch rate
+  const staffIncRate = (sid) => {
+    const s = staff.find(x => x.id === sid);
+    if (s?.incentive_pct !== undefined && s.incentive_pct !== null) return Number(s.incentive_pct);
+    const b = branchesById.get(selBranch);
+    if (globalSettings) return b?.type === 'unisex' ? (globalSettings.unisex_inc ?? 10) : (globalSettings.mens_inc ?? 10);
+    return 10;
+  };
   const sharedContributions = useMemo(() => {
     const billing = {};   // { staffId: amount added to billing }
     const incentive = {}; // { staffId: incentive earned }
@@ -376,15 +386,8 @@ export default function EntryPage() {
       if (amt <= 0) return;
       billing[ss.sale_staff_id] = (billing[ss.sale_staff_id] || 0) + amt;
       (ss.incentive_staff_ids || []).forEach(sid => {
-        const s = staff.find(x => x.id === sid);
-        const b = branchesById.get(selBranch);
-        let incRate = 10;
-        if (globalSettings) {
-          incRate = b?.type === 'unisex' ? (globalSettings.unisex_inc ?? 10) : (globalSettings.mens_inc ?? 10);
-        } else if (s?.incentive_pct !== undefined) {
-          incRate = s.incentive_pct;
-        }
-        incentive[sid] = (incentive[sid] || 0) + Math.round(amt * incRate / 100);
+        const rate = staffIncRate(sid);
+        incentive[sid] = (incentive[sid] || 0) + ceilTo10(amt * rate / 100);
       });
     });
     const totalBilling = Object.values(billing).reduce((s, v) => s + v, 0);
@@ -1504,11 +1507,8 @@ export default function EntryPage() {
                             const saleStaff = staff.find(x => x.id === ss.sale_staff_id);
                             const incBreakdown = (ss.incentive_staff_ids || []).map(sid => {
                               const s = staff.find(x => x.id === sid);
-                              const b = branchesById.get(selBranch);
-                              let rate = 10;
-                              if (globalSettings) rate = b?.type === 'unisex' ? (globalSettings.unisex_inc ?? 10) : (globalSettings.mens_inc ?? 10);
-                              else if (s?.incentive_pct !== undefined) rate = s.incentive_pct;
-                              const inc = Math.round((Number(ss.amount) || 0) * rate / 100);
+                              const rate = staffIncRate(sid);
+                              const inc = ceilTo10((Number(ss.amount) || 0) * rate / 100);
                               return { name: s?.name || "?", rate, inc };
                             });
                             const totalInc = incBreakdown.reduce((s, x) => s + x.inc, 0);
@@ -1556,7 +1556,16 @@ export default function EntryPage() {
                         </div>
                         <div>
                           <label style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Sale Tagged To (billing credit)</label>
-                          <select value={sharedForm.sale_staff_id} onChange={e => setSharedForm(f => ({ ...f, sale_staff_id: e.target.value }))}
+                          <select value={sharedForm.sale_staff_id} onChange={e => {
+                            const sid = e.target.value;
+                            setSharedForm(f => ({
+                              ...f,
+                              sale_staff_id: sid,
+                              incentive_staff_ids: sid && !(f.incentive_staff_ids || []).includes(sid)
+                                ? [...(f.incentive_staff_ids || []), sid]
+                                : (f.incentive_staff_ids || []),
+                            }));
+                          }}
                             style={{ width: "100%", padding: "10px 14px", borderRadius: 8, background: "var(--bg4)", border: "2px solid var(--green)", color: "var(--text)", fontSize: 13, fontWeight: 600, outline: "none", marginTop: 4 }}>
                             <option value="">Select staff…</option>
                             {tableStaff.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
@@ -1568,6 +1577,8 @@ export default function EntryPage() {
                         <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 6 }}>
                           {tableStaff.map(s => {
                             const checked = (sharedForm.incentive_staff_ids || []).includes(s.id);
+                            const rate = staffIncRate(s.id);
+                            const isSaleStaff = s.id === sharedForm.sale_staff_id;
                             return (
                               <label key={s.id} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 12px", borderRadius: 8, background: checked ? "rgba(96,165,250,0.15)" : "var(--bg4)", border: `1px solid ${checked ? "rgba(96,165,250,0.5)" : "var(--border2)"}`, cursor: "pointer", fontSize: 12, fontWeight: 600, color: checked ? "var(--blue, #60a5fa)" : "var(--text3)", transition: "all 0.15s" }}>
                                 <input type="checkbox" checked={checked} onChange={e => {
@@ -1578,7 +1589,8 @@ export default function EntryPage() {
                                       : (f.incentive_staff_ids || []).filter(id => id !== s.id)
                                   }));
                                 }} style={{ accentColor: "var(--blue, #60a5fa)" }} />
-                                {s.name}
+                                {s.name} <span style={{ fontSize: 10, opacity: 0.7 }}>({rate}%)</span>
+                                {isSaleStaff && <span style={{ fontSize: 8, padding: "1px 4px", borderRadius: 4, background: "rgba(74,222,128,0.15)", color: "var(--green)", fontWeight: 800 }}>SALE</span>}
                               </label>
                             );
                           })}
