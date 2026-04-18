@@ -48,11 +48,32 @@ export default function BranchesPage() {
   const [form, setForm] = useState({ name: "", type: "mens", location: "", shop_rent: "", room_rent: "", salary_budget: "", wifi: "", shop_elec: "", room_elec: "" });
 
   // Recalculate modal
-  const [recalcModal, setRecalcModal] = useState(null); // { branch_id, branch_name }
+  const [recalcModal, setRecalcModal] = useState(null); // { branches: [{id, name}] }
   const [recalcFrom, setRecalcFrom] = useState(() => { const d = new Date(); d.setDate(1); return d.toISOString().slice(0, 10); });
   const [recalcTo, setRecalcTo] = useState(() => new Date().toISOString().slice(0, 10));
   const [recalcBusy, setRecalcBusy] = useState(false);
   const [recalcLog, setRecalcLog] = useState([]);
+
+  // Multi-branch selection (card/table list view)
+  const [selectedBranches, setSelectedBranches] = useState(new Set());
+  const toggleBranchSelect = (id) => {
+    setSelectedBranches(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+  const clearBranchSelection = () => setSelectedBranches(new Set());
+  const openBulkRecalc = () => {
+    if (selectedBranches.size === 0) return;
+    const list = Array.from(selectedBranches)
+      .map(id => { const b = branches.find(x => x.id === id); return b ? { id: b.id, name: b.name } : null; })
+      .filter(Boolean);
+    if (list.length === 0) return;
+    setRecalcModal({ branches: list });
+    setRecalcLog([]);
+    setRecalcDone(false);
+  };
 
   const currentUser = useCurrentUser() || {};
   const isAdmin = currentUser?.role === "admin";
@@ -260,45 +281,26 @@ export default function BranchesPage() {
 
   const handleRecalculate = async () => {
     if (!recalcModal || recalcBusy) return;
+    const targetBranches = recalcModal.branches || [];
+    if (targetBranches.length === 0) return;
+
     setRecalcBusy(true);
     setRecalcLog([]);
     setRecalcDone(false);
     setRecalcProgress({ current: 0, total: 0 });
     const log = [];
+    const isMulti = targetBranches.length > 1;
     try {
-      const branchId = recalcModal.branch_id;
-      const branch = branches.find(b => b.id === branchId);
-      const isUnisex = (branch?.type || "").toLowerCase() === "unisex";
       const ceilTo10 = (n) => Math.ceil(n / 10) * 10;
 
-      // Get staff incentive rate
-      const getRate = (sid) => {
-        const s = staff.find(x => x.id === sid);
-        if (s?.incentive_pct !== undefined && s.incentive_pct !== null) return Number(s.incentive_pct);
-        if (globalSettings) return isUnisex ? (globalSettings.unisex_inc ?? 10) : (globalSettings.mens_inc ?? 10);
-        return 10;
-      };
+      // Gather entries for all selected branches so we can drive one progress bar
+      const perBranch = targetBranches.map(({ id, name }) => ({
+        id, name,
+        entries: entries.filter(e => e.branch_id === id && e.date >= recalcFrom && e.date <= recalcTo),
+      }));
+      const totalEntries = perBranch.reduce((s, x) => s + x.entries.length, 0);
 
-      // Get daily expenses for a branch+date
-      const getDailyExp = async (date) => {
-        try {
-          const q = query(collection(db, "daily_expenses"), where("branch_id", "==", branchId), where("date", "==", date));
-          const sn = await getDocs(q);
-          return sn.docs.reduce((s, d) => s + (Number(d.data().amount) || 0), 0);
-        } catch { return 0; }
-      };
-
-      // Get material allocations for branch+date
-      const getMatExp = (date) => {
-        return materialAllocations
-          .filter(a => a.branch_id === branchId && a.date === date)
-          .reduce((s, a) => s + (Number(a.total) || 0), 0);
-      };
-
-      // Find entries in range
-      const branchEntries = entries.filter(e => e.branch_id === branchId && e.date >= recalcFrom && e.date <= recalcTo);
-
-      if (branchEntries.length === 0) {
+      if (totalEntries === 0) {
         log.push({ type: "info", text: "No entries found in the selected range." });
         setRecalcLog(log);
         setRecalcDone(true);
@@ -307,103 +309,142 @@ export default function BranchesPage() {
         return;
       }
 
-      setRecalcProgress({ current: 0, total: branchEntries.length });
+      setRecalcProgress({ current: 0, total: totalEntries });
 
       let updated = 0;
-      for (let i = 0; i < branchEntries.length; i++) {
-        const entry = branchEntries[i];
-        setRecalcProgress({ current: i + 1, total: branchEntries.length });
-        const changes = {};
-        let changed = false;
-        const details = [];
+      let processed = 0;
 
-        // Recalculate staff_billing incentives
-        if (entry.staff_billing?.length > 0) {
-          const newBilling = entry.staff_billing.map(sb => {
-            const billing = Number(sb.billing) || 0;
-            const material = Number(sb.material) || 0;
-            const tips = Number(sb.tips) || 0;
-            const rate = getRate(sb.staff_id);
-            const newInc = ceilTo10(billing * rate / 100);
-            const newMatInc = ceilTo10(material * 0.05);
+      for (const { id: branchId, name: branchName, entries: branchEntries } of perBranch) {
+        const branch = branches.find(b => b.id === branchId);
+        const isUnisex = (branch?.type || "").toLowerCase() === "unisex";
 
-            // Auto-default incentive_taken
-            const s = staff.find(x => x.id === sb.staff_id);
-            const role = (s?.role || "").toLowerCase();
-            const defaultTaken = isUnisex ? (role.includes("hairdresser") || role.includes("hair dresser")) : true;
-            const taken = sb.incentive_taken !== undefined ? sb.incentive_taken : defaultTaken;
+        const getRate = (sid) => {
+          const s = staff.find(x => x.id === sid);
+          if (s?.incentive_pct !== undefined && s.incentive_pct !== null) return Number(s.incentive_pct);
+          if (globalSettings) return isUnisex ? (globalSettings.unisex_inc ?? 10) : (globalSettings.mens_inc ?? 10);
+          return 10;
+        };
 
-            const newTotalInc = Math.round(newInc + newMatInc + tips);
-            return {
-              ...sb,
-              incentive: newInc,
-              mat_incentive: newMatInc,
-              staff_total_inc: newTotalInc,
-              incentive_taken: taken,
-            };
-          });
-          changes.staff_billing = newBilling;
-          changed = true;
-          details.push("incentives recalculated");
+        const getDailyExp = async (date) => {
+          try {
+            const q = query(collection(db, "daily_expenses"), where("branch_id", "==", branchId), where("date", "==", date));
+            const sn = await getDocs(q);
+            return sn.docs.reduce((s, d) => s + (Number(d.data().amount) || 0), 0);
+          } catch { return 0; }
+        };
+
+        const getMatExp = (date) => {
+          return materialAllocations
+            .filter(a => a.branch_id === branchId && a.date === date)
+            .reduce((s, a) => s + (Number(a.total) || 0), 0);
+        };
+
+        if (branchEntries.length === 0) {
+          if (isMulti) {
+            log.push({ type: "info", text: `${branchName}: no entries in range`, details: [] });
+            setRecalcLog([...log]);
+          }
+          continue;
         }
 
-        // Update material expense from allocations
-        const matExp = getMatExp(entry.date);
-        if (matExp > 0 && matExp !== (Number(entry.mat_expense) || 0)) {
-          changes.mat_expense = matExp;
-          changed = true;
-          details.push(`material: ${INR(Number(entry.mat_expense) || 0)} → ${INR(matExp)}`);
+        if (isMulti) {
+          log.push({ type: "info", text: `— ${branchName} (${branchEntries.length} entries) —`, details: [] });
+          setRecalcLog([...log]);
         }
 
-        // Update other expenses from daily_expenses
-        const dailyExp = await getDailyExp(entry.date);
-        if (dailyExp > 0 && dailyExp !== (Number(entry.others) || 0)) {
-          changes.others = dailyExp;
-          changed = true;
-          details.push(`expenses: ${INR(Number(entry.others) || 0)} → ${INR(dailyExp)}`);
-        }
+        for (let i = 0; i < branchEntries.length; i++) {
+          const entry = branchEntries[i];
+          processed++;
+          setRecalcProgress({ current: processed, total: totalEntries });
+          const changes = {};
+          let changed = false;
+          const details = [];
 
-        // Recalculate cash_in_hand
-        if (changed && changes.staff_billing) {
-          const totalBilling = changes.staff_billing.reduce((s, sb) => s + (Number(sb.billing) || 0), 0);
-          const totalMatSale = changes.staff_billing.reduce((s, sb) => s + (Number(sb.material) || 0), 0);
-          const totalSales = totalBilling + totalMatSale;
-          const online = Number(entry.online) || 0;
-          const cash = Math.max(0, totalSales - online);
-          const takenInc = changes.staff_billing.reduce((s, sb) => {
-            if (sb.incentive_taken === false) return s;
-            return s + (Number(sb.incentive) || 0) + (Number(sb.mat_incentive) || 0);
-          }, 0);
-          const tipsPaidCash = changes.staff_billing.reduce((s, sb) => {
-            const t = Number(sb.tips) || 0;
-            return (sb.tip_paid || "cash") === "cash" ? s + t : s;
-          }, 0);
-          const tipsInCash = changes.staff_billing.reduce((s, sb) => {
-            const t = Number(sb.tips) || 0;
-            return (sb.tip_in || "online") === "cash" ? s + t : s;
-          }, 0);
-          const oth = changes.others !== undefined ? changes.others : (Number(entry.others) || 0);
-          const pet = Number(entry.petrol) || 0;
-          changes.cash_in_hand = cash + tipsInCash - tipsPaidCash - takenInc - oth - pet;
-        }
+          if (entry.staff_billing?.length > 0) {
+            const newBilling = entry.staff_billing.map(sb => {
+              const billing = Number(sb.billing) || 0;
+              const material = Number(sb.material) || 0;
+              const tips = Number(sb.tips) || 0;
+              const rate = getRate(sb.staff_id);
+              const newInc = ceilTo10(billing * rate / 100);
+              const newMatInc = ceilTo10(material * 0.05);
 
-        if (changed) {
-          changes.recalculated_at = new Date().toISOString();
-          changes.recalculated_by = currentUser?.name || "user";
-          await updateDoc(doc(db, "entries", entry.id), changes);
-          updated++;
-          log.push({ type: "synced", text: `${entry.date}: synced`, details });
-        } else {
-          log.push({ type: "skip", text: `${entry.date}: already in sync` });
+              const s = staff.find(x => x.id === sb.staff_id);
+              const role = (s?.role || "").toLowerCase();
+              const defaultTaken = isUnisex ? (role.includes("hairdresser") || role.includes("hair dresser")) : true;
+              const taken = sb.incentive_taken !== undefined ? sb.incentive_taken : defaultTaken;
+
+              const newTotalInc = Math.round(newInc + newMatInc + tips);
+              return {
+                ...sb,
+                incentive: newInc,
+                mat_incentive: newMatInc,
+                staff_total_inc: newTotalInc,
+                incentive_taken: taken,
+              };
+            });
+            changes.staff_billing = newBilling;
+            changed = true;
+            details.push("incentives recalculated");
+          }
+
+          const matExp = getMatExp(entry.date);
+          if (matExp > 0 && matExp !== (Number(entry.mat_expense) || 0)) {
+            changes.mat_expense = matExp;
+            changed = true;
+            details.push(`material: ${INR(Number(entry.mat_expense) || 0)} → ${INR(matExp)}`);
+          }
+
+          const dailyExp = await getDailyExp(entry.date);
+          if (dailyExp > 0 && dailyExp !== (Number(entry.others) || 0)) {
+            changes.others = dailyExp;
+            changed = true;
+            details.push(`expenses: ${INR(Number(entry.others) || 0)} → ${INR(dailyExp)}`);
+          }
+
+          if (changed && changes.staff_billing) {
+            const totalBilling = changes.staff_billing.reduce((s, sb) => s + (Number(sb.billing) || 0), 0);
+            const totalMatSale = changes.staff_billing.reduce((s, sb) => s + (Number(sb.material) || 0), 0);
+            const totalSales = totalBilling + totalMatSale;
+            const online = Number(entry.online) || 0;
+            const cash = Math.max(0, totalSales - online);
+            const takenInc = changes.staff_billing.reduce((s, sb) => {
+              if (sb.incentive_taken === false) return s;
+              return s + (Number(sb.incentive) || 0) + (Number(sb.mat_incentive) || 0);
+            }, 0);
+            const tipsPaidCash = changes.staff_billing.reduce((s, sb) => {
+              const t = Number(sb.tips) || 0;
+              return (sb.tip_paid || "cash") === "cash" ? s + t : s;
+            }, 0);
+            const tipsInCash = changes.staff_billing.reduce((s, sb) => {
+              const t = Number(sb.tips) || 0;
+              return (sb.tip_in || "online") === "cash" ? s + t : s;
+            }, 0);
+            const oth = changes.others !== undefined ? changes.others : (Number(entry.others) || 0);
+            const pet = Number(entry.petrol) || 0;
+            changes.cash_in_hand = cash + tipsInCash - tipsPaidCash - takenInc - oth - pet;
+          }
+
+          const prefix = isMulti ? `${branchName} ${entry.date}` : entry.date;
+          if (changed) {
+            changes.recalculated_at = new Date().toISOString();
+            changes.recalculated_by = currentUser?.name || "user";
+            await updateDoc(doc(db, "entries", entry.id), changes);
+            updated++;
+            log.push({ type: "synced", text: `${prefix}: synced`, details });
+          } else {
+            log.push({ type: "skip", text: `${prefix}: already in sync` });
+          }
+          setRecalcLog([...log]);
         }
-        setRecalcLog([...log]);
       }
 
       setRecalcDone(true);
+      const scope = isMulti ? ` across ${targetBranches.length} branches` : "";
       if (updated === 0) {
-        toast({ title: "Already in Sync", message: `All ${branchEntries.length} entries are up to date. Nothing to sync.`, type: "info" });
+        toast({ title: "Already in Sync", message: `All ${totalEntries} entries${scope} are up to date.`, type: "info" });
       } else {
-        toast({ title: "Sync Complete", message: `${updated} of ${branchEntries.length} entries synced successfully.`, type: "success" });
+        toast({ title: "Sync Complete", message: `${updated} of ${totalEntries} entries synced${scope}.`, type: "success" });
       }
     } catch (err) {
       toast({ title: "Error", message: err.message, type: "error" });
@@ -740,7 +781,18 @@ export default function BranchesPage() {
       <div style={{ width: "100%", maxWidth: 560, background: "var(--bg2)", borderRadius: 16, overflow: "hidden", boxShadow: "0 24px 80px rgba(0,0,0,0.5)" }}>
         <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
         <div style={{ padding: "20px 24px", borderBottom: "1px solid var(--border)" }}>
-          <div style={{ fontSize: 17, fontWeight: 800, color: "var(--text)" }}>Recalculate — {recalcModal.branch_name}</div>
+          <div style={{ fontSize: 17, fontWeight: 800, color: "var(--text)" }}>
+            {recalcModal.branches.length === 1
+              ? `Recalculate — ${recalcModal.branches[0].name}`
+              : `Recalculate — ${recalcModal.branches.length} branches`}
+          </div>
+          {recalcModal.branches.length > 1 && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+              {recalcModal.branches.map(b => (
+                <span key={b.id} style={{ fontSize: 10, padding: "3px 8px", borderRadius: 6, background: "var(--bg4)", color: "var(--text2)", fontWeight: 600 }}>{b.name}</span>
+              ))}
+            </div>
+          )}
           <div style={{ fontSize: 12, color: "var(--text3)", marginTop: 4 }}>
             Recalculates incentives (ceil-to-10, per-staff rate, daily/period defaults), updates material expense from allocations, and other expenses from daily expenses.
           </div>
@@ -1010,7 +1062,7 @@ export default function BranchesPage() {
           {b.location && <span style={{ fontSize: 12, color: "var(--text3)" }}>📍 {b.location}</span>}
           {canEdit && (
             <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
-              <button onClick={() => { setRecalcModal({ branch_id: b.id, branch_name: b.name }); setRecalcLog([]); setRecalcDone(false); }}
+              <button onClick={() => { setRecalcModal({ branches: [{ id: b.id, name: b.name }] }); setRecalcLog([]); setRecalcDone(false); }}
                 style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: 8, background: "rgba(96,165,250,0.12)", border: "1px solid rgba(96,165,250,0.3)", color: "var(--blue, #60a5fa)", cursor: "pointer", fontWeight: 600, fontSize: 12 }}>
                 <Icon name="check" size={14} /> Recalculate
               </button>
@@ -1460,6 +1512,26 @@ export default function BranchesPage() {
 
       <PeriodWidget filterMode={filterMode} setFilterMode={setFilterMode} filterYear={filterYear} setFilterYear={setFilterYear} filterMonth={filterMonth} setFilterMonth={setFilterMonth} />
 
+      {/* Bulk recalculate action bar */}
+      {canEdit && selectedBranches.size > 0 && (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", padding: "10px 16px", marginBottom: 12, borderRadius: 10, background: "linear-gradient(135deg, rgba(96,165,250,0.10), rgba(34,211,238,0.06))", border: "1px solid rgba(96,165,250,0.25)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 12 }}>
+            <span style={{ fontWeight: 800, color: "var(--blue, #60a5fa)" }}>{selectedBranches.size}</span>
+            <span style={{ color: "var(--text2)", fontWeight: 600 }}>branch{selectedBranches.size === 1 ? "" : "es"} selected</span>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <button onClick={clearBranchSelection}
+              style={{ padding: "8px 14px", borderRadius: 8, background: "var(--bg4)", color: "var(--text2)", border: "1px solid var(--border2)", fontWeight: 600, fontSize: 11, cursor: "pointer" }}>
+              Clear
+            </button>
+            <button onClick={openBulkRecalc}
+              style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 8, background: "linear-gradient(135deg, var(--accent), var(--gold2))", color: "#000", border: "none", fontWeight: 800, fontSize: 12, cursor: "pointer" }}>
+              <Icon name="check" size={13} /> Recalculate Selected
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Add/Edit Form */}
       {showForm && isAdmin && (
         <div style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 12, padding: 20, marginBottom: 16, boxShadow: "inset 0 2px 10px rgba(0,0,0,.2)" }}>
@@ -1511,6 +1583,17 @@ export default function BranchesPage() {
         <Card style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 11.5, minWidth: 1000 }}>
             <thead><tr>
+              {canEdit && (
+                <TH style={{ width: 32, textAlign: "center" }}>
+                  <input type="checkbox"
+                    checked={branchData.length > 0 && selectedBranches.size === branchData.length}
+                    onChange={() => {
+                      if (selectedBranches.size === branchData.length) clearBranchSelection();
+                      else setSelectedBranches(new Set(branchData.map(d => d.b.id)));
+                    }}
+                    style={{ cursor: "pointer", accentColor: "var(--accent)" }} />
+                </TH>
+              )}
               <TH>Branch</TH>
               <TH>Type</TH>
               <TH right>Income</TH>
@@ -1528,6 +1611,12 @@ export default function BranchesPage() {
             <tbody>
               {branchData.map(({ b, i, vInc, vMatE, vPetrol, fShopRent, fRoomRent, fElec, fWifi, actualSalary, actualLeaves, n }) => (
                 <tr key={b.id} style={{ cursor: "pointer" }} onClick={() => setSelectedBranch(b.id)}>
+                  {canEdit && (
+                    <TD style={{ textAlign: "center" }} onClick={e => { e.stopPropagation(); toggleBranchSelect(b.id); }}>
+                      <input type="checkbox" readOnly checked={selectedBranches.has(b.id)}
+                        style={{ cursor: "pointer", accentColor: "var(--accent)" }} />
+                    </TD>
+                  )}
                   <TD style={{ fontWeight: 700, whiteSpace: "nowrap" }}>
                     <div style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
                       <button onClick={e => { e.stopPropagation(); setAttendanceCalendar(b.id); setAttendanceMonth(filterMode === "month" ? filterPrefix : `${filterYear}-${String(NOW.getMonth() + 1).padStart(2, "0")}`); setAttendanceSelectedDay(null); }}
@@ -1554,6 +1643,7 @@ export default function BranchesPage() {
               ))}
               {branchData.length > 0 && (
                 <tr style={{ background: "var(--bg3)", borderTop: "2px solid var(--border2)" }}>
+                  {canEdit && <TD></TD>}
                   <TD style={{ fontWeight: 800, color: "var(--gold)" }}>TOTAL ({plabel})</TD>
                   <TD> </TD>
                   <TD right style={{ fontWeight: 800, color: "var(--green)" }}>{INR(branchData.reduce((s, d) => s + d.i, 0))}</TD>
@@ -1571,7 +1661,7 @@ export default function BranchesPage() {
                   </TD>
                 </tr>
               )}
-              {branchData.length === 0 && <tr><td colSpan={12} style={{ textAlign: "center", padding: 20, color: "var(--text3)" }}>No branches match filters</td></tr>}
+              {branchData.length === 0 && <tr><td colSpan={canEdit ? 14 : 13} style={{ textAlign: "center", padding: 20, color: "var(--text3)" }}>No branches match filters</td></tr>}
             </tbody>
           </table>
         </Card>
@@ -1580,6 +1670,9 @@ export default function BranchesPage() {
         <DraggableBranchGrid
            branchData={branchData}
            isAdmin={isAdmin}
+           canSelect={canEdit}
+           selectedBranches={selectedBranches}
+           onToggleSelect={toggleBranchSelect}
            onCardClick={setSelectedBranch}
            onCalendarClick={(bid) => { setAttendanceCalendar(bid); setAttendanceMonth(filterMode === "month" ? filterPrefix : `${filterYear}-${String(NOW.getMonth() + 1).padStart(2, "0")}`); setAttendanceSelectedDay(null); }}
         />
@@ -1594,7 +1687,7 @@ export default function BranchesPage() {
 
 // ─── Draggable Branch Card Grid (Branches Page Version) ────────────────────────
 
-function DraggableBranchGrid({ branchData, isAdmin, onCardClick, onCalendarClick }) {
+function DraggableBranchGrid({ branchData, isAdmin, canSelect, selectedBranches, onToggleSelect, onCardClick, onCalendarClick }) {
   const [cardOrder, setCardOrder] = useState([]);
   const [dragOver, setDragOver] = useState(null);
   const [dragging, setDragging] = useState(null);
@@ -1694,6 +1787,14 @@ function DraggableBranchGrid({ branchData, isAdmin, onCardClick, onCalendarClick
             }}
           >
             <div style={{ background: "var(--bg4)", borderBottom: "1px solid var(--border)", padding: "12px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, fontWeight: 700, fontSize: 13, color: "var(--gold)", letterSpacing: "0.5px" }}>
+              {canSelect && (
+                <input type="checkbox" readOnly
+                  checked={selectedBranches?.has(b.id) || false}
+                  onClick={ev => { ev.stopPropagation(); onToggleSelect?.(b.id); }}
+                  onMouseDown={ev => ev.stopPropagation()}
+                  style={{ cursor: "pointer", accentColor: "var(--accent)", flexShrink: 0 }}
+                  title="Select for bulk recalculate" />
+              )}
               <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{b.name}</span>
               <button onClick={ev => { ev.stopPropagation(); onCalendarClick?.(b.id); }}
                 title="Attendance calendar"
