@@ -945,25 +945,29 @@ export default function BranchesPage() {
       for (let d = 1; d <= endDay; d++) {
         const dayPrefix = `${filterYear}-${String(filterMonth).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
         const dEntries = entries.filter(e => e.branch_id === b.id && e.date === dayPrefix);
-        
+
+        // Active staff for the month (needed for leaves + salary)
+        const activeStaffInMonth = staff.filter(s => s.branch_id === b.id && staffStatusForMonth(s, filterPrefix).status !== 'inactive');
+        const dLeaves = leaves.filter(l => l.staff_id && activeStaffInMonth.some(as => as.id === l.staff_id) && l.status === 'approved' && l.date === dayPrefix).reduce((s, l) => s + (l.days || 1), 0);
+
+        // Skip days that have no entries and no approved leaves — avoids
+        // stale rows persisting after the daily entry is deleted.
+        if (dEntries.length === 0 && dLeaves === 0) continue;
+
         const dOnline = dEntries.reduce((s, e) => s + (e.online || 0), 0);
         const dCash = dEntries.reduce((s, e) => s + (e.cash || 0), 0);
         const dMatInc = dEntries.reduce((s, e) => s + (e.staff_billing || []).reduce((ss, sb) => ss + (sb.material || 0), 0), 0);
         const dIncExp = dEntries.reduce((s, e) => s + (e.staff_billing || []).reduce((ss, sb) => ss + (sb.incentive || 0) + (sb.mat_incentive || 0), 0), 0);
         const dMatExp = dEntries.reduce((s, e) => s + (e.mat_expense || 0), 0);
         const dOtherExp = dEntries.reduce((s, e) => s + (e.others || 0) + (e.petrol || 0), 0);
-        
+
         // Fixed costs pro-rated for the day
         const mFixed = (b.shop_rent || 0) + (b.room_rent || 0) + (b.wifi || 0) + (b.shop_elec || 0) + (b.room_elec || 0);
         const dFixed = mFixed * dayFactor;
-        
+
         // Actual Salary for the month pro-rated for that day
-        const activeStaffInMonth = staff.filter(s => s.branch_id === b.id && staffStatusForMonth(s, filterPrefix).status !== 'inactive');
         const mActualSalary = activeStaffInMonth.reduce((s, st) => s + proRataSalary(st, filterPrefix, branches, salHistory, staff, globalSettings), 0);
         const dSalary = mActualSalary * dayFactor;
-        
-        // Leaves on this specific date
-        const dLeaves = leaves.filter(l => l.staff_id && activeStaffInMonth.some(as => as.id === l.staff_id) && l.status === 'approved' && l.date === dayPrefix).reduce((s, l) => s + (l.days || 1), 0);
 
         const dIncome = dOnline + dCash + dMatInc;
         const dExpenses = dIncExp + dMatExp + dOtherExp + dFixed + dSalary;
