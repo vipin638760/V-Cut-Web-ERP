@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, Fragment } from "react";
 import { collection, onSnapshot, query, where, orderBy, addDoc, writeBatch, doc, deleteDoc, getDocs } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
@@ -468,8 +468,8 @@ export default function IncentiveCalculatorPage() {
               const bName = (branchesById.get(d.branch_id)?.name || "—").replace("V-CUT ", "");
               const staffReleases = releasesByStaff[d.id] || [];
               return (
-                <>
-                  <tr key={d.id} style={{ cursor: "pointer", borderBottom: "1px solid var(--border)" }}
+                <Fragment key={d.id}>
+                  <tr style={{ cursor: "pointer", borderBottom: "1px solid var(--border)" }}
                     onClick={() => { setExpandedStaff(expanded ? null : d.id); setSelectedRows(new Set()); }}>
                     {canEdit && mode === "period" && (
                       <TD style={{ textAlign: "center" }} onClick={e => { e.stopPropagation(); toggleSelect(d.id); }}>
@@ -508,7 +508,7 @@ export default function IncentiveCalculatorPage() {
                       </td>
                     </tr>
                   ))}
-                </>
+                </Fragment>
               );
             })}
             {displayed.length > 0 && (
