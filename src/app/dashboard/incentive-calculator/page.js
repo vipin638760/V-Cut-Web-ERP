@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState, useMemo, Fragment } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { collection, onSnapshot, query, where, orderBy, addDoc, writeBatch, doc, deleteDoc, getDocs } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
@@ -463,33 +463,34 @@ export default function IncentiveCalculatorPage() {
             {displayed.length === 0 && (
               <tr><td colSpan={canEdit && mode === "period" ? 11 : 10} style={{ textAlign: "center", padding: 30, color: "var(--text3)", fontSize: 13 }}>No {mode === "daily" ? "daily" : "period"} collectors found in the selected range.</td></tr>
             )}
-            {displayed.map(d => {
+            {displayed.flatMap(d => {
               const expanded = expandedStaff === d.id;
               const bName = (branchesById.get(d.branch_id)?.name || "—").replace("V-CUT ", "");
               const staffReleases = releasesByStaff[d.id] || [];
-              return (
-                <Fragment key={d.id}>
-                  <tr style={{ cursor: "pointer", borderBottom: "1px solid var(--border)" }}
-                    onClick={() => { setExpandedStaff(expanded ? null : d.id); setSelectedRows(new Set()); }}>
-                    {canEdit && mode === "period" && (
-                      <TD style={{ textAlign: "center" }} onClick={e => { e.stopPropagation(); toggleSelect(d.id); }}>
-                        <input type="checkbox" checked={selected.has(d.id)} readOnly
-                          style={{ cursor: "pointer", accentColor: "var(--accent)" }} />
-                      </TD>
-                    )}
-                    <TD style={{ fontWeight: 700 }}>{d.name}</TD>
-                    <TD style={{ color: "var(--text3)" }}>{d.role || "—"}</TD>
-                    <TD>{bName}</TD>
-                    <TD>{d.incentive_pct}%</TD>
-                    <TD right>{d.days}</TD>
-                    <TD right style={{ color: "var(--blue, #60a5fa)" }}>{INR(d.totalSale)}</TD>
-                    <TD right style={{ fontWeight: 700, color: "var(--gold)" }}>{INR(d.totalIncentive)}</TD>
-                    <TD right style={{ color: "var(--green)" }}>{INR(d.takenIncentive)}</TD>
-                    <TD right style={{ fontWeight: 800, color: d.pendingIncentive > 0 ? "var(--orange)" : "var(--text3)" }}>{d.pendingIncentive > 0 ? INR(d.pendingIncentive) : "—"}</TD>
-                    <TD style={{ fontSize: 10, color: "var(--accent)" }}>{expanded ? "▲" : "▼"}</TD>
-                  </tr>
-                  {/* Show past releases inline */}
-                  {staffReleases.length > 0 && expanded && staffReleases.map((r, ri) => (
+              const rows = [
+                <tr key={`row-${d.id}`} style={{ cursor: "pointer", borderBottom: "1px solid var(--border)" }}
+                  onClick={() => { setExpandedStaff(expanded ? null : d.id); setSelectedRows(new Set()); }}>
+                  {canEdit && mode === "period" && (
+                    <TD style={{ textAlign: "center" }} onClick={e => { e.stopPropagation(); toggleSelect(d.id); }}>
+                      <input type="checkbox" checked={selected.has(d.id)} readOnly
+                        style={{ cursor: "pointer", accentColor: "var(--accent)" }} />
+                    </TD>
+                  )}
+                  <TD style={{ fontWeight: 700 }}>{d.name}</TD>
+                  <TD style={{ color: "var(--text3)" }}>{d.role || "—"}</TD>
+                  <TD>{bName}</TD>
+                  <TD>{d.incentive_pct}%</TD>
+                  <TD right>{d.days}</TD>
+                  <TD right style={{ color: "var(--blue, #60a5fa)" }}>{INR(d.totalSale)}</TD>
+                  <TD right style={{ fontWeight: 700, color: "var(--gold)" }}>{INR(d.totalIncentive)}</TD>
+                  <TD right style={{ color: "var(--green)" }}>{INR(d.takenIncentive)}</TD>
+                  <TD right style={{ fontWeight: 800, color: d.pendingIncentive > 0 ? "var(--orange)" : "var(--text3)" }}>{d.pendingIncentive > 0 ? INR(d.pendingIncentive) : "—"}</TD>
+                  <TD style={{ fontSize: 10, color: "var(--accent)" }}>{expanded ? "▲" : "▼"}</TD>
+                </tr>
+              ];
+              if (expanded && staffReleases.length > 0) {
+                staffReleases.forEach((r, ri) => {
+                  rows.push(
                     <tr key={`rel-${d.id}-${ri}`} style={{ background: r.reversed ? "rgba(248,113,113,0.04)" : "rgba(74,222,128,0.04)" }}>
                       <td colSpan={canEdit && mode === "period" ? 12 : 11} style={{ padding: "6px 16px" }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 11, color: r.reversed ? "var(--red)" : "var(--green)" }}>
@@ -507,9 +508,10 @@ export default function IncentiveCalculatorPage() {
                         </div>
                       </td>
                     </tr>
-                  ))}
-                </Fragment>
-              );
+                  );
+                });
+              }
+              return rows;
             })}
             {displayed.length > 0 && (
               <tr style={{ background: "var(--bg3)", fontWeight: 700, borderTop: "2px solid var(--border2)" }}>
