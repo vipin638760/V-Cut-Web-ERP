@@ -28,17 +28,16 @@ export default async function Icon() {
           justifyContent: "center",
           width: "100%",
           height: "100%",
-          background: "#0b0b0d",
-          borderRadius: 12,
+          background: "transparent",
         }}
       >
         <span
           style={{
             fontFamily: fontData ? "GreatVibes" : "cursive",
             color: "#f06464",
-            fontSize: 74,
+            fontSize: 92,
             lineHeight: 1,
-            transform: "translateY(6px)",
+            transform: "translateY(10px)",
           }}
         >
           V
