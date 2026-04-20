@@ -256,6 +256,7 @@ export default function DashboardLayout({ children }) {
                 </div>
               )}
 
+              <RefreshButton />
               {(user.role === "admin" || user.role === "accountant") && <BellNotifications currentUser={user} />}
               <ThemeToggle size={34} />
               <IconBtn name="plus" variant="primary" title="New Entry" onClick={() => router.push("/dashboard/entry")} size={34} />
@@ -266,5 +267,29 @@ export default function DashboardLayout({ children }) {
       </main>
       {ConfirmDialog}
     </div>
+  );
+}
+
+function RefreshButton() {
+  const [spinning, setSpinning] = useState(false);
+  const handle = () => {
+    if (spinning) return;
+    setSpinning(true);
+    window.dispatchEvent(new CustomEvent("app:refresh"));
+    setTimeout(() => setSpinning(false), 1200);
+  };
+  return (
+    <>
+      <style>{`@keyframes refreshSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+      <button onClick={handle} title="Refresh data" disabled={spinning}
+        style={{ width: 34, height: 34, borderRadius: 10, background: spinning ? "rgba(96,165,250,0.18)" : "var(--bg3)", border: "1px solid rgba(96,165,250,0.25)", color: "var(--blue, #60a5fa)", display: "inline-flex", alignItems: "center", justifyContent: "center", cursor: spinning ? "wait" : "pointer", flexShrink: 0 }}>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"
+          style={{ animation: spinning ? "refreshSpin 0.8s linear infinite" : "none" }}>
+          <polyline points="23 4 23 10 17 10"/>
+          <polyline points="1 20 1 14 7 14"/>
+          <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+        </svg>
+      </button>
+    </>
   );
 }

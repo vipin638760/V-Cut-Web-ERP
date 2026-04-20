@@ -98,6 +98,18 @@ export default function DashboardPage() {
   const [kpiSection, setKpiSection] = useState("all");
 
   const [subTick, setSubTick] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
+
+  // Listen for the Command Bar's Refresh button: re-subscribe + show progress
+  useEffect(() => {
+    const onRefresh = () => {
+      setRefreshing(true);
+      setSubTick(t => t + 1);
+      setTimeout(() => setRefreshing(false), 1200);
+    };
+    window.addEventListener("app:refresh", onRefresh);
+    return () => window.removeEventListener("app:refresh", onRefresh);
+  }, []);
 
   useEffect(() => {
     if (!db) return;
@@ -887,19 +899,20 @@ export default function DashboardPage() {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 28 }}>
       {/* Admin Header */}
+      {/* Top progress bar during refresh (listens to Refresh button in Command Bar) */}
+      {refreshing && (
+        <div style={{ position: "fixed", top: 0, left: 0, right: 0, height: 3, background: "transparent", zIndex: 1200, overflow: "hidden" }}>
+          <style>{`@keyframes refreshSlide { 0% { transform: translateX(-100%); } 100% { transform: translateX(300%); } }`}</style>
+          <div style={{ height: "100%", width: "40%", background: "linear-gradient(90deg, transparent, var(--accent), var(--gold2), transparent)", animation: "refreshSlide 1.1s linear infinite" }} />
+        </div>
+      )}
+
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 20, flexWrap: "wrap" }}>
         <div>
           <h2 style={{ fontSize: 28, fontWeight: 800, color: "var(--text)", letterSpacing: -0.5, margin: 0, fontFamily: "var(--font-headline, var(--font-outfit))" }}>Organizational Pulse</h2>
           <p style={{ fontSize: 13, color: "var(--text3)", fontWeight: 500, marginTop: 6 }}>System oversight and branch network analytics.</p>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-          <button onClick={() => setSubTick(t => t + 1)}
-            title="Re-subscribe to live data"
-            style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: 10, background: "rgba(96,165,250,0.12)", border: "1px solid rgba(96,165,250,0.3)", color: "var(--blue, #60a5fa)", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>
-            <Icon name="trending" size={13} /> Refresh
-          </button>
-          <PeriodWidget filterMode={filterMode} setFilterMode={setFilterMode} filterYear={filterYear} setFilterYear={setFilterYear} filterMonth={filterMonth} setFilterMonth={setFilterMonth} />
-        </div>
+        <PeriodWidget filterMode={filterMode} setFilterMode={setFilterMode} filterYear={filterYear} setFilterYear={setFilterYear} filterMonth={filterMonth} setFilterMonth={setFilterMonth} />
       </div>
 
       {/* Admin Metrics */}
