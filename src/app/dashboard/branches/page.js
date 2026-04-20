@@ -1162,12 +1162,13 @@ export default function BranchesPage() {
 
         {/* Section picker — click a card to reveal its detail table below.
             Multiple cards may be open at once so we can cross-reference numbers. */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 10, marginBottom: 16 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 12, marginBottom: 18 }}>
           {[
             { id: "cashflow", label: "Daily Cash Flow", sub: "Match bank deposits", emoji: "💰", accent: "var(--blue, #60a5fa)" },
             { id: "performance", label: "Performance Breakdown", sub: filterMode === "month" ? "Day-by-day P&L" : "Month-by-month P&L", emoji: "📊", accent: "var(--gold)" },
             { id: "materials", label: "Materials Received", sub: "Stock transfers", emoji: "📦", accent: "var(--accent)" },
             { id: "entries", label: "Recent Entries", sub: "Latest daily entries", emoji: "📝", accent: "var(--green)" },
+            { id: "staff", label: `Branch Staff (${branchStaff.length})`, sub: "Roster · billing · leaves", emoji: "👥", accent: "var(--accent)" },
           ].map(s => {
             const isOpen = openSections.has(s.id);
             return (
@@ -1175,23 +1176,24 @@ export default function BranchesPage() {
                 role="button" tabIndex={0}
                 onKeyDown={(ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); toggleSection(s.id); } }}
                 style={{
-                  padding: "12px 14px",
-                  borderRadius: 10,
+                  padding: "18px 20px",
+                  borderRadius: 12,
                   background: isOpen ? "rgba(var(--accent-rgb),0.1)" : "var(--bg3)",
                   border: `1.5px solid ${isOpen ? "var(--accent)" : "var(--border2)"}`,
                   cursor: "pointer",
                   transition: "background .15s, border .15s, transform .15s",
                   transform: isOpen ? "translateY(-1px)" : "none",
-                  boxShadow: isOpen ? "0 4px 14px rgba(var(--accent-rgb),0.18)" : "none",
+                  boxShadow: isOpen ? "0 6px 18px rgba(var(--accent-rgb),0.22)" : "none",
                   userSelect: "none",
-                  display: "flex", alignItems: "center", gap: 10,
+                  display: "flex", alignItems: "center", gap: 14,
+                  minHeight: 76,
                 }}>
-                <div style={{ fontSize: 22 }}>{s.emoji}</div>
+                <div style={{ fontSize: 30, lineHeight: 1, flexShrink: 0 }}>{s.emoji}</div>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 12, fontWeight: 800, color: s.accent }}>{s.label}</div>
-                  <div style={{ fontSize: 10, color: "var(--text3)", marginTop: 2 }}>{s.sub}</div>
+                  <div style={{ fontSize: 14, fontWeight: 800, color: s.accent, lineHeight: 1.2 }}>{s.label}</div>
+                  <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 4 }}>{s.sub}</div>
                 </div>
-                <div style={{ fontSize: 11, fontWeight: 700, color: isOpen ? "var(--accent)" : "var(--text3)" }}>{isOpen ? "▲" : "▼"}</div>
+                <div style={{ fontSize: 13, fontWeight: 800, color: isOpen ? "var(--accent)" : "var(--text3)", flexShrink: 0 }}>{isOpen ? "▲" : "▼"}</div>
               </div>
             );
           })}
@@ -1259,6 +1261,7 @@ export default function BranchesPage() {
         })()}
 
         {/* Staff Table */}
+        {openSections.has("staff") && (<>
         <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 12, color: "var(--gold)" }}>Branch Staff ({branchStaff.length})</div>
         <Card>
           <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12.5 }}>
@@ -1338,6 +1341,7 @@ export default function BranchesPage() {
             </tbody>
           </table>
         </Card>
+        </>)}
 
         {/* Individual Staff Monthly History Breakdown — yearly view only */}
         {selectedStaffHistory && filterMode === "year" && (() => {
