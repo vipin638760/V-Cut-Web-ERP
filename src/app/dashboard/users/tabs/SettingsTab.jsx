@@ -20,6 +20,10 @@ export default function SettingsTab() {
     mens_leaves: 2,
     unisex_leaves: 3
   });
+  // Which source(s) feed Material Cost in the Variable Expense totals.
+  // Default = allocations only (preserves existing behaviour).
+  const [matUseLumpsum, setMatUseLumpsum] = useState(false);
+  const [matUseAllocations, setMatUseAllocations] = useState(true);
 
   useEffect(() => {
     if (!db) return;
@@ -39,6 +43,10 @@ export default function SettingsTab() {
           mens_leaves: data.mens_leaves || 2,
           unisex_leaves: data.unisex_leaves || 3
         });
+        setMatUseLumpsum(data.mat_use_lumpsum === true);
+        // Default true if not yet configured — preserves the existing
+        // behaviour where Material Cost comes from allocations.
+        setMatUseAllocations(data.mat_use_allocations !== false);
       }
       setLoading(false);
     });
@@ -52,6 +60,8 @@ export default function SettingsTab() {
       await setDoc(doc(db, "settings", "global"), {
         gst_pct: Number(gstPct) || 0,
         ...rates,
+        mat_use_lumpsum: matUseLumpsum,
+        mat_use_allocations: matUseAllocations,
         updated_at: new Date().toISOString()
       }, { merge: true });
     } catch (err) {
@@ -129,6 +139,50 @@ export default function SettingsTab() {
               )}
             </div>
           </div>
+        </Card>
+
+        {/* Material Expense Source */}
+        <Card style={{ padding: 32 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
+            <div style={{ background: "rgba(74,222,128,0.1)", padding: 10, borderRadius: 12 }}>
+              <Icon name="wallet" size={20} color="var(--green)" />
+            </div>
+            <h4 style={{ fontSize: 14, fontWeight: 900, color: "var(--text)", textTransform: "uppercase", letterSpacing: 1.5 }}>Material Expense Source</h4>
+          </div>
+          <p style={{ fontSize: 13, color: "var(--text3)", marginBottom: 20, lineHeight: 1.6, maxWidth: 720 }}>
+            Pick which source(s) feed <strong style={{ color: "var(--red)" }}>Material Cost</strong> inside Variable Expense. Tick <em>Material Allocations</em> for HQ stock transfers, <em>Lumpsum</em> for material typed into the Daily Entry form, or both to add them together.
+          </p>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
+            {[
+              { id: "allocations", label: "Material Allocations", sub: "From HQ stock transfers (materials received)", value: matUseAllocations, set: setMatUseAllocations, color: "var(--accent)" },
+              { id: "lumpsum", label: "Lumpsum Material", sub: "Manually typed on the Daily Entry form", value: matUseLumpsum, set: setMatUseLumpsum, color: "var(--gold)" },
+            ].map(o => (
+              <label key={o.id}
+                style={{
+                  flex: "1 1 280px",
+                  minWidth: 260,
+                  padding: "14px 16px",
+                  borderRadius: 12,
+                  background: o.value ? "rgba(var(--accent-rgb),0.08)" : "rgba(255,255,255,0.02)",
+                  border: `1px solid ${o.value ? "rgba(var(--accent-rgb),0.4)" : "var(--border2)"}`,
+                  cursor: "pointer",
+                  display: "flex", alignItems: "flex-start", gap: 12,
+                  transition: "background .15s, border-color .15s",
+                }}>
+                <input type="checkbox" checked={o.value} onChange={e => o.set(e.target.checked)}
+                  style={{ marginTop: 3, width: 18, height: 18, accentColor: "var(--accent)", cursor: "pointer", flexShrink: 0 }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 800, color: o.color, marginBottom: 3 }}>{o.label}</div>
+                  <div style={{ fontSize: 11, color: "var(--text3)" }}>{o.sub}</div>
+                </div>
+              </label>
+            ))}
+          </div>
+          {!matUseAllocations && !matUseLumpsum && (
+            <div style={{ marginTop: 12, fontSize: 11, color: "var(--red)", fontWeight: 700 }}>
+              ⚠ Both sources are off — Material Cost will be ₹0 across all reports.
+            </div>
+          )}
         </Card>
 
         {/* Division Rules */}

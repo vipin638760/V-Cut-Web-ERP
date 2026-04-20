@@ -171,16 +171,19 @@ export default function DashboardPage() {
       .reduce((s, e) => s + (e.online || 0) + (e.cash || 0) +
         (e.staff_billing || []).reduce((ss, sb) => ss + (sb.material || 0), 0), 0);
 
+  // Material source toggles from Master Setup → Material Expense Source.
+  const matUseAllocations = globalSettings?.mat_use_allocations !== false;
+  const matUseLumpsum = globalSettings?.mat_use_lumpsum === true;
+  const allocsTotal = (arr) => arr.reduce((s, a) => s + (Number(a.total) || (a.items || []).reduce((ss, it) => ss + (Number(it.line_total) || (Number(it.qty) * Number(it.price_at_transfer)) || 0), 0)), 0);
+
   const getExpenses = (bid) => {
-    const fromEntries = entries
-      .filter(e => e.branch_id === bid && inPeriod(e.date))
-      .reduce((s, e) => s +
-        (e.staff_billing || []).reduce((ss, sb) => ss + (sb.incentive || 0) + (sb.mat_incentive || 0), 0) +
-        (e.others || 0) + (e.petrol || 0), 0);
-    const matFromAllocs = materialAllocations
-      .filter(a => a.branch_id === bid && inPeriod(a.date || (a.transferred_at || "").slice(0, 10)))
-      .reduce((s, a) => s + (Number(a.total) || (a.items || []).reduce((ss, it) => ss + (Number(it.line_total) || (Number(it.qty) * Number(it.price_at_transfer)) || 0), 0)), 0);
-    return fromEntries + matFromAllocs;
+    const bEntries = entries.filter(e => e.branch_id === bid && inPeriod(e.date));
+    const baseExp = bEntries.reduce((s, e) => s +
+      (e.staff_billing || []).reduce((ss, sb) => ss + (sb.incentive || 0) + (sb.mat_incentive || 0), 0) +
+      (e.others || 0) + (e.petrol || 0), 0);
+    const allocMat = allocsTotal(materialAllocations.filter(a => a.branch_id === bid && inPeriod(a.date || (a.transferred_at || "").slice(0, 10))));
+    const lumpMat = bEntries.reduce((s, e) => s + (Number(e.mat_expense) || 0), 0);
+    return baseExp + (matUseAllocations ? allocMat : 0) + (matUseLumpsum ? lumpMat : 0);
   };
 
   // Prorata Factor for Fixed Costs
@@ -208,14 +211,10 @@ export default function DashboardPage() {
     const income  = iOnline + iCash + iMatS;
 
     const vInc   = bEntries.reduce((s, e) => s + (e.staff_billing || []).reduce((ss, sb) => ss + (sb.incentive || 0) + (sb.mat_incentive || 0), 0), 0);
-    // Source of truth for material cost is the material_allocations collection
-    // (what HQ actually shipped). entry.mat_expense can drift when allocations
-    // are added or edited after the daily entry was saved, so we sum from
-    // allocations directly — matches the Materials Received total on the
-    // branch detail instead of the stale stored value.
-    const vMatE = materialAllocations
-      .filter(a => a.branch_id === b.id && inPeriod(a.date || (a.transferred_at || "").slice(0, 10)))
-      .reduce((s, a) => s + (Number(a.total) || (a.items || []).reduce((ss, it) => ss + (Number(it.line_total) || (Number(it.qty) * Number(it.price_at_transfer)) || 0), 0)), 0);
+    // Material cost respects Master Setup → Material Expense Source toggles.
+    const vMatAlloc = allocsTotal(materialAllocations.filter(a => a.branch_id === b.id && inPeriod(a.date || (a.transferred_at || "").slice(0, 10))));
+    const vMatLump = bEntries.reduce((s, e) => s + (Number(e.mat_expense) || 0), 0);
+    const vMatE = (matUseAllocations ? vMatAlloc : 0) + (matUseLumpsum ? vMatLump : 0);
     const vOther = bEntries.reduce((s, e) => s + (e.others || 0) + (e.petrol || 0), 0);
     const vPetrol = bEntries.reduce((s, e) => s + (e.petrol || 0), 0);
 

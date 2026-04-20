@@ -948,6 +948,11 @@ export default function BranchesPage() {
     const isPastMonth = !isPastYear && filterMonth < currentMonthNum;
     const isCurrentMonth = !isPastYear && filterYear === currentYear && filterMonth === currentMonthNum;
 
+    // Material source toggles from global settings — default: allocations only.
+    const matUseAllocations = globalSettings?.mat_use_allocations !== false;
+    const matUseLumpsum = globalSettings?.mat_use_lumpsum === true;
+    const allocsTotal = (arr) => arr.reduce((s, a) => s + (Number(a.total) || (a.items || []).reduce((ss, it) => ss + (Number(it.line_total) || (Number(it.qty) * Number(it.price_at_transfer)) || 0), 0)), 0);
+
     if (filterMode === "month") {
       const isFutureMonth = (filterYear > currentYear) || (filterYear === currentYear && filterMonth > currentMonthNum);
       const daysCount = new Date(filterYear, filterMonth, 0).getDate();
@@ -972,13 +977,13 @@ export default function BranchesPage() {
         const dIncExp = dEntries.reduce((s, e) => s + (e.staff_billing || []).reduce((ss, sb) => ss + (sb.incentive || 0) + (sb.mat_incentive || 0), 0), 0);
         // Pull the day's material cost from the allocations collection rather
         // than stored entry.mat_expense so the numbers match Materials Received.
-        const dMatExp = materialAllocations
-          .filter(a => a.branch_id === b.id && (a.date || (a.transferred_at || "").slice(0, 10)) === dayPrefix)
-          .reduce((s, a) => s + (Number(a.total) || (a.items || []).reduce((ss, it) => ss + (Number(it.line_total) || (Number(it.qty) * Number(it.price_at_transfer)) || 0), 0)), 0);
-        // Lumpsum material = whatever the accountant typed into the Daily
-        // Entry form's material field. Shown alongside allocation-based Mat.
-        // so both figures are visible.
+        // Allocation-based material for this day (always computed for display).
+        const dAllocMat = allocsTotal(materialAllocations.filter(a => a.branch_id === b.id && (a.date || (a.transferred_at || "").slice(0, 10)) === dayPrefix));
+        // Lumpsum material typed into the Daily Entry form.
         const dLumpMat = dEntries.reduce((s, e) => s + (Number(e.mat_expense) || 0), 0);
+        // Effective material cost that flows into expenses / P&L, based on
+        // the admin's toggles in Master Setup → Material Expense Source.
+        const dMatExp = (matUseAllocations ? dAllocMat : 0) + (matUseLumpsum ? dLumpMat : 0);
         const dOtherExp = dEntries.reduce((s, e) => s + (e.others || 0) + (e.petrol || 0), 0);
 
         // Fixed costs pro-rated for the day
@@ -996,7 +1001,7 @@ export default function BranchesPage() {
           label: `${d} ${new Date(filterYear, filterMonth - 1).toLocaleString('default', { month: 'short' })}`,
           income: dIncome,
           incentives: dIncExp,
-          material: dMatExp,
+          material: dAllocMat,
           lumpsumMat: dLumpMat,
           others: dOtherExp,
           shopRent: (b.shop_rent || 0) * dayFactor,
@@ -1018,10 +1023,9 @@ export default function BranchesPage() {
         const mCash = mEntries.reduce((s, e) => s + (e.cash || 0), 0);
         const mMatInc = mEntries.reduce((s, e) => s + (e.staff_billing || []).reduce((ss, sb) => ss + (sb.material || 0), 0), 0);
         const mIncExp = mEntries.reduce((s, e) => s + (e.staff_billing || []).reduce((ss, sb) => ss + (sb.incentive || 0) + (sb.mat_incentive || 0), 0), 0);
-        const mMatExp = materialAllocations
-          .filter(a => a.branch_id === b.id && (a.date || (a.transferred_at || "").slice(0, 10) || "").startsWith(monthPrefix))
-          .reduce((s, a) => s + (Number(a.total) || (a.items || []).reduce((ss, it) => ss + (Number(it.line_total) || (Number(it.qty) * Number(it.price_at_transfer)) || 0), 0)), 0);
+        const mAllocMat = allocsTotal(materialAllocations.filter(a => a.branch_id === b.id && (a.date || (a.transferred_at || "").slice(0, 10) || "").startsWith(monthPrefix)));
         const mLumpMat = mEntries.reduce((s, e) => s + (Number(e.mat_expense) || 0), 0);
+        const mMatExp = (matUseAllocations ? mAllocMat : 0) + (matUseLumpsum ? mLumpMat : 0);
         const mOtherExp = mEntries.reduce((s, e) => s + (e.others || 0) + (e.petrol || 0), 0);
         
         const mFixed = (b.shop_rent || 0) + (b.room_rent || 0) + (b.wifi || 0) + (b.shop_elec || 0) + (b.room_elec || 0);
@@ -1036,7 +1040,7 @@ export default function BranchesPage() {
           label: new Date(filterYear, m - 1).toLocaleString('default', { month: 'short' }),
           income: mIncome,
           incentives: mIncExp,
-          material: mMatExp,
+          material: mAllocMat,
           lumpsumMat: mLumpMat,
           others: mOtherExp,
           shopRent: (b.shop_rent || 0),
@@ -1062,13 +1066,11 @@ export default function BranchesPage() {
       const mCash = mEntries.reduce((s, e) => s + (e.cash || 0), 0);
       const mMatInc = mEntries.reduce((s, e) => s + (e.staff_billing || []).reduce((ss, sb) => ss + (sb.material || 0), 0), 0);
       const mIncExp = mEntries.reduce((s, e) => s + (e.staff_billing || []).reduce((ss, sb) => ss + (sb.incentive || 0) + (sb.mat_incentive || 0), 0), 0);
-      // Source of truth for material cost is the material_allocations collection
-      // (what HQ actually shipped). entry.mat_expense can drift if an entry was
-      // saved before allocations existed or if allocations were edited after, so
-      // we sum from allocations directly for display.
-      const mMatExp = materialAllocations
-        .filter(a => a.branch_id === b.id && (a.date || (a.transferred_at || "").slice(0, 10) || "").startsWith(monthPrefix))
-        .reduce((s, a) => s + (Number(a.total) || (a.items || []).reduce((ss, it) => ss + (Number(it.line_total) || (Number(it.qty) * Number(it.price_at_transfer)) || 0), 0)), 0);
+      // Material cost respects the admin's source toggles (allocations /
+      // lumpsum / both) from Master Setup → Material Expense Source.
+      const mAllocMatKpi = allocsTotal(materialAllocations.filter(a => a.branch_id === b.id && (a.date || (a.transferred_at || "").slice(0, 10) || "").startsWith(monthPrefix)));
+      const mLumpMatKpi = mEntries.reduce((s, e) => s + (Number(e.mat_expense) || 0), 0);
+      const mMatExp = (matUseAllocations ? mAllocMatKpi : 0) + (matUseLumpsum ? mLumpMatKpi : 0);
       const mOtherExp = mEntries.reduce((s, e) => s + (e.others || 0) + (e.petrol || 0), 0);
       const mFixed = (b.shop_rent || 0) + (b.room_rent || 0) + (b.wifi || 0) + (b.shop_elec || 0) + (b.room_elec || 0);
       const actSal = staff.filter(as => as.branch_id === b.id && staffStatusForMonth(as, monthPrefix).status !== 'inactive').reduce((s, st) => s + proRataSalary(st, monthPrefix, branches, salHistory, staff, globalSettings), 0);
