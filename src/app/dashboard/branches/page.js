@@ -1758,29 +1758,36 @@ function DraggableBranchGrid({ branchData, isAdmin, canSelect, selectedBranches,
       {ordered.map(({ b, i, vInc, vMatE, vOther, fShopRent, fRoomRent, fWifi, fElec, actualSalary, actualLeaves, n, staffCount, totalDeficit, totalExcess, netDiff, reconciledDays }) => {
         const isDragging = dragging === b.id;
         const isOver = dragOver === b.id;
-        
+        const isSelected = selectedBranches?.has(b.id) || false;
+
         return (
-          <div key={b.id} 
+          <div key={b.id}
             draggable="true"
             onDragStart={(ev) => handleDragStart(ev, b.id)}
             onDragOver={(ev) => handleDragOver(ev, b.id)}
             onDrop={(ev) => handleDrop(ev, b.id)}
             onDragEnd={handleDragEnd}
             onClick={(ev) => handleClick(ev, b.id)}
-            style={{ 
-              background: "linear-gradient(160deg,var(--bg3),var(--bg2))", 
-              border: isOver ? "2px dashed var(--gold)" : `2px solid ${n >= 0 ? "var(--green)" : "var(--red)"}`, 
-              borderRadius: 12, 
-              overflow: "hidden", 
-              cursor: isDragging ? "grabbing" : "grab", 
-              transition: "transform .2s, box-shadow .2s, border .2s", 
+            style={{
+              background: "linear-gradient(160deg,var(--bg3),var(--bg2))",
+              border: isOver
+                ? "2px dashed var(--gold)"
+                : isSelected
+                  ? "2px solid var(--accent)"
+                  : `2px solid ${n >= 0 ? "var(--green)" : "var(--red)"}`,
+              borderRadius: 12,
+              overflow: "hidden",
+              cursor: isDragging ? "grabbing" : "grab",
+              transition: "transform .2s, box-shadow .2s, border .2s",
               opacity: isDragging ? 0.4 : 1,
               transform: isOver ? "scale(1.02)" : "scale(1)",
               boxShadow: isOver
                 ? "0 8px 24px rgba(var(--gold-rgb),0.25)"
                 : isDragging
                   ? "0 12px 32px rgba(0,0,0,0.5)"
-                  : n >= 0 ? "0 4px 16px rgba(74,222,128,.15)" : "0 4px 16px rgba(248,113,113,.15)",
+                  : isSelected
+                    ? "0 4px 20px rgba(var(--accent-rgb),0.35)"
+                    : n >= 0 ? "0 4px 16px rgba(74,222,128,.15)" : "0 4px 16px rgba(248,113,113,.15)",
               userSelect: "none"
             }}
             onMouseEnter={ev => {
@@ -1792,12 +1799,32 @@ function DraggableBranchGrid({ branchData, isAdmin, canSelect, selectedBranches,
           >
             <div style={{ background: "var(--bg4)", borderBottom: "1px solid var(--border)", padding: "12px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, fontWeight: 700, fontSize: 13, color: "var(--gold)", letterSpacing: "0.5px" }}>
               {canSelect && (
-                <input type="checkbox" readOnly
-                  checked={selectedBranches?.has(b.id) || false}
-                  onClick={ev => { ev.stopPropagation(); onToggleSelect?.(b.id); }}
+                <span
+                  role="button"
+                  tabIndex={-1}
+                  draggable={false}
+                  onClick={ev => { ev.stopPropagation(); ev.preventDefault(); onToggleSelect?.(b.id); }}
                   onMouseDown={ev => ev.stopPropagation()}
-                  style={{ cursor: "pointer", accentColor: "var(--accent)", flexShrink: 0 }}
-                  title="Select for bulk recalculate" />
+                  onPointerDown={ev => ev.stopPropagation()}
+                  onDragStart={ev => { ev.preventDefault(); ev.stopPropagation(); }}
+                  title={isSelected ? "Click to deselect" : "Click to select for bulk recalculate"}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    width: 26, height: 26,
+                    marginLeft: -4,
+                    borderRadius: 6,
+                    background: isSelected ? "rgba(var(--accent-rgb),0.18)" : "transparent",
+                    border: isSelected ? "1px solid rgba(var(--accent-rgb),0.5)" : "1px solid transparent",
+                    cursor: "pointer",
+                    transition: "background .15s, border .15s",
+                    flexShrink: 0,
+                  }}>
+                  <input type="checkbox" readOnly checked={isSelected}
+                    tabIndex={-1}
+                    style={{ cursor: "pointer", accentColor: "var(--accent)", pointerEvents: "none", margin: 0 }} />
+                </span>
               )}
               <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{b.name}</span>
               <button onClick={ev => { ev.stopPropagation(); onCalendarClick?.(b.id); }}
