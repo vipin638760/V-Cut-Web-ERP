@@ -275,12 +275,20 @@ function RefreshButton() {
   const handle = () => {
     if (spinning) return;
     setSpinning(true);
+    // Give any listening page (e.g. dashboard) a chance to do a soft refresh
+    // and render its own progress indicator; then force a full reload so the
+    // action works uniformly on every route and role.
     window.dispatchEvent(new CustomEvent("app:refresh"));
-    setTimeout(() => setSpinning(false), 1200);
+    setTimeout(() => {
+      if (typeof window !== "undefined") window.location.reload();
+    }, 350);
   };
   return (
     <>
-      <style>{`@keyframes refreshSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+      <style>{`
+        @keyframes refreshSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        @keyframes refreshTopBar { 0% { transform: translateX(-100%); } 100% { transform: translateX(300%); } }
+      `}</style>
       <button onClick={handle} title="Refresh data" disabled={spinning}
         style={{ width: 34, height: 34, borderRadius: 10, background: spinning ? "rgba(96,165,250,0.18)" : "var(--bg3)", border: "1px solid rgba(96,165,250,0.25)", color: "var(--blue, #60a5fa)", display: "inline-flex", alignItems: "center", justifyContent: "center", cursor: spinning ? "wait" : "pointer", flexShrink: 0 }}>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"
@@ -290,6 +298,11 @@ function RefreshButton() {
           <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
         </svg>
       </button>
+      {spinning && (
+        <div style={{ position: "fixed", top: 0, left: 0, right: 0, height: 3, background: "transparent", zIndex: 1200, overflow: "hidden", pointerEvents: "none" }}>
+          <div style={{ height: "100%", width: "40%", background: "linear-gradient(90deg, transparent, var(--accent), var(--gold2), transparent)", animation: "refreshTopBar 1.1s linear infinite" }} />
+        </div>
+      )}
     </>
   );
 }
