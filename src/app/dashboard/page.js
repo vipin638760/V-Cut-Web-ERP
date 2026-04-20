@@ -249,16 +249,19 @@ export default function DashboardPage() {
       actualLeaves += activeStaffInMonth.reduce((s, st) => s + staffLeavesInMonth(st.id, mPrefix, leaves), 0);
     }
 
-    const expenses = vInc + vMatE + vOther + fFixedTot + actualSalary;
-    const net      = income - expenses;
     const totalGst = bEntries.reduce((s, ent) => s + (ent.total_gst || 0), 0);
+    const expenses = vInc + vMatE + vOther + fFixedTot + actualSalary;
+    // Use the full net (after GST) so the card border matches 'Full Net P&L'
+    // on the branch detail — previously cards could look green while the
+    // aggregate P&L was still negative because GST was left out here.
+    const net = income - expenses - totalGst;
 
-    return { 
-      b, 
-      i: income, 
-      e: expenses, 
-      n: net, 
-      staffCount: staff.filter(s => s.branch_id === b.id).length, 
+    return {
+      b,
+      i: income,
+      e: expenses,
+      n: net,
+      staffCount: staff.filter(s => s.branch_id === b.id).length,
       vInc, vMatE, vOther, vPetrol,
       fShopRent, fRoomRent, fWifi, fElec,
       actualSalary, actualLeaves,
