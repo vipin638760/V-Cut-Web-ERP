@@ -1066,6 +1066,21 @@ export default function BranchesPage() {
 
     return (
       <div>
+        {/* Pill-row table styling — each row becomes a rounded card with breathing room.
+            Scoped class so it only applies to tables that opt in. */}
+        <style>{`
+          .pill-table { border-collapse: separate !important; border-spacing: 0 8px !important; }
+          .pill-table thead th { background: transparent !important; border-bottom: none !important; padding-bottom: 4px !important; }
+          .pill-table tbody tr { transition: transform .15s, box-shadow .15s; }
+          .pill-table tbody tr > td { background: var(--bg3); border-top: 1px solid rgba(255,255,255,0.04); border-bottom: 1px solid rgba(0,0,0,0.2); padding: 14px 18px; }
+          .pill-table tbody tr > td:first-child { border-left: 1px solid rgba(255,255,255,0.04); border-radius: 10px 0 0 10px; }
+          .pill-table tbody tr > td:last-child { border-right: 1px solid rgba(0,0,0,0.2); border-radius: 0 10px 10px 0; }
+          .pill-table tbody tr:hover > td { background: var(--bg4); }
+          .pill-table tbody tr.totals-row > td { background: linear-gradient(180deg, var(--bg4), var(--bg3)) !important; border-top: 1px solid rgba(var(--gold-rgb),0.25); border-bottom: 1px solid rgba(var(--gold-rgb),0.25); }
+          .pill-table tbody tr.totals-row > td:first-child { border-left: 1px solid rgba(var(--gold-rgb),0.25); }
+          .pill-table tbody tr.totals-row > td:last-child { border-right: 1px solid rgba(var(--gold-rgb),0.25); }
+        `}</style>
+
         {/* Back header */}
         <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20, flexWrap: "wrap" }}>
           <button onClick={() => setSelectedBranch(null)} style={{ display: "flex", alignItems: "center", gap: 6, background: "var(--bg3)", border: "1px solid var(--border2)", borderRadius: 8, padding: "8px 14px", fontSize: 12, fontFamily: "var(--font-outfit)", fontWeight: 600, cursor: "pointer", color: "var(--text2)" }}>
@@ -1224,7 +1239,7 @@ export default function BranchesPage() {
                 <span style={{ fontSize: 10, color: "var(--text3)", textTransform: "none", letterSpacing: 0 }}>Match against bank deposits · Left-over cash still at branch</span>
               </div>
               <div style={{ overflowX: "auto" }}>
-                <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12, minWidth: 480 }}>
+                <table className="pill-table" style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12, minWidth: 480 }}>
                   <thead>
                     <tr>
                       <TH>{filterMode === "month" ? "Date" : "Month"}</TH>
@@ -1246,7 +1261,7 @@ export default function BranchesPage() {
                       </tr>
                     ))}
                     {rows.length > 0 && (
-                      <tr style={{ background: "var(--bg3)", borderTop: "2px solid var(--border2)" }}>
+                      <tr className="totals-row" style={{ background: "var(--bg3)", borderTop: "2px solid var(--border2)" }}>
                         <TD style={{ fontWeight: 800, color: "var(--gold)" }}>TOTAL</TD>
                         <TD right style={{ fontWeight: 800, color: "var(--green)" }}>{INR(totals.cash)}</TD>
                         <TD right style={{ fontWeight: 800, color: "var(--blue, #60a5fa)" }}>{INR(totals.online)}</TD>
@@ -1264,7 +1279,7 @@ export default function BranchesPage() {
         {openSections.has("staff") && (<>
         <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 12, color: "var(--gold)" }}>Branch Staff ({branchStaff.length})</div>
         <Card>
-          <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12.5 }}>
+          <table className="pill-table" style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12.5 }}>
             <thead><tr>
               <TH>#</TH><TH>Name</TH><TH>Role</TH>{isAdmin && <TH right>Salary</TH>}<TH right>Leaves (T/L)</TH><TH right>Billing ({plabel})</TH><TH right>Staff T.Inc</TH><TH right>Staff T.Sale</TH><TH> </TH>
             </tr></thead>
@@ -1375,7 +1390,7 @@ export default function BranchesPage() {
                 <button onClick={() => setSelectedStaffHistory(null)} style={{ background: "none", border: "none", color: "var(--text3)", cursor: "pointer", fontSize: 11, fontWeight: 700 }}>CLOSE ✕</button>
               </div>
               <Card>
-                <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
+                <table className="pill-table" style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
                   <thead><tr>
                     <TH>Month</TH><TH>Status</TH><TH right>Days Worked</TH><TH right>Leaves</TH><TH right>Billing</TH><TH right>Incentives</TH><TH right>Salary Drawn</TH>
                   </tr></thead>
@@ -1396,7 +1411,7 @@ export default function BranchesPage() {
                         <TD right style={{ color: "var(--gold)", fontWeight: 700 }}>{INR(h.salary)}</TD>
                       </tr>
                     ))}
-                    <tr style={{ background: "var(--bg3)", borderTop: "2px solid var(--border2)" }}>
+                    <tr className="totals-row" style={{ background: "var(--bg3)", borderTop: "2px solid var(--border2)" }}>
                       <TD style={{ fontWeight: 800, color: "var(--gold)" }}>YEARLY TOTAL</TD>
                       <TD colSpan={2}></TD>
                       <TD right style={{ fontWeight: 800, color: "var(--red)" }}>{hist.reduce((s, x) => s + x.leaves, 0)}</TD>
@@ -1418,7 +1433,7 @@ export default function BranchesPage() {
             {filterMode === "month" ? "Daily Performance Breakdown" : "Monthly Performance Breakdown"} ({filterYear})
           </div>
             <Card>
-              <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12.5 }}>
+              <table className="pill-table" style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12.5 }}>
                 <thead><tr>
                   <TH>{filterMode === "month" ? "Date" : "Month"}</TH>
                   <TH right>Income</TH>
@@ -1451,7 +1466,7 @@ export default function BranchesPage() {
                     </tr>
                   ))}
                   {breakdownStats.length > 0 && (
-                    <tr style={{ background: "var(--bg3)", borderTop: "2px solid var(--border2)" }}>
+                    <tr className="totals-row" style={{ background: "var(--bg3)", borderTop: "2px solid var(--border2)" }}>
                       <TD style={{ fontWeight: 800, color: "var(--gold)" }}>TOTAL ({plabel})</TD>
                       <TD right style={{ fontWeight: 800, color: "var(--green)" }}>{INR(breakdownStats.reduce((s, m) => s + m.income, 0))}</TD>
                       <TD right style={{ fontWeight: 800, color: "var(--red)" }}>{INR(breakdownStats.reduce((s, m) => s + m.incentives, 0))}</TD>
@@ -1499,7 +1514,7 @@ export default function BranchesPage() {
                 </div>
               </div>
               <Card style={{ padding: 0 }}>
-                <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12.5 }}>
+                <table className="pill-table" style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12.5 }}>
                   <thead><tr>
                     <TH>Date</TH>
                     <TH>Material</TH>
@@ -1523,7 +1538,7 @@ export default function BranchesPage() {
                       <tr><td colSpan={6} style={{ textAlign: "center", padding: 24, color: "var(--text3)", fontStyle: "italic" }}>No materials transferred to this branch in this period.</td></tr>
                     )}
                     {flatRows.length > 0 && (
-                      <tr style={{ background: "var(--bg3)", borderTop: "2px solid var(--border2)" }}>
+                      <tr className="totals-row" style={{ background: "var(--bg3)", borderTop: "2px solid var(--border2)" }}>
                         <TD style={{ fontWeight: 800, color: "var(--gold)" }} colSpan={5}>TOTAL</TD>
                         <TD right style={{ fontWeight: 800, color: "var(--accent)" }}>{INR(totalReceived)}</TD>
                       </tr>
@@ -1539,7 +1554,7 @@ export default function BranchesPage() {
         {openSections.has("entries") && (<>
         <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 12, color: "var(--gold)" }}>Recent Entries</div>
         <Card>
-          <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12.5 }}>
+          <table className="pill-table" style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12.5 }}>
             <thead><tr>
               <TH>Date</TH><TH right>Online</TH><TH right>Cash</TH><TH right>GST</TH><TH right>Billing</TH><TH right>Incentive</TH><TH right>Staff T.Inc</TH><TH right>Staff T.Sale</TH><TH right>Cash in Hand</TH>
               {canEdit && <TH sticky> </TH>}
@@ -1763,7 +1778,7 @@ export default function BranchesPage() {
                 </tr>
               ))}
               {branchData.length > 0 && (
-                <tr style={{ background: "var(--bg3)", borderTop: "2px solid var(--border2)" }}>
+                <tr className="totals-row" style={{ background: "var(--bg3)", borderTop: "2px solid var(--border2)" }}>
                   {canEdit && <TD></TD>}
                   <TD style={{ fontWeight: 800, color: "var(--gold)" }}>TOTAL ({plabel})</TD>
                   <TD> </TD>
