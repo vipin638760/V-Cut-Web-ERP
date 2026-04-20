@@ -37,10 +37,14 @@ export default async function Icon() {
           style={{
             fontFamily: fontData ? "GreatVibes" : "cursive",
             color: "#ef4444",
-            fontSize: 640,
+            fontSize: 440,
             lineHeight: 1,
-            transform: "translateY(70px)",
+            transform: "translateY(40px)",
             fontWeight: 400,
+            // Faux-bold the thin script: stack offset shadows around the glyph
+            // so the cursive curves thicken and survive downscaling to 16px.
+            textShadow:
+              "6px 0 0 #ef4444, -6px 0 0 #ef4444, 0 6px 0 #ef4444, 0 -6px 0 #ef4444, 4px 4px 0 #ef4444, -4px 4px 0 #ef4444, 4px -4px 0 #ef4444, -4px -4px 0 #ef4444",
           }}
         >
           V
