@@ -420,9 +420,10 @@ export default function BranchesPage() {
               const t = Number(sb.tips) || 0;
               return (sb.tip_in || "online") === "cash" ? s + t : s;
             }, 0);
-            const oth = changes.others !== undefined ? changes.others : (Number(entry.others) || 0);
-            const pet = Number(entry.petrol) || 0;
-            changes.cash_in_hand = cash + tipsInCash - tipsPaidCash - takenInc - oth - pet;
+            // Daily expenses (entry.others / entry.petrol) are paid by the
+            // head-office cashier, not from the branch drawer, so they belong
+            // in P&L but must NOT be subtracted from cash_in_hand here.
+            changes.cash_in_hand = cash + tipsInCash - tipsPaidCash - takenInc;
           }
 
           const prefix = isMulti ? `${branchName} ${entry.date}` : entry.date;

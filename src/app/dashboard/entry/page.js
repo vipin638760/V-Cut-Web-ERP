@@ -451,8 +451,11 @@ export default function EntryPage() {
     return { tipsInCash: inCash, tipsPaidCash: outCash };
   }, [staffRows]);
 
-  // Cash drawer balance: only deduct incentives that were actually taken (ticked)
-  const cashInHand = totalCash + tipsInCash - tipsPaidCash - totalIncentiveTaken - (Number(otherExp) || 0) - dailyExpTotal;
+  // Cash drawer balance: only deduct incentives that were actually taken (ticked).
+  // Daily expenses (AC service, petrol, etc.) are paid by the head-office cashier
+  // from central funds, so they are a P&L cost but are NOT subtracted from the
+  // branch cash drawer here.
+  const cashInHand = totalCash + tipsInCash - tipsPaidCash - totalIncentiveTaken - (Number(otherExp) || 0);
 
   // Reconciliation: actual counted cash vs expected cash-in-hand
   const actualCashNum = actualCash === "" ? null : Number(actualCash);
@@ -733,7 +736,7 @@ export default function EntryPage() {
     visibleEntries.forEach(e => {
       const b = branchesById.get(e.branch_id);
       const agg = sumStaffBilling(e.staff_billing);
-      const cih = e.cash_in_hand !== undefined ? e.cash_in_hand : (e.cash||0) - agg.incentive - agg.tips - (e.others||0);
+      const cih = e.cash_in_hand !== undefined ? e.cash_in_hand : (e.cash||0) - agg.incentive - agg.tips;
       const row = ws.addRow([e.date, b?.name||"?", e.online||0, e.cash||0, e.total_gst||0, agg.material, agg.billing, agg.incentive, agg.tips, agg.staffTotalInc, e.others||0, e.petrol||0, cih]);
       row.eachCell((cell, colNum) => { if (colNum >= 3) cell.numFmt = "#,##0"; });
     });
@@ -1838,7 +1841,7 @@ export default function EntryPage() {
               const staffTotalIncE = agg.staffTotalInc;
               const staffTotalSaleE = totalBillingE + totalMatE + totalTipsE;
               const totalOthE = (e.others || 0) + (e.petrol || 0);
-              const cih = e.cash_in_hand !== undefined ? e.cash_in_hand : (e.cash || 0) - totalIncE - totalTipsE - (e.others || 0);
+              const cih = e.cash_in_hand !== undefined ? e.cash_in_hand : (e.cash || 0) - totalIncE - totalTipsE;
               return (
                 <tr key={e.id}>
                   <TD style={{ fontWeight: 600, whiteSpace: "nowrap" }}>{e.date}</TD>
