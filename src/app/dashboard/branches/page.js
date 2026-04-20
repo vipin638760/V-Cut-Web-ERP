@@ -50,6 +50,8 @@ export default function BranchesPage() {
   // Detail-view section picker: empty set = all hidden; user clicks cards to reveal
   // each section (Cash Flow, Performance, Materials, Recent Entries).
   const [openSections, setOpenSections] = useState(new Set());
+  // KPI breakdown popup — "variable" or "fixed" or null
+  const [kpiBreakdown, setKpiBreakdown] = useState(null);
   const toggleSection = (id) => setOpenSections(prev => {
     const next = new Set(prev);
     next.has(id) ? next.delete(id) : next.add(id);
@@ -1107,23 +1109,96 @@ export default function BranchesPage() {
 
         <PeriodWidget filterMode={filterMode} setFilterMode={setFilterMode} filterYear={filterYear} setFilterYear={setFilterYear} filterMonth={filterMonth} setFilterMonth={setFilterMonth} />
 
-        {/* KPIs */}
+        {/* KPIs — admin can click Variable Exp and Fixed Costs to see how it arrives */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 16, marginBottom: 24 }}>
           {[
-            ["Total Income", INR(totalIncSum), "var(--green)"],
-            ["Variable Exp", INR(totalVarExp), "var(--red)"],
-            ["Gross Net", isAdmin ? INR(netSum) : "•••••", netSum >= 0 ? "var(--green)" : "var(--red)"],
-            ["Fixed Costs", isAdmin ? INR(totalFixedSalaryComp) : "•••••", "var(--orange)"],
-            ["GST Est.", isAdmin ? INR(totalGstEst) : "•••••", "var(--red)"],
-            ["Full Net P&L", isAdmin ? (INR(fullNetSum)) : "•••••", fullNetSum >= 0 ? "var(--green)" : "var(--red)"],
-          ].map(([l, v, c]) => (
-            <Card key={l} style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 4, minHeight: 90, justifyContent: "center" }}>
-              <div style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>{l}</div>
+            { l: "Total Income", v: INR(totalIncSum), c: "var(--green)" },
+            { l: "Variable Exp", v: INR(totalVarExp), c: "var(--red)", click: isAdmin ? "variable" : null },
+            { l: "Gross Net", v: isAdmin ? INR(netSum) : "•••••", c: netSum >= 0 ? "var(--green)" : "var(--red)" },
+            { l: "Fixed Costs", v: isAdmin ? INR(totalFixedSalaryComp) : "•••••", c: "var(--orange)", click: isAdmin ? "fixed" : null },
+            { l: "GST Est.", v: isAdmin ? INR(totalGstEst) : "•••••", c: "var(--red)" },
+            { l: "Full Net P&L", v: isAdmin ? (INR(fullNetSum)) : "•••••", c: fullNetSum >= 0 ? "var(--green)" : "var(--red)" },
+          ].map(({ l, v, c, click }) => (
+            <Card key={l}
+              onClick={click ? () => setKpiBreakdown(click) : undefined}
+              style={{
+                padding: "16px 20px", display: "flex", flexDirection: "column", gap: 4, minHeight: 90, justifyContent: "center",
+                cursor: click ? "pointer" : "default",
+                position: "relative",
+                transition: "transform .15s, box-shadow .15s",
+                ...(click ? { ":hover": { transform: "translateY(-2px)" } } : {}),
+              }}
+              onMouseEnter={click ? ev => { ev.currentTarget.style.transform = "translateY(-2px)"; ev.currentTarget.style.boxShadow = "0 6px 18px rgba(var(--accent-rgb),0.15)"; } : undefined}
+              onMouseLeave={click ? ev => { ev.currentTarget.style.transform = "none"; ev.currentTarget.style.boxShadow = "none"; } : undefined}
+            >
+              <div style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, display: "flex", alignItems: "center", gap: 6 }}>
+                {l}
+                {click && <span title="Click for breakdown" style={{ fontSize: 10, color: "var(--accent)", opacity: 0.7 }}>ⓘ</span>}
+              </div>
               <div style={{ fontSize: 22, fontWeight: 800, color: c, whiteSpace: "nowrap" }}>{v}</div>
               <div style={{ fontSize: 10, color: "var(--blue)", fontWeight: 600 }}>{isYearly ? "This Year" : "This Month"}</div>
             </Card>
           ))}
         </div>
+
+        {/* KPI breakdown popup */}
+        {kpiBreakdown && isAdmin && (() => {
+          const isVar = kpiBreakdown === "variable";
+          const nMonths = factor; // number of months summed for this period
+          const shopRent = (b.shop_rent || 0) * nMonths;
+          const roomRent = (b.room_rent || 0) * nMonths;
+          const wifi = (b.wifi || 0) * nMonths;
+          const elec = ((b.shop_elec || 0) + (b.room_elec || 0)) * nMonths;
+          const salaryPortion = totalFixedSalaryComp - (shopRent + roomRent + wifi + elec);
+          const rows = isVar
+            ? [
+                { label: "Staff Incentives", value: totalIncentiveExp, hint: "Sum of staff `incentive` + `mat_incentive` across all entries in period", color: "var(--red)" },
+                { label: "Material Cost", value: totalMatExp, hint: "Sum of `mat_expense` across all entries in period", color: "var(--red)" },
+                { label: "Other / Petrol", value: totalOtherExp, hint: "Sum of `others` + `petrol` (daily expenses paid by HO)", color: "var(--red)" },
+              ]
+            : [
+                { label: "Shop Rent", value: shopRent, hint: `₹${(b.shop_rent || 0).toLocaleString("en-IN")} × ${nMonths} month${nMonths === 1 ? "" : "s"}`, color: "var(--orange)" },
+                { label: "Room Rent", value: roomRent, hint: `₹${(b.room_rent || 0).toLocaleString("en-IN")} × ${nMonths} month${nMonths === 1 ? "" : "s"}`, color: "var(--orange)" },
+                { label: "Electricity (Shop + Room)", value: elec, hint: `₹${((b.shop_elec || 0) + (b.room_elec || 0)).toLocaleString("en-IN")} × ${nMonths} month${nMonths === 1 ? "" : "s"}`, color: "var(--orange)" },
+                { label: "WiFi", value: wifi, hint: `₹${(b.wifi || 0).toLocaleString("en-IN")} × ${nMonths} month${nMonths === 1 ? "" : "s"}`, color: "var(--orange)" },
+                { label: "Actual Salary (pro-rated)", value: salaryPortion, hint: "Sum of active staff's pro-rata salaries across the months in period", color: "var(--blue)" },
+              ];
+          const total = isVar ? totalVarExp : totalFixedSalaryComp;
+          return (
+            <div onClick={() => setKpiBreakdown(null)}
+              style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.55)", backdropFilter: "blur(6px)", zIndex: 1100, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+              <div onClick={ev => ev.stopPropagation()}
+                style={{ width: "100%", maxWidth: 520, background: "var(--bg2)", borderRadius: 16, overflow: "hidden", boxShadow: "0 24px 80px rgba(0,0,0,0.5)" }}>
+                <div style={{ padding: "18px 22px", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+                  <div>
+                    <div style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Breakdown</div>
+                    <div style={{ fontSize: 17, fontWeight: 800, color: isVar ? "var(--red)" : "var(--orange)", marginTop: 2 }}>
+                      {isVar ? "Variable Expenses" : "Fixed Costs"} — {INR(total)}
+                    </div>
+                    <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 4 }}>{plabel}</div>
+                  </div>
+                  <button onClick={() => setKpiBreakdown(null)}
+                    style={{ background: "var(--bg4)", border: "1px solid var(--border2)", color: "var(--text2)", borderRadius: 8, width: 32, height: 32, cursor: "pointer", fontSize: 14, fontWeight: 700 }}>✕</button>
+                </div>
+                <div style={{ padding: "10px 22px 18px" }}>
+                  {rows.map(r => (
+                    <div key={r.label} style={{ padding: "12px 0", borderBottom: "1px solid var(--border)" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12 }}>
+                        <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text)" }}>{r.label}</span>
+                        <span style={{ fontSize: 14, fontWeight: 800, color: r.color, whiteSpace: "nowrap" }}>{INR(r.value)}</span>
+                      </div>
+                      <div style={{ fontSize: 10.5, color: "var(--text3)", marginTop: 3 }}>{r.hint}</div>
+                    </div>
+                  ))}
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 10, paddingTop: 12, borderTop: "2px solid var(--border2)" }}>
+                    <span style={{ fontSize: 12, fontWeight: 800, color: "var(--gold)", letterSpacing: 1 }}>TOTAL</span>
+                    <span style={{ fontSize: 18, fontWeight: 800, color: isVar ? "var(--red)" : "var(--orange)" }}>{INR(total)}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* Two-column detail */}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 20 }}>
