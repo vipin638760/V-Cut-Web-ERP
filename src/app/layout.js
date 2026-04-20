@@ -26,8 +26,8 @@ const manrope = Manrope({
 });
 
 export const metadata = {
-  title: "V-CUT Group — Management System",
-  description: "Salon Management System",
+  title: "V-Cut Salon",
+  description: "V-Cut Salon Management System",
 };
 
 export const viewport = {
