@@ -30,8 +30,7 @@ export default async function Icon() {
           justifyContent: "center",
           width: "100%",
           height: "100%",
-          background: "#0b0b0d",
-          borderRadius: 96,
+          background: "transparent",
         }}
       >
         <span
