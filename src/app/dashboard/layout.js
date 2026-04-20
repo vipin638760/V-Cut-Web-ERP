@@ -12,6 +12,7 @@ const NAV = {
   admin: [
     { id: "dashboard", l: "Dashboard",             icon: "home" },
     { id: "branches",  l: "Branch Details",        icon: "grid" },
+    { id: "cash-collection", l: "Cash Collection", icon: "wallet" },
     { id: "incentive-calculator", l: "Incentive Calculator", icon: "trending" },
     { id: "entry",     l: "Daily Business Entry",  icon: "edit" },
     { id: "pos",       l: "POS Terminal",          icon: "wallet" },
@@ -30,6 +31,7 @@ const NAV = {
   accountant: [
     { id: "dashboard", l: "Dashboard",             icon: "home" },
     { id: "branches",  l: "Branch Details",        icon: "grid" },
+    { id: "cash-collection", l: "Cash Collection", icon: "wallet" },
     { id: "incentive-calculator", l: "Incentive Calculator", icon: "trending" },
     { id: "entry",     l: "Daily Business Entry",  icon: "edit" },
     { id: "pos",       l: "POS Terminal",          icon: "wallet" },

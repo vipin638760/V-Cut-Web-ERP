@@ -1142,6 +1142,67 @@ export default function BranchesPage() {
           </Card>
         </div>
 
+        {/* Cash Flow — daily (monthly mode) or monthly (yearly mode) matchable against bank deposits */}
+        {(() => {
+          const rows = filterMode === "month"
+            ? [...periodEntries]
+                .sort((a, b) => a.date.localeCompare(b.date))
+                .map(e => ({ label: e.date, cash: e.cash || 0, online: e.online || 0, cih: e.cash_in_hand || 0 }))
+            : Array.from({ length: endMonth }, (_, idx) => {
+                const m = idx + 1;
+                const monthPrefix = `${filterYear}-${String(m).padStart(2, '0')}`;
+                const mEntries = periodEntries.filter(e => e.date.startsWith(monthPrefix));
+                return {
+                  label: new Date(filterYear, m - 1).toLocaleString('default', { month: 'short' }),
+                  cash: mEntries.reduce((s, e) => s + (e.cash || 0), 0),
+                  online: mEntries.reduce((s, e) => s + (e.online || 0), 0),
+                  cih: mEntries.reduce((s, e) => s + (e.cash_in_hand || 0), 0),
+                };
+              }).filter(r => r.cash || r.online || r.cih);
+          const totals = rows.reduce((acc, r) => ({ cash: acc.cash + r.cash, online: acc.online + r.online, cih: acc.cih + r.cih }), { cash: 0, online: 0, cih: 0 });
+          return (
+            <Card style={{ marginBottom: 16, overflow: "hidden" }}>
+              <div style={{ padding: "14px 16px", borderBottom: "1px solid var(--border)", fontWeight: 700, color: "var(--blue, #60a5fa)", fontSize: 12, textTransform: "uppercase", letterSpacing: 1, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span>{filterMode === "month" ? "Daily Cash Flow" : "Monthly Cash Flow"}</span>
+                <span style={{ fontSize: 10, color: "var(--text3)", textTransform: "none", letterSpacing: 0 }}>Match against bank deposits · Left-over cash still at branch</span>
+              </div>
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12, minWidth: 480 }}>
+                  <thead>
+                    <tr>
+                      <TH>{filterMode === "month" ? "Date" : "Month"}</TH>
+                      <TH right>Cash Sales</TH>
+                      <TH right>Online / UPI</TH>
+                      <TH right>Cash In Hand</TH>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.length === 0 && (
+                      <tr><td colSpan={4} style={{ padding: 20, textAlign: "center", color: "var(--text3)" }}>No entries in {plabel}</td></tr>
+                    )}
+                    {rows.map((r, i) => (
+                      <tr key={i} style={{ borderBottom: "1px solid var(--border)" }}>
+                        <TD style={{ fontWeight: 600 }}>{r.label}</TD>
+                        <TD right style={{ color: "var(--green)" }}>{INR(r.cash)}</TD>
+                        <TD right style={{ color: "var(--blue, #60a5fa)" }}>{INR(r.online)}</TD>
+                        <TD right style={{ color: r.cih >= 0 ? "var(--gold)" : "var(--red)", fontWeight: 700 }}>{INR(r.cih)}</TD>
+                      </tr>
+                    ))}
+                    {rows.length > 0 && (
+                      <tr style={{ background: "var(--bg3)", borderTop: "2px solid var(--border2)" }}>
+                        <TD style={{ fontWeight: 800, color: "var(--gold)" }}>TOTAL</TD>
+                        <TD right style={{ fontWeight: 800, color: "var(--green)" }}>{INR(totals.cash)}</TD>
+                        <TD right style={{ fontWeight: 800, color: "var(--blue, #60a5fa)" }}>{INR(totals.online)}</TD>
+                        <TD right style={{ fontWeight: 800, color: "var(--gold)" }}>{INR(totals.cih)}</TD>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          );
+        })()}
+
         {/* Quick action: open the standalone attendance calendar modal for this branch */}
         <div style={{ display: "flex", justifyContent: "flex-end", margin: "8px 0 16px" }}>
           <button onClick={() => { setAttendanceCalendar(b.id); setAttendanceMonth(filterMode === "month" ? filterPrefix : `${filterYear}-${String(NOW.getMonth() + 1).padStart(2, "0")}`); setAttendanceSelectedDay(null); }}
