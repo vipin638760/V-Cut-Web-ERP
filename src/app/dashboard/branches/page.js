@@ -47,6 +47,15 @@ export default function BranchesPage() {
   const [editId, setEditId] = useState(null);
   const [form, setForm] = useState({ name: "", type: "mens", location: "", shop_rent: "", room_rent: "", salary_budget: "", wifi: "", shop_elec: "", room_elec: "" });
 
+  // Detail-view section picker: empty set = all hidden; user clicks cards to reveal
+  // each section (Cash Flow, Performance, Materials, Recent Entries).
+  const [openSections, setOpenSections] = useState(new Set());
+  const toggleSection = (id) => setOpenSections(prev => {
+    const next = new Set(prev);
+    next.has(id) ? next.delete(id) : next.add(id);
+    return next;
+  });
+
   // Recalculate modal
   const [recalcModal, setRecalcModal] = useState(null); // { branches: [{id, name}] }
   const [recalcFrom, setRecalcFrom] = useState(() => { const d = new Date(); d.setDate(1); return d.toISOString().slice(0, 10); });
@@ -1143,8 +1152,7 @@ export default function BranchesPage() {
         </div>
 
         {/* Quick action: open the standalone attendance calendar modal for this branch.
-            Placed above the Cash Flow cards so it stays in a fixed spot regardless
-            of how many daily cards are rendered below. */}
+            Kept above the detail sections so it stays in a fixed spot. */}
         <div style={{ display: "flex", justifyContent: "flex-end", margin: "8px 0 16px" }}>
           <button onClick={() => { setAttendanceCalendar(b.id); setAttendanceMonth(filterMode === "month" ? filterPrefix : `${filterYear}-${String(NOW.getMonth() + 1).padStart(2, "0")}`); setAttendanceSelectedDay(null); }}
             style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "10px 16px", borderRadius: 10, background: "rgba(var(--accent-rgb),0.1)", border: "1px solid rgba(var(--accent-rgb),0.35)", color: "var(--accent)", fontSize: 12, fontWeight: 800, letterSpacing: 1, textTransform: "uppercase", cursor: "pointer" }}>
@@ -1152,16 +1160,103 @@ export default function BranchesPage() {
           </button>
         </div>
 
-        {/* Cash Flow — selectable cards per day/month. Click a card to open its
-            detailed staff breakdown below; multiple cards may be selected at once. */}
-        <CashFlowCards
-          periodEntries={periodEntries}
-          filterMode={filterMode}
-          filterYear={filterYear}
-          endMonth={endMonth}
-          plabel={plabel}
-          staff={staff}
-        />
+        {/* Section picker — click a card to reveal its detail table below.
+            Multiple cards may be open at once so we can cross-reference numbers. */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 10, marginBottom: 16 }}>
+          {[
+            { id: "cashflow", label: "Daily Cash Flow", sub: "Match bank deposits", emoji: "💰", accent: "var(--blue, #60a5fa)" },
+            { id: "performance", label: "Performance Breakdown", sub: filterMode === "month" ? "Day-by-day P&L" : "Month-by-month P&L", emoji: "📊", accent: "var(--gold)" },
+            { id: "materials", label: "Materials Received", sub: "Stock transfers", emoji: "📦", accent: "var(--accent)" },
+            { id: "entries", label: "Recent Entries", sub: "Latest daily entries", emoji: "📝", accent: "var(--green)" },
+          ].map(s => {
+            const isOpen = openSections.has(s.id);
+            return (
+              <div key={s.id} onClick={() => toggleSection(s.id)}
+                role="button" tabIndex={0}
+                onKeyDown={(ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); toggleSection(s.id); } }}
+                style={{
+                  padding: "12px 14px",
+                  borderRadius: 10,
+                  background: isOpen ? "rgba(var(--accent-rgb),0.1)" : "var(--bg3)",
+                  border: `1.5px solid ${isOpen ? "var(--accent)" : "var(--border2)"}`,
+                  cursor: "pointer",
+                  transition: "background .15s, border .15s, transform .15s",
+                  transform: isOpen ? "translateY(-1px)" : "none",
+                  boxShadow: isOpen ? "0 4px 14px rgba(var(--accent-rgb),0.18)" : "none",
+                  userSelect: "none",
+                  display: "flex", alignItems: "center", gap: 10,
+                }}>
+                <div style={{ fontSize: 22 }}>{s.emoji}</div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 12, fontWeight: 800, color: s.accent }}>{s.label}</div>
+                  <div style={{ fontSize: 10, color: "var(--text3)", marginTop: 2 }}>{s.sub}</div>
+                </div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: isOpen ? "var(--accent)" : "var(--text3)" }}>{isOpen ? "▲" : "▼"}</div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Cash Flow — daily (month mode) or monthly (year mode), matchable against bank deposits */}
+        {openSections.has("cashflow") && (() => {
+          const rows = filterMode === "month"
+            ? [...periodEntries]
+                .sort((a, b) => a.date.localeCompare(b.date))
+                .map(e => ({ label: e.date, cash: e.cash || 0, online: e.online || 0, cih: e.cash_in_hand || 0 }))
+            : Array.from({ length: endMonth }, (_, idx) => {
+                const m = idx + 1;
+                const monthPrefix = `${filterYear}-${String(m).padStart(2, '0')}`;
+                const mEntries = periodEntries.filter(e => e.date.startsWith(monthPrefix));
+                return {
+                  label: new Date(filterYear, m - 1).toLocaleString('default', { month: 'short' }),
+                  cash: mEntries.reduce((s, e) => s + (e.cash || 0), 0),
+                  online: mEntries.reduce((s, e) => s + (e.online || 0), 0),
+                  cih: mEntries.reduce((s, e) => s + (e.cash_in_hand || 0), 0),
+                };
+              }).filter(r => r.cash || r.online || r.cih);
+          const totals = rows.reduce((acc, r) => ({ cash: acc.cash + r.cash, online: acc.online + r.online, cih: acc.cih + r.cih }), { cash: 0, online: 0, cih: 0 });
+          return (
+            <Card style={{ marginBottom: 16, overflow: "hidden" }}>
+              <div style={{ padding: "14px 16px", borderBottom: "1px solid var(--border)", fontWeight: 700, color: "var(--blue, #60a5fa)", fontSize: 12, textTransform: "uppercase", letterSpacing: 1, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span>{filterMode === "month" ? "Daily Cash Flow" : "Monthly Cash Flow"}</span>
+                <span style={{ fontSize: 10, color: "var(--text3)", textTransform: "none", letterSpacing: 0 }}>Match against bank deposits · Left-over cash still at branch</span>
+              </div>
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12, minWidth: 480 }}>
+                  <thead>
+                    <tr>
+                      <TH>{filterMode === "month" ? "Date" : "Month"}</TH>
+                      <TH right>Cash Sales</TH>
+                      <TH right>Online / UPI</TH>
+                      <TH right>Cash In Hand</TH>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.length === 0 && (
+                      <tr><td colSpan={4} style={{ padding: 20, textAlign: "center", color: "var(--text3)" }}>No entries in {plabel}</td></tr>
+                    )}
+                    {rows.map((r, i) => (
+                      <tr key={i} style={{ borderBottom: "1px solid var(--border)" }}>
+                        <TD style={{ fontWeight: 600 }}>{r.label}</TD>
+                        <TD right style={{ color: "var(--green)" }}>{INR(r.cash)}</TD>
+                        <TD right style={{ color: "var(--blue, #60a5fa)" }}>{INR(r.online)}</TD>
+                        <TD right style={{ color: r.cih >= 0 ? "var(--gold)" : "var(--red)", fontWeight: 700 }}>{INR(r.cih)}</TD>
+                      </tr>
+                    ))}
+                    {rows.length > 0 && (
+                      <tr style={{ background: "var(--bg3)", borderTop: "2px solid var(--border2)" }}>
+                        <TD style={{ fontWeight: 800, color: "var(--gold)" }}>TOTAL</TD>
+                        <TD right style={{ fontWeight: 800, color: "var(--green)" }}>{INR(totals.cash)}</TD>
+                        <TD right style={{ fontWeight: 800, color: "var(--blue, #60a5fa)" }}>{INR(totals.online)}</TD>
+                        <TD right style={{ fontWeight: 800, color: "var(--gold)" }}>{INR(totals.cih)}</TD>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          );
+        })()}
 
         {/* Staff Table */}
         <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 12, color: "var(--gold)" }}>Branch Staff ({branchStaff.length})</div>
@@ -1313,6 +1408,7 @@ export default function BranchesPage() {
         })()}
 
         {/* Breakdown Table */}
+        {openSections.has("performance") && (
         <div style={{ marginTop: 24, marginBottom: 24 }}>
           <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 12, color: "var(--gold)" }}>
             {filterMode === "month" ? "Daily Performance Breakdown" : "Monthly Performance Breakdown"} ({filterYear})
@@ -1372,9 +1468,10 @@ export default function BranchesPage() {
               </table>
             </Card>
           </div>
+        )}
 
         {/* Materials Received */}
-        {(() => {
+        {openSections.has("materials") && (() => {
           const branchAllocs = materialAllocations.filter(a => a.branch_id === b.id && (a.date || a.transferred_at || "").startsWith(filterMode === "year" ? String(filterYear) : filterPrefix));
           const flatRows = branchAllocs.flatMap(a =>
             (a.items || []).map((it, i) => ({
@@ -1435,6 +1532,7 @@ export default function BranchesPage() {
         })()}
 
         {/* Recent Entries */}
+        {openSections.has("entries") && (<>
         <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 12, color: "var(--gold)" }}>Recent Entries</div>
         <Card>
           <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12.5 }}>
@@ -1474,6 +1572,7 @@ export default function BranchesPage() {
             </tbody>
           </table>
         </Card>
+        </>)}
 
         {/* Audit Log Modal */}
         {logView && (
@@ -1878,192 +1977,5 @@ function CompactStat({ label, val, col, bold }) {
       <div style={{ fontSize: 7, color: "var(--text3)", textTransform: "uppercase", fontWeight: 700, marginBottom: 1 }}>{label}</div>
       <div style={{ fontSize: 10.5, fontWeight: bold ? 800 : 700, color: col, whiteSpace: "nowrap" }}>{val}</div>
     </div>
-  );
-}
-
-function CashFlowCards({ periodEntries, filterMode, filterYear, endMonth, plabel, staff }) {
-  const [selected, setSelected] = useState(new Set());
-
-  const cards = filterMode === "month"
-    ? [...periodEntries]
-        .sort((a, b) => a.date.localeCompare(b.date))
-        .map(e => ({
-          key: e.date,
-          label: e.date,
-          cash: e.cash || 0,
-          online: e.online || 0,
-          cih: e.cash_in_hand || 0,
-          entries: [e],
-        }))
-    : Array.from({ length: endMonth }, (_, idx) => {
-        const m = idx + 1;
-        const monthPrefix = `${filterYear}-${String(m).padStart(2, "0")}`;
-        const mEntries = periodEntries.filter(e => e.date?.startsWith(monthPrefix));
-        if (mEntries.length === 0) return null;
-        return {
-          key: monthPrefix,
-          label: new Date(filterYear, m - 1).toLocaleString("default", { month: "short", year: "numeric" }),
-          cash: mEntries.reduce((s, e) => s + (e.cash || 0), 0),
-          online: mEntries.reduce((s, e) => s + (e.online || 0), 0),
-          cih: mEntries.reduce((s, e) => s + (e.cash_in_hand || 0), 0),
-          entries: mEntries,
-        };
-      }).filter(Boolean);
-
-  const totals = cards.reduce(
-    (acc, c) => ({ cash: acc.cash + c.cash, online: acc.online + c.online, cih: acc.cih + c.cih }),
-    { cash: 0, online: 0, cih: 0 }
-  );
-
-  const toggle = (key) => setSelected(prev => {
-    const next = new Set(prev);
-    next.has(key) ? next.delete(key) : next.add(key);
-    return next;
-  });
-  const clear = () => setSelected(new Set());
-
-  const staffName = (id) => staff.find(s => s.id === id)?.name || id;
-  const selectedCards = cards.filter(c => selected.has(c.key));
-
-  return (
-    <>
-      <Card style={{ marginBottom: selectedCards.length > 0 ? 16 : 16, overflow: "hidden" }}>
-        <div style={{ padding: "14px 16px", borderBottom: "1px solid var(--border)", fontWeight: 700, color: "var(--blue, #60a5fa)", fontSize: 12, textTransform: "uppercase", letterSpacing: 1, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-          <span>{filterMode === "month" ? "Daily Cash Flow" : "Monthly Cash Flow"}</span>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            {selected.size > 0 && (
-              <>
-                <span style={{ fontSize: 10, color: "var(--accent)", textTransform: "uppercase", letterSpacing: 1 }}>{selected.size} selected</span>
-                <button onClick={clear} style={{ padding: "4px 10px", borderRadius: 6, background: "var(--bg4)", color: "var(--text2)", border: "1px solid var(--border2)", fontWeight: 700, fontSize: 10, cursor: "pointer", textTransform: "uppercase", letterSpacing: 0.5 }}>Clear</button>
-              </>
-            )}
-            <span style={{ fontSize: 10, color: "var(--text3)", textTransform: "none", letterSpacing: 0 }}>Click a card to view staff breakdown</span>
-          </div>
-        </div>
-
-        {cards.length === 0 ? (
-          <div style={{ padding: 24, textAlign: "center", color: "var(--text3)", fontSize: 12 }}>No entries in {plabel}</div>
-        ) : (
-          <div style={{ padding: 14, display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(160px,1fr))", gap: 10 }}>
-            {cards.map(c => {
-              const isSel = selected.has(c.key);
-              return (
-                <div key={c.key} onClick={() => toggle(c.key)}
-                  style={{
-                    padding: "12px 14px",
-                    borderRadius: 10,
-                    background: isSel ? "rgba(var(--accent-rgb),0.1)" : "var(--bg3)",
-                    border: `1.5px solid ${isSel ? "var(--accent)" : "var(--border2)"}`,
-                    cursor: "pointer",
-                    transition: "background .15s, border .15s, transform .15s",
-                    transform: isSel ? "translateY(-1px)" : "none",
-                    boxShadow: isSel ? "0 4px 16px rgba(var(--accent-rgb),0.2)" : "none",
-                    userSelect: "none",
-                  }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                    <div style={{ fontSize: 11, fontWeight: 800, color: "var(--gold)" }}>{c.label}</div>
-                    {isSel && <span style={{ fontSize: 10, color: "var(--accent)", fontWeight: 800 }}>✓</span>}
-                  </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px 8px" }}>
-                    <div>
-                      <div style={{ fontSize: 8, color: "var(--text3)", fontWeight: 700, letterSpacing: 0.5 }}>CASH</div>
-                      <div style={{ fontSize: 11, color: "var(--green)", fontWeight: 700 }}>{INR(c.cash)}</div>
-                    </div>
-                    <div>
-                      <div style={{ fontSize: 8, color: "var(--text3)", fontWeight: 700, letterSpacing: 0.5 }}>ONLINE</div>
-                      <div style={{ fontSize: 11, color: "var(--blue, #60a5fa)", fontWeight: 700 }}>{INR(c.online)}</div>
-                    </div>
-                  </div>
-                  <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid var(--border)" }}>
-                    <div style={{ fontSize: 8, color: "var(--text3)", fontWeight: 700, letterSpacing: 0.5 }}>CASH IN HAND</div>
-                    <div style={{ fontSize: 13, fontWeight: 800, color: c.cih >= 0 ? "var(--gold)" : "var(--red)" }}>{INR(c.cih)}</div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-        {cards.length > 0 && (
-          <div style={{ padding: "10px 16px", borderTop: "2px solid var(--border2)", background: "var(--bg3)", display: "flex", justifyContent: "space-between", gap: 12, fontSize: 11 }}>
-            <span style={{ fontWeight: 800, color: "var(--gold)", letterSpacing: 1 }}>TOTAL ({cards.length} {filterMode === "month" ? "days" : "months"})</span>
-            <div style={{ display: "flex", gap: 18 }}>
-              <span><span style={{ color: "var(--text3)" }}>Cash </span><strong style={{ color: "var(--green)" }}>{INR(totals.cash)}</strong></span>
-              <span><span style={{ color: "var(--text3)" }}>Online </span><strong style={{ color: "var(--blue, #60a5fa)" }}>{INR(totals.online)}</strong></span>
-              <span><span style={{ color: "var(--text3)" }}>CIH </span><strong style={{ color: "var(--gold)" }}>{INR(totals.cih)}</strong></span>
-            </div>
-          </div>
-        )}
-      </Card>
-
-      {/* One detail table per selected card */}
-      {selectedCards.length > 0 && (
-        <div style={{ display: "grid", gridTemplateColumns: selectedCards.length > 1 ? "repeat(auto-fit,minmax(320px,1fr))" : "1fr", gap: 12, marginBottom: 16 }}>
-          {selectedCards.map(c => (
-            <Card key={`detail-${c.key}`} style={{ overflow: "hidden" }}>
-              <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--border)", fontWeight: 800, color: "var(--accent)", fontSize: 11, textTransform: "uppercase", letterSpacing: 1, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <span>{c.label}</span>
-                <span style={{ fontSize: 10, color: "var(--text3)", fontWeight: 600, textTransform: "none", letterSpacing: 0 }}>
-                  Cash {INR(c.cash)} · Online {INR(c.online)} · CIH {INR(c.cih)}
-                </span>
-              </div>
-              <div style={{ overflowX: "auto" }}>
-                {filterMode === "month" ? (
-                  // Daily card → per-staff breakdown for that one day
-                  <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 11.5, minWidth: 320 }}>
-                    <thead>
-                      <tr>
-                        <TH>Staff</TH>
-                        <TH right>Billing</TH>
-                        <TH right>Material</TH>
-                        <TH right>Incentive</TH>
-                        <TH right>Tips</TH>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {(c.entries[0]?.staff_billing || []).length === 0 ? (
-                        <tr><td colSpan={5} style={{ padding: 16, textAlign: "center", color: "var(--text3)" }}>No staff activity on this day</td></tr>
-                      ) : (
-                        (c.entries[0].staff_billing).map((sb, i) => (
-                          <tr key={`${sb.staff_id}-${i}`} style={{ borderBottom: "1px solid var(--border)" }}>
-                            <TD style={{ fontWeight: 600 }}>{staffName(sb.staff_id)}</TD>
-                            <TD right style={{ color: "var(--green)" }}>{INR(sb.billing || 0)}</TD>
-                            <TD right style={{ color: "var(--accent)" }}>{INR(sb.material || 0)}</TD>
-                            <TD right style={{ color: "var(--gold)" }}>{INR((sb.incentive || 0) + (sb.mat_incentive || 0))}</TD>
-                            <TD right style={{ color: "var(--blue, #60a5fa)" }}>{INR(sb.tips || 0)}</TD>
-                          </tr>
-                        ))
-                      )}
-                    </tbody>
-                  </table>
-                ) : (
-                  // Monthly card → daily rows for that month
-                  <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 11.5, minWidth: 320 }}>
-                    <thead>
-                      <tr>
-                        <TH>Date</TH>
-                        <TH right>Cash</TH>
-                        <TH right>Online</TH>
-                        <TH right>Cash In Hand</TH>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {[...c.entries].sort((a, b) => a.date.localeCompare(b.date)).map(e => (
-                        <tr key={e.id} style={{ borderBottom: "1px solid var(--border)" }}>
-                          <TD style={{ fontWeight: 600 }}>{e.date}</TD>
-                          <TD right style={{ color: "var(--green)" }}>{INR(e.cash || 0)}</TD>
-                          <TD right style={{ color: "var(--blue, #60a5fa)" }}>{INR(e.online || 0)}</TD>
-                          <TD right style={{ color: (e.cash_in_hand || 0) >= 0 ? "var(--gold)" : "var(--red)", fontWeight: 700 }}>{INR(e.cash_in_hand || 0)}</TD>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
-              </div>
-            </Card>
-          ))}
-        </div>
-      )}
-    </>
   );
 }
