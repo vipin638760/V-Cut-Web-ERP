@@ -122,6 +122,51 @@ export default function DashboardLayout({ children }) {
 
   const roleNav = useMemo(() => (user ? NAV[user.role] || [] : []), [user]);
 
+  // ── Draggable sidebar order, persisted per-role in localStorage ──
+  const [navOrder, setNavOrder] = useState([]);
+  const [navDragId, setNavDragId] = useState(null);
+  const [navDragOverId, setNavDragOverId] = useState(null);
+
+  useEffect(() => {
+    if (!user?.role || typeof window === "undefined") return;
+    try {
+      const saved = localStorage.getItem(`vcut_nav_order_${user.role}`);
+      if (saved) setNavOrder(JSON.parse(saved));
+      else setNavOrder([]);
+    } catch { /* ignore */ }
+  }, [user?.role]);
+
+  // Apply the saved order on top of roleNav; any new nav items that were not
+  // in the saved order are appended at the bottom so they still appear.
+  let orderedNav = roleNav;
+  if (navOrder && navOrder.length > 0) {
+    const byId = new Map(roleNav.map(n => [n.id, n]));
+    const result = [];
+    navOrder.forEach(id => {
+      if (byId.has(id)) { result.push(byId.get(id)); byId.delete(id); }
+    });
+    byId.forEach(n => result.push(n));
+    orderedNav = result;
+  }
+
+  const reorderNav = useCallback((fromId, toId) => {
+    if (!fromId || fromId === toId) return;
+    const ids = orderedNav.map(n => n.id);
+    const fromIdx = ids.indexOf(fromId);
+    const toIdx = ids.indexOf(toId);
+    if (fromIdx < 0 || toIdx < 0) return;
+    const next = [...ids];
+    next.splice(fromIdx, 1);
+    next.splice(toIdx, 0, fromId);
+    setNavOrder(next);
+    try { localStorage.setItem(`vcut_nav_order_${user.role}`, JSON.stringify(next)); } catch { /* ignore */ }
+  }, [orderedNav, user?.role]);
+
+  const resetNavOrder = useCallback(() => {
+    setNavOrder([]);
+    try { localStorage.removeItem(`vcut_nav_order_${user?.role}`); } catch { /* ignore */ }
+  }, [user?.role]);
+
   // Prefetch on hover/focus rather than all at mount — avoids a boot-time bundle storm.
   const handlePrefetch = useCallback((id) => {
     if (prefetched.current.has(id)) return;
@@ -186,21 +231,61 @@ export default function DashboardLayout({ children }) {
         </div>
 
         <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 2, overflowY: "auto", padding: "0 8px" }}>
-          {roleNav.map((n) => {
+          {orderedNav.map((n) => {
             const isActive = activeTab === n.id || (n.id === "dashboard" && (activeTab === "" || activeTab === "dashboard"));
+            const isDraggingThis = navDragId === n.id;
+            const isOverThis = navDragOverId === n.id && !isDraggingThis;
             return (
-              <SidebarItem
+              <div
                 key={n.id}
-                id={n.id}
-                icon={n.icon}
-                label={n.l}
-                isActive={isActive}
-                onClick={handleNav}
-                onMouseEnter={handlePrefetch}
-                onFocus={handlePrefetch}
-              />
+                draggable="true"
+                onDragStart={(ev) => {
+                  setNavDragId(n.id);
+                  if (ev.dataTransfer) {
+                    ev.dataTransfer.effectAllowed = "move";
+                    ev.dataTransfer.setData("text/plain", n.id);
+                  }
+                }}
+                onDragOver={(ev) => {
+                  ev.preventDefault();
+                  if (ev.dataTransfer) ev.dataTransfer.dropEffect = "move";
+                  if (navDragId && navDragId !== n.id) setNavDragOverId(n.id);
+                }}
+                onDragLeave={() => { if (navDragOverId === n.id) setNavDragOverId(null); }}
+                onDrop={(ev) => {
+                  ev.preventDefault();
+                  reorderNav(navDragId, n.id);
+                  setNavDragId(null);
+                  setNavDragOverId(null);
+                }}
+                onDragEnd={() => { setNavDragId(null); setNavDragOverId(null); }}
+                style={{
+                  opacity: isDraggingThis ? 0.4 : 1,
+                  borderRadius: 10,
+                  boxShadow: isOverThis ? "inset 0 2px 0 0 var(--accent)" : "none",
+                  transition: "opacity .15s, box-shadow .15s",
+                  cursor: navDragId ? "grabbing" : "grab",
+                }}
+              >
+                <SidebarItem
+                  id={n.id}
+                  icon={n.icon}
+                  label={n.l}
+                  isActive={isActive}
+                  onClick={handleNav}
+                  onMouseEnter={handlePrefetch}
+                  onFocus={handlePrefetch}
+                />
+              </div>
             );
           })}
+          {navOrder.length > 0 && (
+            <button onClick={resetNavOrder}
+              title="Restore the default menu order"
+              style={{ margin: "8px 8px 4px", padding: "6px 10px", borderRadius: 8, background: "transparent", border: "1px dashed rgba(var(--accent-rgb),0.3)", color: "var(--text3)", fontSize: 10, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase", cursor: "pointer" }}>
+              Reset menu order
+            </button>
+          )}
         </div>
 
         <div style={{ padding: "16px", background: "var(--bg3)", display: "flex", alignItems: "center", gap: 12 }}>
