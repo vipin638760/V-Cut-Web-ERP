@@ -97,35 +97,46 @@ export default function DashboardPage() {
   const [empActiveTab, setEmpActiveTab] = useState("stats");
   const [kpiSection, setKpiSection] = useState("all");
 
+  const [subTick, setSubTick] = useState(0);
+
   useEffect(() => {
     if (!db) return;
+    const err = (name) => (e) => console.warn(`${name} sync error:`, e);
     const unsubs = [
-      onSnapshot(collection(db, "branches"), sn =>
-        setBranches(sn.docs.map(d => ({ ...d.data(), id: d.id })))),
-      onSnapshot(collection(db, "staff"), sn =>
-        setStaff(sn.docs.map(d => ({ ...d.data(), id: d.id })))),
-      onSnapshot(collection(db, "leaves"), sn =>
-        setLeaves(sn.docs.map(d => ({ ...d.data(), id: d.id })))),
-      onSnapshot(collection(db, "salary_history"), sn =>
-        setSalHistory(sn.docs.map(d => ({ ...d.data(), id: d.id })))),
-      onSnapshot(doc(db, "settings", "global"), sn => setGlobalSettings(sn.data() || {})),
+      onSnapshot(collection(db, "branches"),
+        sn => setBranches(sn.docs.map(d => ({ ...d.data(), id: d.id }))),
+        err("branches")),
+      onSnapshot(collection(db, "staff"),
+        sn => setStaff(sn.docs.map(d => ({ ...d.data(), id: d.id }))),
+        err("staff")),
+      onSnapshot(collection(db, "leaves"),
+        sn => setLeaves(sn.docs.map(d => ({ ...d.data(), id: d.id }))),
+        err("leaves")),
+      onSnapshot(collection(db, "salary_history"),
+        sn => setSalHistory(sn.docs.map(d => ({ ...d.data(), id: d.id }))),
+        err("salary_history")),
+      onSnapshot(doc(db, "settings", "global"),
+        sn => setGlobalSettings(sn.data() || {}),
+        err("settings")),
       onSnapshot(
         query(collection(db, "entries"), orderBy("date", "desc")),
         sn => {
           setEntries(sn.docs.map(d => ({ ...d.data(), id: d.id })));
           setLoading(false);
-        }
+        },
+        err("entries")
       ),
-      onSnapshot(collection(db, "staff_advances"), sn =>
-        setAdvances(sn.docs.map(d => ({ ...d.data(), id: d.id })))
-      ),
+      onSnapshot(collection(db, "staff_advances"),
+        sn => setAdvances(sn.docs.map(d => ({ ...d.data(), id: d.id }))),
+        err("staff_advances")),
       onSnapshot(
         query(collection(db, "staff_reviews"), orderBy("date", "desc")),
-        sn => setReviews(sn.docs.map(d => ({ ...d.data(), id: d.id })))
+        sn => setReviews(sn.docs.map(d => ({ ...d.data(), id: d.id }))),
+        err("staff_reviews")
       ),
     ];
     return () => unsubs.forEach(u => u());
-  }, []);
+  }, [subTick]);
 
   const filterPrefix = makeFilterPrefix(filterYear, filterMonth);
   const plabel       = periodLabel(filterMode, filterYear, filterMonth);
@@ -165,7 +176,7 @@ export default function DashboardPage() {
   // Build + filter + sort branch data
   let branchData = branches.map(b => {
     const bEntries = entries.filter(ent => ent.branch_id === b.id && inPeriod(ent.date));
-    
+
     // Aggregates
     const iOnline = bEntries.reduce((s, e) => s + (e.online || 0), 0);
     const iCash   = bEntries.reduce((s, e) => s + (e.cash || 0), 0);
@@ -176,23 +187,53 @@ export default function DashboardPage() {
     const vMatE  = bEntries.reduce((s, e) => s + (e.mat_expense || 0), 0);
     const vOther = bEntries.reduce((s, e) => s + (e.others || 0) + (e.petrol || 0), 0);
     const vPetrol = bEntries.reduce((s, e) => s + (e.petrol || 0), 0);
-    
-    // Fixed costs
-    const fShopRent = (b.shop_rent || 0) * factor;
-    const fRoomRent = (b.room_rent || 0) * factor;
-    const fWifi     = (b.wifi || 0) * factor;
-    const fElec     = ((b.shop_elec || 0) + (b.room_elec || 0)) * factor;
+
+    // Only count days/months with entries or approved leaves when pro-rating
+    // fixed costs + salary. Matches the branches detail daily/monthly breakdown
+    // so a deleted entry actually lowers the card's expense pro-rata.
+    const branchStaffIds = new Set(staff.filter(s => s.branch_id === b.id).map(s => s.id));
+    const activeDates = new Set(bEntries.map(e => e.date));
+    leaves.forEach(l => {
+      if (l.status === 'approved' && branchStaffIds.has(l.staff_id) && l.date && inPeriod(l.date)) {
+        activeDates.add(l.date);
+      }
+    });
+    const activeMonthSet = new Set();
+    activeDates.forEach(d => activeMonthSet.add(d.slice(0, 7)));
+
+    let fixedFactor;
+    if (isYearly) {
+      fixedFactor = activeMonthSet.size;
+    } else {
+      const daysInMonth = new Date(filterYear, filterMonth, 0).getDate();
+      fixedFactor = daysInMonth ? activeDates.size / daysInMonth : 0;
+    }
+
+    // Fixed costs — pro-rate by active days/months
+    const fShopRent = (b.shop_rent || 0) * fixedFactor;
+    const fRoomRent = (b.room_rent || 0) * fixedFactor;
+    const fWifi     = (b.wifi || 0) * fixedFactor;
+    const fElec     = ((b.shop_elec || 0) + (b.room_elec || 0)) * fixedFactor;
     const fFixedTot = fShopRent + fRoomRent + fWifi + fElec;
 
-    // Payroll (Actual)
+    // Payroll (Actual) — only accrue for months with activity, and in monthly
+    // mode pro-rate by active days in that month.
     let actualSalary = 0;
     let actualLeaves = 0;
     const startM = isYearly ? 1 : filterMonth;
     const endM   = isYearly ? factor : filterMonth;
     for (let m = startM; m <= endM; m++) {
       const mPrefix = `${filterYear}-${String(m).padStart(2, '0')}`;
+      if (!activeMonthSet.has(mPrefix)) continue;
       const activeStaffInMonth = staff.filter(s => s.branch_id === b.id && staffStatusForMonth(s, mPrefix).status !== 'inactive');
-      actualSalary += activeStaffInMonth.reduce((s, st) => s + proRataSalary(st, mPrefix, branches, salHistory, staff, globalSettings), 0);
+      const mSalary = activeStaffInMonth.reduce((s, st) => s + proRataSalary(st, mPrefix, branches, salHistory, staff, globalSettings), 0);
+      if (isYearly) {
+        actualSalary += mSalary;
+      } else {
+        const daysInMonth = new Date(filterYear, filterMonth, 0).getDate();
+        const monthActiveDays = Array.from(activeDates).filter(d => d.startsWith(mPrefix)).length;
+        actualSalary += daysInMonth ? mSalary * monthActiveDays / daysInMonth : 0;
+      }
       actualLeaves += activeStaffInMonth.reduce((s, st) => s + staffLeavesInMonth(st.id, mPrefix, leaves), 0);
     }
 
@@ -851,7 +892,14 @@ export default function DashboardPage() {
           <h2 style={{ fontSize: 28, fontWeight: 800, color: "var(--text)", letterSpacing: -0.5, margin: 0, fontFamily: "var(--font-headline, var(--font-outfit))" }}>Organizational Pulse</h2>
           <p style={{ fontSize: 13, color: "var(--text3)", fontWeight: 500, marginTop: 6 }}>System oversight and branch network analytics.</p>
         </div>
-        <PeriodWidget filterMode={filterMode} setFilterMode={setFilterMode} filterYear={filterYear} setFilterYear={setFilterYear} filterMonth={filterMonth} setFilterMonth={setFilterMonth} />
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <button onClick={() => setSubTick(t => t + 1)}
+            title="Re-subscribe to live data"
+            style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: 10, background: "rgba(96,165,250,0.12)", border: "1px solid rgba(96,165,250,0.3)", color: "var(--blue, #60a5fa)", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>
+            <Icon name="trending" size={13} /> Refresh
+          </button>
+          <PeriodWidget filterMode={filterMode} setFilterMode={setFilterMode} filterYear={filterYear} setFilterYear={setFilterYear} filterMonth={filterMonth} setFilterMonth={setFilterMonth} />
+        </div>
       </div>
 
       {/* Admin Metrics */}
