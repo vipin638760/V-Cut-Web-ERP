@@ -1118,27 +1118,50 @@ export default function BranchesPage() {
             { l: "Fixed Costs", v: isAdmin ? INR(totalFixedSalaryComp) : "•••••", c: "var(--orange)", click: isAdmin ? "fixed" : null },
             { l: "GST Est.", v: isAdmin ? INR(totalGstEst) : "•••••", c: "var(--red)" },
             { l: "Full Net P&L", v: isAdmin ? (INR(fullNetSum)) : "•••••", c: fullNetSum >= 0 ? "var(--green)" : "var(--red)" },
-          ].map(({ l, v, c, click }) => (
-            <Card key={l}
-              onClick={click ? () => setKpiBreakdown(click) : undefined}
-              style={{
-                padding: "16px 20px", display: "flex", flexDirection: "column", gap: 4, minHeight: 90, justifyContent: "center",
-                cursor: click ? "pointer" : "default",
-                position: "relative",
-                transition: "transform .15s, box-shadow .15s",
-                ...(click ? { ":hover": { transform: "translateY(-2px)" } } : {}),
-              }}
-              onMouseEnter={click ? ev => { ev.currentTarget.style.transform = "translateY(-2px)"; ev.currentTarget.style.boxShadow = "0 6px 18px rgba(var(--accent-rgb),0.15)"; } : undefined}
-              onMouseLeave={click ? ev => { ev.currentTarget.style.transform = "none"; ev.currentTarget.style.boxShadow = "none"; } : undefined}
-            >
-              <div style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, display: "flex", alignItems: "center", gap: 6 }}>
-                {l}
-                {click && <span title="Click for breakdown" style={{ fontSize: 10, color: "var(--accent)", opacity: 0.7 }}>ⓘ</span>}
+          ].map(({ l, v, c, click }) => {
+            const content = (
+              <>
+                <div style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, display: "flex", alignItems: "center", gap: 6 }}>
+                  {l}
+                  {click && <span title="Click for breakdown" style={{ fontSize: 10, color: "var(--accent)", opacity: 0.85 }}>ⓘ</span>}
+                </div>
+                <div style={{ fontSize: 22, fontWeight: 800, color: c, whiteSpace: "nowrap", marginTop: 4 }}>{v}</div>
+                <div style={{ fontSize: 10, color: "var(--blue)", fontWeight: 600, marginTop: 4 }}>{isYearly ? "This Year" : "This Month"}</div>
+              </>
+            );
+            if (!click) {
+              return (
+                <Card key={l} style={{ padding: "16px 20px", display: "flex", flexDirection: "column", minHeight: 90, justifyContent: "center" }}>
+                  {content}
+                </Card>
+              );
+            }
+            // Clickable KPI — use a plain div so onClick / hover handlers actually work.
+            return (
+              <div key={l}
+                role="button"
+                tabIndex={0}
+                onClick={() => setKpiBreakdown(click)}
+                onKeyDown={(ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); setKpiBreakdown(click); } }}
+                onMouseEnter={ev => { ev.currentTarget.style.transform = "translateY(-2px)"; ev.currentTarget.style.boxShadow = "0 6px 18px rgba(var(--accent-rgb),0.18)"; ev.currentTarget.style.borderColor = "rgba(var(--accent-rgb),0.35)"; }}
+                onMouseLeave={ev => { ev.currentTarget.style.transform = "none"; ev.currentTarget.style.boxShadow = "none"; ev.currentTarget.style.borderColor = "var(--border)"; }}
+                style={{
+                  padding: "16px 20px",
+                  minHeight: 90,
+                  background: "var(--bg2)",
+                  border: "1px solid var(--border)",
+                  borderRadius: 12,
+                  display: "flex",
+                  flexDirection: "column",
+                  justifyContent: "center",
+                  cursor: "pointer",
+                  transition: "transform .15s, box-shadow .15s, border-color .15s",
+                  userSelect: "none",
+                }}>
+                {content}
               </div>
-              <div style={{ fontSize: 22, fontWeight: 800, color: c, whiteSpace: "nowrap" }}>{v}</div>
-              <div style={{ fontSize: 10, color: "var(--blue)", fontWeight: 600 }}>{isYearly ? "This Year" : "This Month"}</div>
-            </Card>
-          ))}
+            );
+          })}
         </div>
 
         {/* KPI breakdown popup */}
