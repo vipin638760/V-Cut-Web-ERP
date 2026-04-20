@@ -4,7 +4,7 @@ import { ImageResponse } from "next/og";
 // Rendered via satori/ImageResponse so we can embed the TTF; a static SVG
 // favicon cannot load Google Fonts.
 
-export const size = { width: 180, height: 180 };
+export const size = { width: 512, height: 512 };
 export const contentType = "image/png";
 
 // jsdelivr serves the raw Great Vibes TTF from the Google Fonts repo.
@@ -31,16 +31,17 @@ export default async function Icon() {
           width: "100%",
           height: "100%",
           background: "#0b0b0d",
-          borderRadius: 32,
+          borderRadius: 96,
         }}
       >
         <span
           style={{
             fontFamily: fontData ? "GreatVibes" : "cursive",
             color: "#ef4444",
-            fontSize: 240,
+            fontSize: 640,
             lineHeight: 1,
-            transform: "translateY(30px)",
+            transform: "translateY(70px)",
+            fontWeight: 400,
           }}
         >
           V
