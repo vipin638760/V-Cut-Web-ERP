@@ -76,6 +76,127 @@ export default function CashCollectionPage() {
   const selectAll = () => setSelected(new Set(branches.map(b => b.id)));
   const clearAll = () => setSelected(new Set());
 
+  // ── Quick date range helpers (Mon-Sun weeks + rolling windows) ──
+  const iso = (d) => d.toISOString().slice(0, 10);
+  const applyWeek = (offset = 0) => {
+    const today = new Date();
+    const dow = today.getDay(); // 0 = Sun, 1 = Mon, ... 6 = Sat
+    const diffToMon = dow === 0 ? -6 : 1 - dow;
+    const monday = new Date(today);
+    monday.setDate(today.getDate() + diffToMon + offset * 7);
+    const sunday = new Date(monday);
+    sunday.setDate(monday.getDate() + 6);
+    setDateFrom(iso(monday));
+    setDateTo(iso(sunday));
+  };
+  const applyRollingDays = (n) => {
+    const today = new Date();
+    const from = new Date(today);
+    from.setDate(today.getDate() - (n - 1));
+    setDateFrom(iso(from));
+    setDateTo(iso(today));
+  };
+  const applyThisMonth = () => {
+    const today = new Date();
+    const first = new Date(today.getFullYear(), today.getMonth(), 1);
+    setDateFrom(iso(first));
+    setDateTo(iso(today));
+  };
+
+  // ── Print Collection Slip ──
+  // Opens a new window with a simple printable slip: one row per selected branch
+  // with Expected / Collected / Carry-forward / Signature columns so the cashier
+  // can fill it in on the visit and get each counter handler to sign.
+  const printCollectionSlip = () => {
+    if (branchRows.length === 0) return;
+    const rowsHtml = branchRows.map((r, i) => `
+      <tr>
+        <td style="text-align:center;">${i + 1}</td>
+        <td>${(r.b.name || "").replace(/</g, "&lt;")}</td>
+        <td style="text-align:right;">${INR(r.cih)}</td>
+        <td style="text-align:right;">&nbsp;</td>
+        <td style="text-align:right;">&nbsp;</td>
+        <td>&nbsp;</td>
+      </tr>
+    `).join("");
+    const totalExpected = branchRows.reduce((s, r) => s + r.cih, 0);
+    const collectorName = (currentUser?.name || "").replace(/</g, "&lt;");
+    const printedOn = new Date().toLocaleString();
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>V-Cut Salon — Cash Collection Slip</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: Arial, Helvetica, sans-serif; color: #000; padding: 24px; font-size: 12px; }
+    h1 { text-align: center; margin: 0 0 4px; font-size: 18px; letter-spacing: 1px; }
+    .sub { text-align: center; color: #555; font-size: 11px; margin-bottom: 18px; }
+    .meta { display: flex; justify-content: space-between; gap: 16px; margin-bottom: 12px; }
+    .meta div { flex: 1; }
+    .fill { display: inline-block; border-bottom: 1px solid #000; min-width: 180px; padding: 0 6px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+    th, td { border: 1px solid #000; padding: 8px 10px; font-size: 12px; vertical-align: middle; }
+    th { background: #f2f2f2; text-align: left; }
+    tfoot td { font-weight: bold; background: #fafafa; }
+    .sigs { margin-top: 36px; display: flex; justify-content: space-between; gap: 24px; }
+    .sigs div { flex: 1; border-top: 1px solid #000; padding-top: 6px; text-align: center; font-size: 11px; }
+    .note { margin-top: 18px; font-size: 10.5px; color: #555; line-height: 1.5; }
+    .actions { margin-top: 20px; text-align: center; }
+    .actions button { padding: 8px 18px; font-size: 12px; border: 1px solid #333; background: #f06464; color: #fff; border-radius: 4px; cursor: pointer; }
+    @media print { .actions { display: none; } body { padding: 0; } }
+  </style>
+</head>
+<body>
+  <h1>V-CUT SALON — CASH COLLECTION SLIP</h1>
+  <div class="sub">Printed on ${printedOn}</div>
+  <div class="meta">
+    <div>Period: <span class="fill">${plabel}</span></div>
+    <div>Visit date: <span class="fill">&nbsp;</span></div>
+    <div>Collector: <span class="fill">${collectorName || "&nbsp;"}</span></div>
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th style="width:32px;text-align:center;">#</th>
+        <th>Branch</th>
+        <th style="width:110px;text-align:right;">Expected (₹)</th>
+        <th style="width:110px;text-align:right;">Collected (₹)</th>
+        <th style="width:110px;text-align:right;">Carry-fwd (₹)</th>
+        <th style="width:150px;">Counter Signature</th>
+      </tr>
+    </thead>
+    <tbody>${rowsHtml}</tbody>
+    <tfoot>
+      <tr>
+        <td colspan="2" style="text-align:right;">TOTAL</td>
+        <td style="text-align:right;">${INR(totalExpected)}</td>
+        <td style="text-align:right;">&nbsp;</td>
+        <td style="text-align:right;">&nbsp;</td>
+        <td>&nbsp;</td>
+      </tr>
+    </tfoot>
+  </table>
+  <div class="note">
+    Collector fills the Collected amount at each branch; Carry-fwd = Expected − Collected. The counter handler signs against their branch row. The bottom signatures are for the collector and the HO cashier on handover.
+  </div>
+  <div class="sigs">
+    <div>Collector Signature</div>
+    <div>HO Cashier Signature</div>
+  </div>
+  <div class="actions">
+    <button onclick="window.print()">Print slip</button>
+  </div>
+</body>
+</html>`;
+    const w = window.open("", "_blank", "width=900,height=800");
+    if (!w) return;
+    w.document.open();
+    w.document.write(html);
+    w.document.close();
+    setTimeout(() => { try { w.focus(); w.print(); } catch { /* ignore */ } }, 350);
+  };
+
   // Daily/monthly cashflow rows for a single branch in current period
   const flowRowsFor = (bEntries) => {
     if (customRangeActive || filterMode === "month") {
@@ -147,6 +268,22 @@ export default function CashCollectionPage() {
             <span style={{ fontSize: 11, color: "var(--text3)" }}>Pick both dates to apply</span>
           )}
         </div>
+        {/* Quick presets — one-click week / rolling window selection */}
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 12, paddingTop: 10, borderTop: "1px solid var(--border)" }}>
+          <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, alignSelf: "center", marginRight: 4 }}>Quick:</span>
+          {[
+            ["This week", () => applyWeek(0)],
+            ["Last week", () => applyWeek(-1)],
+            ["Last 7 days", () => applyRollingDays(7)],
+            ["Last 14 days", () => applyRollingDays(14)],
+            ["This month", applyThisMonth],
+          ].map(([label, fn]) => (
+            <button key={label} onClick={fn}
+              style={{ padding: "5px 10px", borderRadius: 7, fontSize: 11, fontWeight: 700, background: "var(--bg4)", color: "var(--text2)", border: "1px solid var(--border2)", cursor: "pointer" }}>
+              {label}
+            </button>
+          ))}
+        </div>
       </Card>
 
       {/* Branch multi-select */}
@@ -199,8 +336,18 @@ export default function CashCollectionPage() {
 
       {/* Per-branch table with expandable daily view */}
       <Card style={{ overflow: "hidden" }}>
-        <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--border)", fontWeight: 700, color: "var(--gold)", fontSize: 12, textTransform: "uppercase", letterSpacing: 1 }}>
-          Per-branch cash flow · {plabel}
+        <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--border)", fontWeight: 700, color: "var(--gold)", fontSize: 12, textTransform: "uppercase", letterSpacing: 1, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <span>Per-branch cash flow · {plabel}</span>
+          <button onClick={printCollectionSlip} disabled={branchRows.length === 0}
+            title="Open a printable cash collection slip for the current selection"
+            style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "7px 14px", borderRadius: 8, fontSize: 11, fontWeight: 800, letterSpacing: 0.5, background: branchRows.length === 0 ? "var(--bg4)" : "linear-gradient(135deg, var(--accent), var(--gold2))", color: branchRows.length === 0 ? "var(--text3)" : "#000", border: "none", cursor: branchRows.length === 0 ? "not-allowed" : "pointer", textTransform: "uppercase", opacity: branchRows.length === 0 ? 0.5 : 1 }}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="6 9 6 2 18 2 18 9"/>
+              <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/>
+              <rect x="6" y="14" width="12" height="8"/>
+            </svg>
+            Print Collection Slip
+          </button>
         </div>
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12.5, minWidth: 560 }}>
