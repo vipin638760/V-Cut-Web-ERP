@@ -21,6 +21,11 @@ export default function CashCollectionPage() {
   const [filterYear, setFilterYear] = useState(NOW.getFullYear());
   const [filterMonth, setFilterMonth] = useState(NOW.getMonth() + 1);
 
+  // Custom date range — when both are set, it overrides the month/year filter.
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const customRangeActive = Boolean(dateFrom && dateTo);
+
   const [selected, setSelected] = useState(new Set());
   const [expanded, setExpanded] = useState(null); // branch_id whose daily view is open
 
@@ -37,8 +42,14 @@ export default function CashCollectionPage() {
   }, []);
 
   const filterPrefix = makeFilterPrefix(filterYear, filterMonth);
-  const plabel = periodLabel(filterMode, filterYear, filterMonth);
-  const inPeriod = (d) => filterMode === "month" ? d?.startsWith(filterPrefix) : d?.startsWith(String(filterYear));
+  const plabel = customRangeActive
+    ? `${dateFrom} → ${dateTo}`
+    : periodLabel(filterMode, filterYear, filterMonth);
+  const inPeriod = (d) => {
+    if (!d) return false;
+    if (customRangeActive) return d >= dateFrom && d <= dateTo;
+    return filterMode === "month" ? d.startsWith(filterPrefix) : d.startsWith(String(filterYear));
+  };
 
   const allRows = branches.map(b => {
     const bEntries = entries.filter(e => e.branch_id === b.id && inPeriod(e.date));
@@ -67,7 +78,8 @@ export default function CashCollectionPage() {
 
   // Daily/monthly cashflow rows for a single branch in current period
   const flowRowsFor = (bEntries) => {
-    if (filterMode === "month") {
+    if (customRangeActive || filterMode === "month") {
+      // Daily rows — one per entry date in range
       return [...bEntries]
         .sort((a, b) => a.date.localeCompare(b.date))
         .map(e => ({ label: e.date, cash: e.cash || 0, online: e.online || 0, cih: e.cash_in_hand || 0 }));
@@ -103,6 +115,39 @@ export default function CashCollectionPage() {
       </div>
 
       <PeriodWidget filterMode={filterMode} setFilterMode={setFilterMode} filterYear={filterYear} setFilterYear={setFilterYear} filterMonth={filterMonth} setFilterMonth={setFilterMonth} />
+
+      {/* Custom date range — overrides the period widget when both dates are set */}
+      <Card style={{ marginTop: 12, marginBottom: 12, padding: 14 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1 }}>
+            Custom range
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <label style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>From</label>
+            <input type="date" value={dateFrom} max={dateTo || undefined} onChange={e => setDateFrom(e.target.value)}
+              style={{ padding: "7px 10px", borderRadius: 8, background: "var(--bg4)", border: "1px solid var(--border2)", color: "var(--text)", fontSize: 12 }} />
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <label style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>To</label>
+            <input type="date" value={dateTo} min={dateFrom || undefined} onChange={e => setDateTo(e.target.value)}
+              style={{ padding: "7px 10px", borderRadius: 8, background: "var(--bg4)", border: "1px solid var(--border2)", color: "var(--text)", fontSize: 12 }} />
+          </div>
+          {(dateFrom || dateTo) && (
+            <button onClick={() => { setDateFrom(""); setDateTo(""); }}
+              style={{ padding: "7px 12px", borderRadius: 8, fontSize: 11, fontWeight: 700, background: "var(--bg4)", color: "var(--text2)", border: "1px solid var(--border2)", cursor: "pointer" }}>
+              Clear
+            </button>
+          )}
+          {customRangeActive && (
+            <span style={{ fontSize: 11, color: "var(--accent)", fontWeight: 700, background: "rgba(var(--accent-rgb),0.12)", padding: "4px 10px", borderRadius: 6 }}>
+              Active · overriding {filterMode === "month" ? "monthly" : "yearly"} filter
+            </span>
+          )}
+          {!customRangeActive && (dateFrom || dateTo) && (
+            <span style={{ fontSize: 11, color: "var(--text3)" }}>Pick both dates to apply</span>
+          )}
+        </div>
+      </Card>
 
       {/* Branch multi-select */}
       <Card style={{ marginTop: 12, marginBottom: 16, padding: 14 }}>
@@ -190,7 +235,7 @@ export default function CashCollectionPage() {
                     <tr key={`detail-${r.b.id}`}>
                       <td colSpan={5} style={{ padding: 0, background: "var(--bg3)" }}>
                         <div style={{ padding: "10px 16px", fontSize: 11, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                          <span>{filterMode === "month" ? "Daily breakdown" : "Monthly breakdown"}</span>
+                          <span>{(customRangeActive || filterMode === "month") ? "Daily breakdown" : "Monthly breakdown"}</span>
                           <span style={{ color: "var(--text3)", textTransform: "none", letterSpacing: 0, fontSize: 10, fontWeight: 500 }}>{flow.length} row{flow.length === 1 ? "" : "s"}</span>
                         </div>
                         {flow.length === 0 ? (
@@ -199,7 +244,7 @@ export default function CashCollectionPage() {
                           <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 11.5 }}>
                             <thead>
                               <tr>
-                                <TH>{filterMode === "month" ? "Date" : "Month"}</TH>
+                                <TH>{(customRangeActive || filterMode === "month") ? "Date" : "Month"}</TH>
                                 <TH right>Cash Sales</TH>
                                 <TH right>Online / UPI</TH>
                                 <TH right>Cash In Hand</TH>
