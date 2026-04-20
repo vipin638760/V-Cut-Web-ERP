@@ -219,60 +219,39 @@ export default function DashboardPage() {
     const vOther = bEntries.reduce((s, e) => s + (e.others || 0) + (e.petrol || 0), 0);
     const vPetrol = bEntries.reduce((s, e) => s + (e.petrol || 0), 0);
 
-    // Only count days/months with entries or approved leaves when pro-rating
-    // fixed costs + salary. Matches the branches detail daily/monthly breakdown
-    // so a deleted entry actually lowers the card's expense pro-rata.
-    const branchStaffIds = new Set(staff.filter(s => s.branch_id === b.id).map(s => s.id));
-    const activeDates = new Set(bEntries.map(e => e.date));
-    leaves.forEach(l => {
-      if (l.status === 'approved' && branchStaffIds.has(l.staff_id) && l.date && inPeriod(l.date)) {
-        activeDates.add(l.date);
-      }
-    });
-    const activeMonthSet = new Set();
-    activeDates.forEach(d => activeMonthSet.add(d.slice(0, 7)));
-
-    let fixedFactor;
-    if (isYearly) {
-      fixedFactor = activeMonthSet.size;
-    } else {
-      const daysInMonth = new Date(filterYear, filterMonth, 0).getDate();
-      fixedFactor = daysInMonth ? activeDates.size / daysInMonth : 0;
-    }
-
-    // Fixed costs — pro-rate by active days/months
-    const fShopRent = (b.shop_rent || 0) * fixedFactor;
-    const fRoomRent = (b.room_rent || 0) * fixedFactor;
-    const fWifi     = (b.wifi || 0) * fixedFactor;
-    const fElec     = ((b.shop_elec || 0) + (b.room_elec || 0)) * fixedFactor;
+    // Fixed costs — charge the full period (rent / wifi / electricity accrue
+    // whether the shop operated that day or not). Matches the branch detail
+    // 'Fixed Costs' KPI so the card P&L lines up with Full Net P&L.
+    const fShopRent = (b.shop_rent || 0) * factor;
+    const fRoomRent = (b.room_rent || 0) * factor;
+    const fWifi     = (b.wifi || 0) * factor;
+    const fElec     = ((b.shop_elec || 0) + (b.room_elec || 0)) * factor;
     const fFixedTot = fShopRent + fRoomRent + fWifi + fElec;
 
-    // Payroll (Actual) — only accrue for months with activity, and in monthly
-    // mode pro-rate by active days in that month.
+    // Payroll (Actual) — full monthly pro-rata across every month in range.
+    // Salary is a contractual cost, not proportional to days the shop opened,
+    // so we do not cut it by active days here either.
     let actualSalary = 0;
     let actualLeaves = 0;
     const startM = isYearly ? 1 : filterMonth;
     const endM   = isYearly ? factor : filterMonth;
     for (let m = startM; m <= endM; m++) {
       const mPrefix = `${filterYear}-${String(m).padStart(2, '0')}`;
-      if (!activeMonthSet.has(mPrefix)) continue;
       const activeStaffInMonth = staff.filter(s => s.branch_id === b.id && staffStatusForMonth(s, mPrefix).status !== 'inactive');
-      const mSalary = activeStaffInMonth.reduce((s, st) => s + proRataSalary(st, mPrefix, branches, salHistory, staff, globalSettings), 0);
-      if (isYearly) {
-        actualSalary += mSalary;
-      } else {
-        const daysInMonth = new Date(filterYear, filterMonth, 0).getDate();
-        const monthActiveDays = Array.from(activeDates).filter(d => d.startsWith(mPrefix)).length;
-        actualSalary += daysInMonth ? mSalary * monthActiveDays / daysInMonth : 0;
-      }
+      actualSalary += activeStaffInMonth.reduce((s, st) => s + proRataSalary(st, mPrefix, branches, salHistory, staff, globalSettings), 0);
       actualLeaves += activeStaffInMonth.reduce((s, st) => s + staffLeavesInMonth(st.id, mPrefix, leaves), 0);
     }
 
-    const totalGst = bEntries.reduce((s, ent) => s + (ent.total_gst || 0), 0);
+    // GST is derived from online revenue at the configured global rate so it
+    // matches the branch detail's totalGstEst (which uses the same formula).
+    // Falling back to stored entry.total_gst hides entries that were saved
+    // before the field was populated.
+    const gstPct = globalSettings?.gst_pct || 0;
+    const totalGst = (iOnline * gstPct) / 100;
     const expenses = vInc + vMatE + vOther + fFixedTot + actualSalary;
-    // Use the full net (after GST) so the card border matches 'Full Net P&L'
-    // on the branch detail — previously cards could look green while the
-    // aggregate P&L was still negative because GST was left out here.
+    // Net = Full Net P&L (income − variable − fixed − salary − GST), matching
+    // the branch detail KPI so the card border and the Profit/Loss filter
+    // reflect the same number you see inside the branch.
     const net = income - expenses - totalGst;
 
     return {
