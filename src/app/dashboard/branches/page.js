@@ -975,6 +975,10 @@ export default function BranchesPage() {
         const dMatExp = materialAllocations
           .filter(a => a.branch_id === b.id && (a.date || (a.transferred_at || "").slice(0, 10)) === dayPrefix)
           .reduce((s, a) => s + (Number(a.total) || (a.items || []).reduce((ss, it) => ss + (Number(it.line_total) || (Number(it.qty) * Number(it.price_at_transfer)) || 0), 0)), 0);
+        // Lumpsum material = whatever the accountant typed into the Daily
+        // Entry form's material field. Shown alongside allocation-based Mat.
+        // so both figures are visible.
+        const dLumpMat = dEntries.reduce((s, e) => s + (Number(e.mat_expense) || 0), 0);
         const dOtherExp = dEntries.reduce((s, e) => s + (e.others || 0) + (e.petrol || 0), 0);
 
         // Fixed costs pro-rated for the day
@@ -993,6 +997,7 @@ export default function BranchesPage() {
           income: dIncome,
           incentives: dIncExp,
           material: dMatExp,
+          lumpsumMat: dLumpMat,
           others: dOtherExp,
           shopRent: (b.shop_rent || 0) * dayFactor,
           roomRent: (b.room_rent || 0) * dayFactor,
@@ -1016,6 +1021,7 @@ export default function BranchesPage() {
         const mMatExp = materialAllocations
           .filter(a => a.branch_id === b.id && (a.date || (a.transferred_at || "").slice(0, 10) || "").startsWith(monthPrefix))
           .reduce((s, a) => s + (Number(a.total) || (a.items || []).reduce((ss, it) => ss + (Number(it.line_total) || (Number(it.qty) * Number(it.price_at_transfer)) || 0), 0)), 0);
+        const mLumpMat = mEntries.reduce((s, e) => s + (Number(e.mat_expense) || 0), 0);
         const mOtherExp = mEntries.reduce((s, e) => s + (e.others || 0) + (e.petrol || 0), 0);
         
         const mFixed = (b.shop_rent || 0) + (b.room_rent || 0) + (b.wifi || 0) + (b.shop_elec || 0) + (b.room_elec || 0);
@@ -1031,6 +1037,7 @@ export default function BranchesPage() {
           income: mIncome,
           incentives: mIncExp,
           material: mMatExp,
+          lumpsumMat: mLumpMat,
           others: mOtherExp,
           shopRent: (b.shop_rent || 0),
           roomRent: (b.room_rent || 0),
@@ -1568,6 +1575,7 @@ export default function BranchesPage() {
                   <TH right>Income</TH>
                   <TH right>Inc.</TH>
                   <TH right>Mat.</TH>
+                  <TH right title="Lumpsum material typed into the Daily Entry form">Lumpsum Mat.</TH>
                   <TH right>Petrol</TH>
                   <TH right>Rent (S)</TH>
                   <TH right>Rent (R)</TH>
@@ -1584,6 +1592,7 @@ export default function BranchesPage() {
                       <TD right style={{ color: "var(--green)" }}>{INR(m.income)}</TD>
                       <TD right style={{ color: "var(--red)" }}>{INR(m.incentives)}</TD>
                       <TD right style={{ color: "var(--red)" }}>{INR(m.material)}</TD>
+                      <TD right style={{ color: "var(--accent)" }}>{(m.lumpsumMat || 0) > 0 ? INR(m.lumpsumMat) : "—"}</TD>
                       <TD right style={{ color: "var(--red)" }}>{INR(m.others)}</TD>
                       <TD right style={{ color: "var(--orange)" }}>{INR(m.shopRent)}</TD>
                       <TD right style={{ color: "var(--orange)" }}>{INR(m.roomRent)}</TD>
@@ -1600,6 +1609,7 @@ export default function BranchesPage() {
                       <TD right style={{ fontWeight: 800, color: "var(--green)" }}>{INR(breakdownStats.reduce((s, m) => s + m.income, 0))}</TD>
                       <TD right style={{ fontWeight: 800, color: "var(--red)" }}>{INR(breakdownStats.reduce((s, m) => s + m.incentives, 0))}</TD>
                       <TD right style={{ fontWeight: 800, color: "var(--red)" }}>{INR(breakdownStats.reduce((s, m) => s + m.material, 0))}</TD>
+                      <TD right style={{ fontWeight: 800, color: "var(--accent)" }}>{INR(breakdownStats.reduce((s, m) => s + (m.lumpsumMat || 0), 0))}</TD>
                       <TD right style={{ fontWeight: 800, color: "var(--red)" }}>{INR(breakdownStats.reduce((s, m) => s + m.others, 0))}</TD>
                       <TD right style={{ fontWeight: 800, color: "var(--orange)" }}>{INR(breakdownStats.reduce((s, m) => s + m.shopRent, 0))}</TD>
                       <TD right style={{ fontWeight: 800, color: "var(--orange)" }}>{INR(breakdownStats.reduce((s, m) => s + m.roomRent, 0))}</TD>
