@@ -71,14 +71,34 @@ export default function TaskpediaPage() {
   const [dragOverCol, setDragOverCol] = useState(null);
 
   useEffect(() => {
-    if (!db) return;
-    const unsubs = [
-      onSnapshot(query(collection(db, "taskpedia"), orderBy("created_at", "desc")), sn => {
-        setTasks(sn.docs.map(d => ({ ...d.data(), id: d.id })));
-        setLoading(false);
-      }),
-      onSnapshot(collection(db, "users"), sn => setUsers(sn.docs.map(d => ({ ...d.data(), id: d.id })))),
-    ];
+    if (!db) { setLoading(false); return; }
+    const unsubs = [];
+    try {
+      unsubs.push(onSnapshot(
+        query(collection(db, "taskpedia"), orderBy("created_at", "desc")),
+        sn => {
+          setTasks(sn.docs.map(d => ({ ...d.data(), id: d.id })));
+          setLoading(false);
+        },
+        (err) => {
+          // If the collection is empty or rules block reads, fall through
+          // to an empty board rather than leaving the spinner up forever.
+          console.warn("[taskpedia] tasks subscription error:", err?.message);
+          setTasks([]);
+          setLoading(false);
+        }
+      ));
+    } catch (err) {
+      console.warn("[taskpedia] tasks query build failed:", err?.message);
+      setLoading(false);
+    }
+    try {
+      unsubs.push(onSnapshot(
+        collection(db, "users"),
+        sn => setUsers(sn.docs.map(d => ({ ...d.data(), id: d.id }))),
+        () => setUsers([])
+      ));
+    } catch { /* ignore — assignee list will be empty */ }
     return () => unsubs.forEach(u => u());
   }, []);
 

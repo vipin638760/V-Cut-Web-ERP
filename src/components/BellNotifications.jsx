@@ -1,10 +1,12 @@
 "use client";
 import { useEffect, useState, useRef, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { collection, onSnapshot, getDocs, query, where, doc, updateDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { Icon } from "./ui";
 
 export default function BellNotifications({ currentUser }) {
+  const router = useRouter();
   const [approvals, setApprovals] = useState([]);
   const [extras, setExtras] = useState([]); // leaves, staff_setup, advances
   const [taskpedia, setTaskpedia] = useState([]); // tasks assigned to current user + unread
@@ -25,30 +27,43 @@ export default function BellNotifications({ currentUser }) {
   // Taskpedia — subscribe via array-contains on assignee_ids so both
   // single-assignee legacy docs (assignee_id) and new multi-assignee docs
   // surface. Run two subscriptions and merge, since Firestore doesn't have
-  // an OR across different fields in a single query.
+  // an OR across different fields in a single query. image_url is stripped
+  // on the way in — it's a base64 blob that bloats the notification list
+  // without being rendered in the bell.
   useEffect(() => {
     if (!db || !currentUser?.id) return;
-    const mergeSet = new Map(); // id -> doc
+    const mergeSet = new Map(); // id -> slim doc
     const publish = () => {
-      const mine = Array.from(mergeSet.values()).filter(t => !t.read_by_assignee && t.status !== "done");
-      setTaskpedia(mine);
+      try {
+        const mine = Array.from(mergeSet.values()).filter(t => !t.read_by_assignee && t.status !== "done");
+        setTaskpedia(mine);
+      } catch { setTaskpedia([]); }
     };
-    const q1 = query(collection(db, "taskpedia"), where("assignee_ids", "array-contains", currentUser.id));
-    const q2 = query(collection(db, "taskpedia"), where("assignee_id", "==", currentUser.id));
-    const unsub1 = onSnapshot(q1, sn => {
-      sn.docChanges().forEach(ch => {
-        if (ch.type === "removed") mergeSet.delete(ch.doc.id);
-        else mergeSet.set(ch.doc.id, { ...ch.doc.data(), id: ch.doc.id, _kind: "taskpedia" });
-      });
-      publish();
-    }, () => { /* swallow — fallback to q2 */ });
-    const unsub2 = onSnapshot(q2, sn => {
-      sn.docChanges().forEach(ch => {
-        if (ch.type === "removed") mergeSet.delete(ch.doc.id);
-        else mergeSet.set(ch.doc.id, { ...ch.doc.data(), id: ch.doc.id, _kind: "taskpedia" });
-      });
-      publish();
-    }, () => setTaskpedia([]));
+    const slim = (d) => {
+      const { image_url, description, ...rest } = d.data(); // eslint-disable-line no-unused-vars
+      return { ...rest, id: d.id, _kind: "taskpedia" };
+    };
+    let unsub1 = () => {}, unsub2 = () => {};
+    try {
+      const q1 = query(collection(db, "taskpedia"), where("assignee_ids", "array-contains", currentUser.id));
+      unsub1 = onSnapshot(q1, sn => {
+        sn.docChanges().forEach(ch => {
+          if (ch.type === "removed") mergeSet.delete(ch.doc.id);
+          else mergeSet.set(ch.doc.id, slim(ch.doc));
+        });
+        publish();
+      }, () => { /* swallow — the == query below still covers legacy docs */ });
+    } catch { /* query failed to build — nothing to do */ }
+    try {
+      const q2 = query(collection(db, "taskpedia"), where("assignee_id", "==", currentUser.id));
+      unsub2 = onSnapshot(q2, sn => {
+        sn.docChanges().forEach(ch => {
+          if (ch.type === "removed") mergeSet.delete(ch.doc.id);
+          else mergeSet.set(ch.doc.id, slim(ch.doc));
+        });
+        publish();
+      }, () => { /* swallow — stay empty if this path also fails */ });
+    } catch { /* ignore */ }
     return () => { unsub1(); unsub2(); };
   }, [currentUser?.id]);
 
@@ -212,10 +227,11 @@ export default function BellNotifications({ currentUser }) {
                       {a.assigned_by_name && <div style={{ fontSize: 11, color: "var(--text2)", marginTop: 2 }}>From {a.assigned_by_name}</div>}
                       <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 2 }}>Due {a.due_date}</div>
                       <div style={{ marginTop: 8 }}>
-                        <a href="/dashboard/taskpedia"
-                          style={{ display: "inline-block", padding: "6px 12px", background: "rgba(168,85,247,0.12)", border: "1px solid rgba(168,85,247,0.35)", color: "#a855f7", borderRadius: 6, fontSize: 10, fontWeight: 800, letterSpacing: 1, textTransform: "uppercase", textDecoration: "none" }}>
+                        <button type="button"
+                          onClick={() => { setOpen(false); router.push("/dashboard/taskpedia"); }}
+                          style={{ display: "inline-block", padding: "6px 12px", background: "rgba(168,85,247,0.12)", border: "1px solid rgba(168,85,247,0.35)", color: "#a855f7", borderRadius: 6, fontSize: 10, fontWeight: 800, letterSpacing: 1, textTransform: "uppercase", cursor: "pointer" }}>
                           Open Taskpedia
-                        </a>
+                        </button>
                       </div>
                     </>
                   )}
