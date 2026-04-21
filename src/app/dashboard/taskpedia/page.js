@@ -1,8 +1,7 @@
 "use client";
 import { useEffect, useState, useMemo } from "react";
 import { collection, onSnapshot, addDoc, deleteDoc, doc, updateDoc, orderBy, query } from "firebase/firestore";
-import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
-import { db, storage } from "@/lib/firebase";
+import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
 import { Icon, Card, Modal, useConfirm, useToast } from "@/components/ui";
 import VLoader from "@/components/VLoader";
@@ -14,6 +13,39 @@ const COLUMNS = [
 ];
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
+
+// Resize + compress client-side and return a data: URL. Avoids Firebase
+// Storage (the app uses custom Firestore-backed auth, so unauthenticated
+// uploadBytes calls hang against default Storage rules). A 1200-px JPEG
+// at 0.72 quality comfortably fits in Firestore's 1 MiB doc limit for
+// typical screenshots, and the <img> tag handles data: URLs natively.
+async function compressImageToDataUrl(file, maxDim = 1200, quality = 0.72) {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise((resolve, reject) => {
+      const el = new Image();
+      el.onload = () => resolve(el);
+      el.onerror = () => reject(new Error("Could not load image."));
+      el.src = url;
+    });
+    let { width, height } = img;
+    if (width > maxDim || height > maxDim) {
+      const scale = Math.min(maxDim / width, maxDim / height);
+      width = Math.round(width * scale);
+      height = Math.round(height * scale);
+    }
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(img, 0, 0, width, height);
+    // toDataURL falls back to PNG if the browser doesn't support the
+    // requested mime — always shrink PNGs by routing through JPEG.
+    return canvas.toDataURL("image/jpeg", quality);
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
 
 export default function TaskpediaPage() {
   const currentUser = useCurrentUser() || {};
@@ -78,9 +110,12 @@ export default function TaskpediaPage() {
     try {
       let image_url = null;
       if (image) {
-        const fileRef = ref(storage, `taskpedia/${Date.now()}-${image.name}`);
-        await uploadBytes(fileRef, image);
-        image_url = await getDownloadURL(fileRef);
+        if (image.size > 8 * 1024 * 1024) {
+          toast({ title: "Image too large", message: "Please pick an image under 8 MB.", type: "warning" });
+          setUploading(false);
+          return;
+        }
+        image_url = await compressImageToDataUrl(image);
       }
       const assignee = usersById.get(assignee_id);
       await addDoc(collection(db, "taskpedia"), {
