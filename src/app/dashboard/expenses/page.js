@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState, useMemo } from "react";
-import { collection, onSnapshot, query, orderBy, addDoc, deleteDoc, doc, setDoc, writeBatch } from "firebase/firestore";
+import { collection, onSnapshot, query, orderBy, addDoc, deleteDoc, doc, setDoc, writeBatch, updateDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
 import { INR, proRataSalary } from "@/lib/calculations";
@@ -30,11 +30,16 @@ export default function ExpensesPage() {
   const [staff, setStaff] = useState([]);
   const [salHistory, setSalHistory] = useState([]);
   const [dailyEntries, setDailyEntries] = useState([]);
+  const [dailyOps, setDailyOps] = useState([]); // daily_expenses — feeds the Variable tab
   const [loading, setLoading]   = useState(true);
   const [showForm, setShowForm] = useState(false);
-  const [viewType, setViewType] = useState("fixed"); // 'fixed' or 'total'
+  const [viewType, setViewType] = useState("fixed"); // 'fixed' | 'variable' | 'total'
   const [focusedCol, setFocusedCol] = useState(null); // category name or null
   const [bulkEdit, setBulkEdit] = useState(false);
+  const [recalcFlash, setRecalcFlash] = useState(false); // visual ack on Recalculate
+  // Drill-down modal for Variable cells: { branchId, category } | null
+  const [drillDown, setDrillDown] = useState(null);
+  const [drillEditing, setDrillEditing] = useState(null); // daily_expenses row being edited
   
   const [filterMode, setFilterMode]   = useState("month");
   const [filterYear, setFilterYear]   = useState(NOW.getFullYear());
@@ -68,6 +73,7 @@ export default function ExpensesPage() {
       onSnapshot(collection(db, "staff"), sn => setStaff(sn.docs.map(d => ({ ...d.data(), id: d.id })))),
       onSnapshot(collection(db, "salary_history"), sn => setSalHistory(sn.docs.map(d => ({ ...d.data(), id: d.id })))),
       onSnapshot(query(collection(db, "entries"), orderBy("date", "desc")), sn => setDailyEntries(sn.docs.map(d => ({ ...d.data(), id: d.id })))),
+      onSnapshot(query(collection(db, "daily_expenses"), orderBy("date", "desc")), sn => setDailyOps(sn.docs.map(d => ({ ...d.data(), id: d.id })))),
       onSnapshot(query(collection(db, "fixed_expenses"), orderBy("date", "desc")), sn => {
         setExpenses(sn.docs.map(d => ({ ...d.data(), id: d.id })));
         setLoading(false);
@@ -157,6 +163,48 @@ export default function ExpensesPage() {
     });
     return m;
   }, [dailyEntries]);
+
+  // Variable tab — columns come from every active expense_type (same master list
+  // the Daily Expenses page writes to). Adding a category there instantly creates
+  // a column here.
+  const variableCols = useMemo(
+    () => customTypes.filter(t => t.active !== false).map(t => t.name).sort((a, b) => a.localeCompare(b)),
+    [customTypes]
+  );
+
+  // Map<branchId|YYYY-MM|category, sum> for daily_expenses (Variable tab source)
+  const dailyOpsByKey = useMemo(() => {
+    const m = new Map();
+    dailyOps.forEach(e => {
+      if (!e.branch_id || !e.date || !e.expense_type) return;
+      const k = `${e.branch_id}|${e.date.slice(0, 7)}|${e.expense_type}`;
+      m.set(k, (m.get(k) || 0) + (Number(e.amount) || 0));
+    });
+    return m;
+  }, [dailyOps]);
+
+  // Lookup: sum of one (branch, category) pair for the current filter period.
+  const varCellSum = (bid, cat) => {
+    if (filterMode === "month") return dailyOpsByKey.get(`${bid}|${filterPrefix}|${cat}`) || 0;
+    // Year mode — sum all 12 months
+    let total = 0;
+    for (let m = 1; m <= 12; m++) {
+      const k = `${bid}|${filterYear}-${String(m).padStart(2, "0")}|${cat}`;
+      total += dailyOpsByKey.get(k) || 0;
+    }
+    return total;
+  };
+
+  // Individual rows behind a Variable cell — drives the drill-down modal.
+  const drillRows = useMemo(() => {
+    if (!drillDown) return [];
+    const { branchId, category } = drillDown;
+    return dailyOps
+      .filter(e => e.branch_id === branchId && e.expense_type === category && (
+        filterMode === "month" ? e.date?.startsWith(filterPrefix) : e.date?.startsWith(String(filterYear))
+      ))
+      .sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+  }, [drillDown, dailyOps, filterMode, filterPrefix, filterYear]);
 
   // Map<branchId, activeColsSum> — current-month grid totals (used by KPI and annual fallback)
   const gridTotalByBranch = useMemo(() => {
@@ -778,6 +826,17 @@ export default function ExpensesPage() {
 
   const networkAnnualTotal = useMemo(() => {
     const REAL_NOW = new Date().toISOString().slice(0, 7);
+    // Variable year-mode: sum daily_expenses across branches × months × categories.
+    if (viewType === "variable") {
+      let total = 0;
+      for (const b of branches) {
+        for (let m = 1; m <= 12; m++) {
+          const pref = `${filterYear}-${String(m).padStart(2, "0")}`;
+          for (const t of variableCols) total += dailyOpsByKey.get(`${b.id}|${pref}|${t}`) || 0;
+        }
+      }
+      return total;
+    }
     let total = 0;
     for (let i = 0; i < branches.length; i++) {
       const b = branches[i];
@@ -792,8 +851,10 @@ export default function ExpensesPage() {
         if (!isFuture) {
           total += (mAct > 0 || isCurrent ? (mAct || (isCurrent ? gridSum : mBase)) : mBase);
           if (viewType === "total") {
-            for (let j = 0; j < bStaff.length; j++) {
-              total += proRataSalary(bStaff[j], pref, branches, salHistory, staff);
+            if (isAdmin) {
+              for (let j = 0; j < bStaff.length; j++) {
+                total += proRataSalary(bStaff[j], pref, branches, salHistory, staff);
+              }
             }
             const dailyAgg = dailyAggByBranchMonth.get(`${b.id}|${pref}`);
             if (dailyAgg) total += dailyAgg.variable;
@@ -804,10 +865,14 @@ export default function ExpensesPage() {
       }
     }
     return total;
-  }, [branches, filterYear, filterPrefix, viewType, expensesByBranchMonth, dailyAggByBranchMonth, staffByBranch, gridTotalByBranch, salHistory, staff]);
+  }, [branches, filterYear, filterPrefix, viewType, expensesByBranchMonth, dailyAggByBranchMonth, staffByBranch, gridTotalByBranch, salHistory, staff, isAdmin, variableCols, dailyOpsByKey]);
 
-  const displayTotal = filterMode === "month" 
-    ? (viewType === "fixed" ? networkFixed : (networkFixed + networkSalary + networkVar)) 
+  const displayTotal = filterMode === "month"
+    ? (viewType === "fixed"
+        ? networkFixed
+        : viewType === "variable"
+          ? networkVar
+          : (networkFixed + (isAdmin ? networkSalary : 0) + networkVar))
     : networkAnnualTotal;
 
   if (loading) return <VLoader fullscreen label="Loading Expenses" />;
@@ -821,13 +886,21 @@ export default function ExpensesPage() {
         <div>
            <h2 style={{ fontSize: 28, fontWeight: 800, color: "var(--text)", letterSpacing: -0.5, margin: 0, fontFamily: "var(--font-headline, var(--font-outfit))" }}>Financial Expenses</h2>
            <div style={{ display: "flex", gap: 3, marginTop: 10, background: "var(--bg4)", padding: 3, borderRadius: 10 }}>
-              <button onClick={() => setViewType("fixed")} style={{ ...TS, background: viewType === "fixed" ? "linear-gradient(135deg, var(--accent), var(--gold2))" : "transparent", color: viewType === "fixed" ? "#000" : "var(--text3)" }}>Fixed Only</button>
-              <button onClick={() => setViewType("total")} style={{ ...TS, background: viewType === "total" ? "linear-gradient(135deg, var(--accent), var(--gold2))" : "transparent", color: viewType === "total" ? "#000" : "var(--text3)" }}>Total (F+S+V)</button>
+              <button onClick={() => setViewType("fixed")} style={{ ...TS, background: viewType === "fixed" ? "linear-gradient(135deg, var(--accent), var(--gold2))" : "transparent", color: viewType === "fixed" ? "#000" : "var(--text3)" }}>Fixed</button>
+              <button onClick={() => setViewType("variable")} style={{ ...TS, background: viewType === "variable" ? "linear-gradient(135deg, var(--accent), var(--gold2))" : "transparent", color: viewType === "variable" ? "#000" : "var(--text3)" }}>Variable</button>
+              <button onClick={() => setViewType("total")} style={{ ...TS, background: viewType === "total" ? "linear-gradient(135deg, var(--accent), var(--gold2))" : "transparent", color: viewType === "total" ? "#000" : "var(--text3)" }}>Total (F+V+S)</button>
            </div>
         </div>
 
         <div style={{ display: "flex", gap: 8 }}>
-          {canEdit && filterMode === "month" && (
+          {viewType === "variable" && (
+            <button onClick={() => { setRecalcFlash(true); setTimeout(() => setRecalcFlash(false), 900); toast({ title: "Recalculated", message: "Variable totals refreshed from daily_expenses.", type: "success" }); }}
+              title="Re-aggregate Variable totals from daily_expenses"
+              style={{ display: "flex", alignItems: "center", gap: 6, padding: "10px 16px", borderRadius: 10, background: recalcFlash ? "linear-gradient(135deg,var(--accent),var(--gold2))" : "var(--bg3)", color: recalcFlash ? "#000" : "var(--accent)", border: "1px solid rgba(var(--accent-rgb),0.3)", cursor: "pointer", fontWeight: 700, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, transition: "all .2s" }}>
+              <Icon name="check" size={12} /> Recalculate
+            </button>
+          )}
+          {viewType !== "variable" && canEdit && filterMode === "month" && (
             <>
               <button onClick={handleSyncMasterData} title="Convert all master suggestions to records"
                 style={{ display: "flex", alignItems: "center", gap: 6, padding: "10px 16px", borderRadius: 10, background: "var(--bg3)", color: "var(--text3)", border: "1px solid rgba(72,72,71,0.12)", cursor: "pointer", fontWeight: 600, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5 }}>
@@ -839,7 +912,7 @@ export default function ExpensesPage() {
               </button>
             </>
           )}
-          {canEdit && filterMode === "month" && (
+          {viewType !== "variable" && canEdit && filterMode === "month" && (
             <>
               <button onClick={downloadExpenseTemplate} disabled={templating} title="Download a blank template for this month"
                 style={{ display: "flex", alignItems: "center", gap: 6, padding: "10px 16px", borderRadius: 10, background: "var(--bg3)", color: "var(--orange)", border: "1px solid rgba(72,72,71,0.12)", cursor: templating ? "wait" : "pointer", fontWeight: 700, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, opacity: templating ? 0.6 : 1 }}>
@@ -868,12 +941,12 @@ export default function ExpensesPage() {
           <div style={{ fontSize: 24, fontWeight: 800, color: "var(--orange)", fontFamily: "var(--font-headline, var(--font-outfit))" }}>{INR(networkFixed)}</div>
         </div>
         <div onClick={() => setFocusedCol("Salary")} style={{ background: "var(--bg3)", padding: "18px 22px", borderRadius: 14, cursor: "pointer", border: "1px solid rgba(72,72,71,0.1)" }}>
-          <div style={{ fontSize: 10, fontWeight: 600, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.5, marginBottom: 8 }}>Variable Costs</div>
-          <div style={{ fontSize: 24, fontWeight: 800, color: "var(--blue)", fontFamily: "var(--font-headline, var(--font-outfit))" }}>{INR(networkSalary + networkVar)}</div>
+          <div style={{ fontSize: 10, fontWeight: 600, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.5, marginBottom: 8 }}>Variable Costs{isAdmin ? " + Salary" : ""}</div>
+          <div style={{ fontSize: 24, fontWeight: 800, color: "var(--blue)", fontFamily: "var(--font-headline, var(--font-outfit))" }}>{INR(isAdmin ? networkSalary + networkVar : networkVar)}</div>
         </div>
         <div onClick={() => setFocusedCol(null)} style={{ background: "var(--bg3)", padding: "18px 22px", borderRadius: 14, cursor: "pointer", border: "1px solid rgba(72,72,71,0.1)" }}>
           <div style={{ fontSize: 10, fontWeight: 600, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.5, marginBottom: 8 }}>Total Spending</div>
-          <div style={{ fontSize: 24, fontWeight: 800, color: "var(--red)", fontFamily: "var(--font-headline, var(--font-outfit))" }}>{INR(displayTotal)}</div>
+          <div style={{ fontSize: 24, fontWeight: 800, color: "var(--red)", fontFamily: "var(--font-headline, var(--font-outfit))" }}>{(!isAdmin && viewType === "total") ? "•••••" : INR(displayTotal)}</div>
         </div>
       </div>
 
@@ -894,7 +967,7 @@ export default function ExpensesPage() {
                   {viewType === "total" && isAdmin && <TH right onClick={() => setFocusedCol("Salary")} style={{ width: 110, minWidth: 110, background: focusedCol === "Salary" ? "rgba(96,165,250,0.08)" : "var(--bg4)", color: "var(--blue)", cursor: "pointer" }}>Salary</TH>}
                   {viewType === "total" && <TH right onClick={() => setFocusedCol("Variable")} style={{ width: 110, minWidth: 110, background: focusedCol === "Variable" ? "rgba(96,165,250,0.08)" : "var(--bg4)", color: "var(--blue)", cursor: "pointer" }}>Variable</TH>}
 
-                  {activeCols.map(t => {
+                  {(viewType === "variable" ? variableCols : activeCols).map(t => {
                     const label = t.replace(/Bill/gi, "").replace(/ \/ /g, "/").replace(/Electricity/gi, "Elec").replace(/Collector /gi, "").replace(/Maintenance/gi, "Maint").replace(/Service/gi, "Svc").replace(/ELECTRICAL/gi, "ELEC");
                     return (
                       <TH key={t} right onClick={() => setFocusedCol(t)} style={{
@@ -914,7 +987,12 @@ export default function ExpensesPage() {
                   const bGrid = localGrid[b.id] || {};
                   const stats = getBranchStats(b.id);
                   const fixedTotal = activeCols.reduce((s, t) => s + (Number(bGrid[t]?.val) || 0), 0);
-                  const rowTotal = viewType === "fixed" ? fixedTotal : (fixedTotal + stats.salary + stats.variable);
+                  const variableRowTotal = variableCols.reduce((s, t) => s + varCellSum(b.id, t), 0);
+                  const rowTotal = viewType === "fixed"
+                    ? fixedTotal
+                    : viewType === "variable"
+                      ? variableRowTotal
+                      : (fixedTotal + (isAdmin ? stats.salary : 0) + stats.variable);
 
                   return (
                     <tr key={b.id} style={{ transition: "background 0.15s" }}
@@ -929,30 +1007,43 @@ export default function ExpensesPage() {
                         </>
                       )}
 
-                      {activeCols.map(t => {
-                        const cell = bGrid[t] || { val: "", isActual: false };
-                        return (
-                          <TD key={t} right style={{ padding: "6px 4px", background: focusedCol === t ? "rgba(var(--accent-rgb),0.02)" : "transparent", width: 110 }}>
-                            <input
-                              type="number"
-                              value={cell.val}
-                              onChange={(e) => handleInputChange(b.id, t, e.target.value)}
-                              onBlur={(e) => handleGridUpdate(b.id, t, e.target.value)}
-                              placeholder="—"
-                              style={{
-                                width: 80, padding: "7px 8px", background: bulkEdit ? "var(--bg4)" : "var(--bg4)",
-                                border: "none", borderBottom: cell.isActual ? "2px solid var(--accent)" : "2px solid transparent",
-                                borderRadius: 8,
-                                color: cell.isActual ? "var(--red)" : "var(--text3)",
-                                fontWeight: 700, fontStyle: cell.isActual ? "normal" : "italic",
-                                textAlign: "right", fontSize: 13, outline: "none", transition: "all .2s",
-                                fontFamily: "var(--font-headline, var(--font-outfit))",
-                                pointerEvents: (canEdit || bulkEdit) ? "auto" : "none"
-                              }}
-                            />
-                          </TD>
-                        );
-                      })}
+                      {viewType === "variable"
+                        ? variableCols.map(t => {
+                            const sum = varCellSum(b.id, t);
+                            return (
+                              <TD key={t} right style={{ padding: "6px 4px", background: focusedCol === t ? "rgba(var(--accent-rgb),0.02)" : "transparent", width: 110 }}>
+                                <button onClick={() => setDrillDown({ branchId: b.id, category: t })}
+                                  title={`View ${t} entries for ${b.name.replace("V-CUT ", "")}`}
+                                  style={{ width: 80, padding: "7px 8px", background: "var(--bg4)", border: "none", borderRadius: 8, color: sum > 0 ? "var(--red)" : "var(--text3)", fontWeight: 700, fontStyle: sum > 0 ? "normal" : "italic", textAlign: "right", fontSize: 13, cursor: sum > 0 ? "pointer" : "default", fontFamily: "var(--font-headline, var(--font-outfit))", outline: "none" }}>
+                                  {sum > 0 ? INR(sum) : "—"}
+                                </button>
+                              </TD>
+                            );
+                          })
+                        : activeCols.map(t => {
+                            const cell = bGrid[t] || { val: "", isActual: false };
+                            return (
+                              <TD key={t} right style={{ padding: "6px 4px", background: focusedCol === t ? "rgba(var(--accent-rgb),0.02)" : "transparent", width: 110 }}>
+                                <input
+                                  type="number"
+                                  value={cell.val}
+                                  onChange={(e) => handleInputChange(b.id, t, e.target.value)}
+                                  onBlur={(e) => handleGridUpdate(b.id, t, e.target.value)}
+                                  placeholder="—"
+                                  style={{
+                                    width: 80, padding: "7px 8px", background: bulkEdit ? "var(--bg4)" : "var(--bg4)",
+                                    border: "none", borderBottom: cell.isActual ? "2px solid var(--accent)" : "2px solid transparent",
+                                    borderRadius: 8,
+                                    color: cell.isActual ? "var(--red)" : "var(--text3)",
+                                    fontWeight: 700, fontStyle: cell.isActual ? "normal" : "italic",
+                                    textAlign: "right", fontSize: 13, outline: "none", transition: "all .2s",
+                                    fontFamily: "var(--font-headline, var(--font-outfit))",
+                                    pointerEvents: (canEdit || bulkEdit) ? "auto" : "none"
+                                  }}
+                                />
+                              </TD>
+                            );
+                          })}
                       <TD right style={{ fontWeight: 800, color: "var(--red)", fontSize: 14, background: "var(--bg3)", padding: "0 14px", borderLeft: "1px solid rgba(72,72,71,0.1)", position: "sticky", right: 0, zIndex: 10, width: 120, fontFamily: "var(--font-headline, var(--font-outfit))" }}>{INR(rowTotal)}</TD>
                     </tr>
                   );
@@ -965,7 +1056,7 @@ export default function ExpensesPage() {
                 <tr style={{ position: "sticky", top: 0, zIndex: 10 }}>
                   <TH style={{ position: "sticky", left: 0, background: "var(--bg4)", zIndex: 20, borderRight: "1px solid rgba(72,72,71,0.15)", minWidth: 120, fontSize: 11 }}>Branch</TH>
                   {MONTHS.map(m => <TH key={m} right style={{ background: "var(--bg4)", fontSize: 10, color: "var(--text3)" }}>{m}</TH>)}
-                  <TH right style={{ background: "var(--bg4)", borderLeft: "1px solid rgba(72,72,71,0.15)", fontSize: 11, position: "sticky", right: 0, zIndex: 15 }}>{viewType === "fixed" ? "YTD Fixed" : "YTD Total"}</TH>
+                  <TH right style={{ background: "var(--bg4)", borderLeft: "1px solid rgba(72,72,71,0.15)", fontSize: 11, position: "sticky", right: 0, zIndex: 15 }}>{viewType === "fixed" ? "YTD Fixed" : viewType === "variable" ? "YTD Variable" : "YTD Total"}</TH>
                 </tr>
               </thead>
               <tbody>
@@ -992,9 +1083,13 @@ export default function ExpensesPage() {
 
                         let mTotal = mFixed;
 
-                        if (viewType === "total" && !isFuture) {
+                        if (viewType === "variable") {
+                          // Year-mode Variable column: sum daily_expenses for this
+                          // branch across all active categories in this month.
+                          mTotal = variableCols.reduce((s, t) => s + (dailyOpsByKey.get(`${b.id}|${mPrefix}|${t}`) || 0), 0);
+                        } else if (viewType === "total" && !isFuture) {
                           const bStaff = staff.filter(s => s.branch_id === b.id);
-                          const mSalary = bStaff.reduce((s, st) => s + proRataSalary(st, mPrefix, branches, salHistory, staff), 0);
+                          const mSalary = isAdmin ? bStaff.reduce((s, st) => s + proRataSalary(st, mPrefix, branches, salHistory, staff), 0) : 0;
                           const bEntries = dailyEntries.filter(e => e.branch_id === b.id && e.date?.startsWith(mPrefix));
                           const mVar = bEntries.reduce((s, e) => {
                             const sb = e.staff_billing || [];
@@ -1004,7 +1099,7 @@ export default function ExpensesPage() {
                           mTotal += (mSalary + mVar);
                         } else if (viewType === "total" && isFuture) {
                            // Future total view should also only show manual actuals
-                           mTotal = mActuals; 
+                           mTotal = mActuals;
                         }
 
                         branchYearTotal += mTotal;
@@ -1026,11 +1121,17 @@ export default function ExpensesPage() {
                     {viewType === "total" && isAdmin && <TD right style={{ color: "var(--blue)", fontWeight: 700, width: 110, minWidth: 110, fontFamily: "var(--font-headline, var(--font-outfit))" }}>{INR(networkSalary)}</TD>}
                     {viewType === "total" && <TD right style={{ color: "var(--blue)", fontWeight: 700, width: 110, minWidth: 110, fontFamily: "var(--font-headline, var(--font-outfit))" }}>{INR(networkVar)}</TD>}
 
-                    {activeCols.map(t => {
-                      const tTotal = branches.reduce((s, b) => s + (Number(localGrid[b.id]?.[t]?.val) || 0), 0);
+                    {(viewType === "variable" ? variableCols : activeCols).map(t => {
+                      const tTotal = viewType === "variable"
+                        ? branches.reduce((s, b) => s + varCellSum(b.id, t), 0)
+                        : branches.reduce((s, b) => s + (Number(localGrid[b.id]?.[t]?.val) || 0), 0);
                       return <TD key={t} right style={{ color: "var(--red)", fontSize: 12, width: 110, minWidth: 110, fontWeight: 700, fontFamily: "var(--font-headline, var(--font-outfit))" }}>{INR(tTotal)}</TD>;
                     })}
-                    <TD right style={{ fontSize: 16, color: "var(--red)", fontWeight: 800, borderLeft: "1px solid rgba(72,72,71,0.15)", width: 120, minWidth: 120, fontFamily: "var(--font-headline, var(--font-outfit))" }}>{INR(displayTotal)}</TD>
+                    <TD right style={{ fontSize: 16, color: "var(--red)", fontWeight: 800, borderLeft: "1px solid rgba(72,72,71,0.15)", width: 120, minWidth: 120, fontFamily: "var(--font-headline, var(--font-outfit))" }}>
+                      {INR(viewType === "variable"
+                        ? branches.reduce((s, b) => s + variableCols.reduce((ss, t) => ss + varCellSum(b.id, t), 0), 0)
+                        : displayTotal)}
+                    </TD>
                   </>
                 ) : (
                   <>
@@ -1039,7 +1140,12 @@ export default function ExpensesPage() {
                       const REAL_NOW = new Date().toISOString().slice(0, 7);
                       const isFuture = mPrefix > REAL_NOW;
                       const isCurrentActive = mPrefix === filterPrefix;
-                      
+
+                      if (viewType === "variable") {
+                        const nVarMonth = branches.reduce((s, b) => s + variableCols.reduce((ss, t) => ss + (dailyOpsByKey.get(`${b.id}|${mPrefix}|${t}`) || 0), 0), 0);
+                        return <TD key={i} right style={{ color: "var(--orange)", fontSize: 12, fontWeight: 700, width: 110, minWidth: 110, fontFamily: "var(--font-headline, var(--font-outfit))" }}>{nVarMonth > 0 ? INR(nVarMonth) : "—"}</TD>;
+                      }
+
                       // Network Fixed (Actuals or Baseline if no data AND NOT FUTURE)
                       const nFixed = branches.reduce((s, b) => {
                          const mAct = expenses.filter(e => e.branch_id === b.id && e.date?.startsWith(mPrefix)).reduce((ss, e) => ss + (e.amount || 0), 0);
@@ -1264,6 +1370,112 @@ export default function ExpensesPage() {
                   {committing ? "Committing..." : `Commit ${additions + updates + cleared} Change(s)`}
                 </button>
               </div>
+            </div>
+          );
+        })()}
+      </Modal>
+
+      <Modal isOpen={!!drillDown} onClose={() => { setDrillDown(null); setDrillEditing(null); }} title={drillDown ? `${drillDown.category} — ${branches.find(b => b.id === drillDown.branchId)?.name?.replace("V-CUT ", "") || ""}` : ""} width={720}>
+        {drillDown && (() => {
+          const b = branches.find(x => x.id === drillDown.branchId);
+          const periodLabel = filterMode === "month" ? filterPrefix : String(filterYear);
+          const totalSum = drillRows.reduce((s, r) => s + (Number(r.amount) || 0), 0);
+          const saveEdit = async () => {
+            if (!drillEditing || !drillEditing.amount || !drillEditing.date) {
+              toast({ title: "Incomplete", message: "Date and amount required.", type: "warning" });
+              return;
+            }
+            try {
+              if (drillEditing.id) {
+                await updateDoc(doc(db, "daily_expenses", drillEditing.id), {
+                  date: drillEditing.date, amount: Number(drillEditing.amount), note: drillEditing.note?.trim() || "",
+                  updated_at: new Date().toISOString(), updated_by: currentUser?.name || "admin",
+                });
+                toast({ title: "Updated", message: "Entry updated.", type: "success" });
+              } else {
+                await addDoc(collection(db, "daily_expenses"), {
+                  date: drillEditing.date, branch_id: drillDown.branchId, branch_name: b?.name || "",
+                  expense_type: drillDown.category, amount: Number(drillEditing.amount), note: drillEditing.note?.trim() || "",
+                  created_at: new Date().toISOString(), created_by: currentUser?.name || "admin",
+                });
+                toast({ title: "Saved", message: "Entry added.", type: "success" });
+              }
+              setDrillEditing(null);
+            } catch (err) {
+              toast({ title: "Error", message: err.message, type: "error" });
+            }
+          };
+          const confirmDelete = (row) => confirm({
+            title: "Delete entry",
+            message: `Delete <strong>${drillDown.category}</strong> — ${INR(row.amount)} on ${row.date}?`,
+            confirmText: "Delete", type: "danger",
+            onConfirm: async () => {
+              await deleteDoc(doc(db, "daily_expenses", row.id));
+              toast({ title: "Deleted", message: "Entry removed.", type: "success" });
+            },
+          });
+          return (
+            <div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", background: "var(--bg4)", borderRadius: 10, marginBottom: 14, fontSize: 12 }}>
+                <div style={{ color: "var(--text3)" }}>Period <span style={{ color: "var(--accent)", fontWeight: 700 }}>{periodLabel}</span> · {drillRows.length} {drillRows.length === 1 ? "entry" : "entries"}</div>
+                <div style={{ color: "var(--red)", fontWeight: 800, fontSize: 14 }}>{INR(totalSum)}</div>
+              </div>
+              {isAdmin && !drillEditing && (
+                <button onClick={() => setDrillEditing({ date: new Date().toISOString().slice(0, 10), amount: "", note: "" })}
+                  style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: 8, background: "linear-gradient(135deg,var(--accent),var(--gold2))", color: "#000", border: "none", cursor: "pointer", fontWeight: 700, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 12 }}>
+                  <Icon name="plus" size={12} /> Add Entry
+                </button>
+              )}
+              {isAdmin && drillEditing && (
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 2fr auto auto", gap: 8, padding: 12, background: "var(--bg4)", borderRadius: 10, marginBottom: 12, alignItems: "center" }}>
+                  <input type="date" value={drillEditing.date} onChange={e => setDrillEditing({ ...drillEditing, date: e.target.value })}
+                    style={{ padding: "8px 10px", background: "var(--bg3)", border: "1px solid rgba(72,72,71,0.2)", borderRadius: 8, color: "var(--text)", fontSize: 12 }} />
+                  <input type="number" placeholder="Amount" value={drillEditing.amount} onChange={e => setDrillEditing({ ...drillEditing, amount: e.target.value })}
+                    style={{ padding: "8px 10px", background: "var(--bg3)", border: "1px solid rgba(72,72,71,0.2)", borderRadius: 8, color: "var(--text)", fontSize: 12 }} />
+                  <input type="text" placeholder="Note (optional)" value={drillEditing.note || ""} onChange={e => setDrillEditing({ ...drillEditing, note: e.target.value })}
+                    style={{ padding: "8px 10px", background: "var(--bg3)", border: "1px solid rgba(72,72,71,0.2)", borderRadius: 8, color: "var(--text)", fontSize: 12 }} />
+                  <button onClick={saveEdit}
+                    style={{ padding: "8px 14px", borderRadius: 8, background: "var(--green)", color: "#000", border: "none", cursor: "pointer", fontWeight: 700, fontSize: 11 }}>Save</button>
+                  <button onClick={() => setDrillEditing(null)}
+                    style={{ padding: "8px 14px", borderRadius: 8, background: "var(--bg3)", color: "var(--text3)", border: "1px solid rgba(72,72,71,0.2)", cursor: "pointer", fontWeight: 700, fontSize: 11 }}>Cancel</button>
+                </div>
+              )}
+              {drillRows.length === 0 ? (
+                <div style={{ padding: "28px 14px", textAlign: "center", color: "var(--text3)", fontStyle: "italic", fontSize: 12 }}>No {drillDown.category} entries in {periodLabel}.</div>
+              ) : (
+                <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
+                  <thead>
+                    <tr>
+                      <TH style={{ fontSize: 10 }}>Date</TH>
+                      <TH right style={{ fontSize: 10 }}>Amount</TH>
+                      <TH style={{ fontSize: 10 }}>Note</TH>
+                      <TH style={{ fontSize: 10 }}>By</TH>
+                      {isAdmin && <TH right style={{ fontSize: 10 }}>Actions</TH>}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {drillRows.map(r => (
+                      <tr key={r.id}>
+                        <TD style={{ fontFamily: "monospace", fontSize: 11 }}>{r.date}</TD>
+                        <TD right style={{ color: "var(--red)", fontWeight: 700 }}>{INR(r.amount)}</TD>
+                        <TD style={{ color: "var(--text3)", fontSize: 11 }}>{r.note || "—"}</TD>
+                        <TD style={{ color: "var(--text3)", fontSize: 11 }}>{r.updated_by || r.created_by || "—"}</TD>
+                        {isAdmin && (
+                          <TD right>
+                            <IconBtn name="edit" title="Edit" variant="secondary" onClick={() => setDrillEditing({ id: r.id, date: r.date, amount: r.amount, note: r.note || "" })} />
+                            <IconBtn name="del" title="Delete" variant="danger" onClick={() => confirmDelete(r)} />
+                          </TD>
+                        )}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+              {!isAdmin && (
+                <div style={{ marginTop: 14, padding: "10px 14px", background: "rgba(96,165,250,0.06)", border: "1px solid rgba(96,165,250,0.2)", borderRadius: 10, fontSize: 11, color: "var(--blue)" }}>
+                  Read-only view. Ask an admin to edit or delete entries.
+                </div>
+              )}
             </div>
           );
         })()}

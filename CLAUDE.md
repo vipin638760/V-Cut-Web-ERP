@@ -109,6 +109,7 @@ On settle, if bill is linked to a customer, update their doc with `last_visit_da
 - **Loaders** — every `if (loading) return <VLoader fullscreen label="..." />`. Don't write plain "Loading..." strings.
 - **Card glow** — `Card` and `StatCard` in `components/ui.jsx` render with a coloured halo (`box-shadow` + tinted border). Branch cards go further: green glow for `n > 0`, red for `n <= 0` (zero-net counts as not-profitable, not neutral). Keep the `n > 0` convention when adding new P&L-coloured surfaces — never `n >= 0`.
 - **Branch `n` = Full Net P&L** — in both dashboard and branches `branchData`, `n` subtracts variable + fixed + salary + GST estimate (`iOnline * gst_pct / 100`). This matches the detail view's Full Net P&L KPI, so card border / Profit-Loss filter / table column all agree. Don't compute a GST-less "gross net" for UI colouring.
+- **Operational Expenses tabs** — three views: Fixed (editable grid, CORE_COLS + active customs), Variable (read-only, columns derived from active `expense_types`, cells aggregate `daily_expenses` by branch × month × category, click opens drill-down modal), Total (Fixed + Variable + Salary). Edit in the Variable drill-down is admin-only — accountant sees entries read-only. Salary is never exposed to non-admin: mask it in aggregate KPIs, network-row totals, and per-branch row totals alike.
 
 ## Don'ts
 
