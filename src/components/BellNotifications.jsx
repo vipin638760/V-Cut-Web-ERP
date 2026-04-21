@@ -22,18 +22,34 @@ export default function BellNotifications({ currentUser }) {
     return () => unsub();
   }, []);
 
-  // Taskpedia — live subscription for tasks assigned to the current user,
-  // client-side filter for unread + not-done so one composite index covers it.
+  // Taskpedia — subscribe via array-contains on assignee_ids so both
+  // single-assignee legacy docs (assignee_id) and new multi-assignee docs
+  // surface. Run two subscriptions and merge, since Firestore doesn't have
+  // an OR across different fields in a single query.
   useEffect(() => {
     if (!db || !currentUser?.id) return;
-    const q = query(collection(db, "taskpedia"), where("assignee_id", "==", currentUser.id));
-    const unsub = onSnapshot(q, sn => {
-      const mine = sn.docs
-        .map(d => ({ ...d.data(), id: d.id, _kind: "taskpedia" }))
-        .filter(t => !t.read_by_assignee && t.status !== "done");
+    const mergeSet = new Map(); // id -> doc
+    const publish = () => {
+      const mine = Array.from(mergeSet.values()).filter(t => !t.read_by_assignee && t.status !== "done");
       setTaskpedia(mine);
+    };
+    const q1 = query(collection(db, "taskpedia"), where("assignee_ids", "array-contains", currentUser.id));
+    const q2 = query(collection(db, "taskpedia"), where("assignee_id", "==", currentUser.id));
+    const unsub1 = onSnapshot(q1, sn => {
+      sn.docChanges().forEach(ch => {
+        if (ch.type === "removed") mergeSet.delete(ch.doc.id);
+        else mergeSet.set(ch.doc.id, { ...ch.doc.data(), id: ch.doc.id, _kind: "taskpedia" });
+      });
+      publish();
+    }, () => { /* swallow — fallback to q2 */ });
+    const unsub2 = onSnapshot(q2, sn => {
+      sn.docChanges().forEach(ch => {
+        if (ch.type === "removed") mergeSet.delete(ch.doc.id);
+        else mergeSet.set(ch.doc.id, { ...ch.doc.data(), id: ch.doc.id, _kind: "taskpedia" });
+      });
+      publish();
     }, () => setTaskpedia([]));
-    return () => unsub();
+    return () => { unsub1(); unsub2(); };
   }, [currentUser?.id]);
 
   // Fetch other notifications on-demand when dropdown opens (safe — no persistent subscriptions)

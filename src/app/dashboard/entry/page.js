@@ -94,6 +94,11 @@ export default function EntryPage() {
   const [recentDate, setRecentDate] = useState(""); // defaults to selDate
   const [rangeFrom, setRangeFrom] = useState("");
   const [rangeTo, setRangeTo] = useState("");
+  // Multi-branch picker for Recent Entries (works in branch + range modes).
+  // Empty set = fall back to current selBranch so the old UX still works.
+  const [recentBranchIds, setRecentBranchIds] = useState([]);
+  const [recentBranchSearch, setRecentBranchSearch] = useState("");
+  const [showBranchPicker, setShowBranchPicker] = useState(false);
   const [uploadPreview, setUploadPreview] = useState(null); // { rows: [...], errors: [...], valid: [...] }
   const [serviceLogsByStaff, setServiceLogsByStaff] = useState({}); // { [staff_id]: { billing, tips, material, count, closed } }
   const [sharedServices, setSharedServices] = useState([]); // [{ id, service_name, amount, sale_staff_id, incentive_staff_ids: [] }]
@@ -713,11 +718,19 @@ export default function EntryPage() {
   const activeRecentDate = recentDate || selDate;
   const visibleEntries = useMemo(() => {
     let list = filteredEntries;
-    if (recentView === "branch" && selBranch) list = filteredEntries.filter(e => e.branch_id === selBranch);
+    // Multi-branch picker wins if anything is selected; otherwise fall back
+    // to the single selBranch so existing muscle memory still works.
+    const branchSet = recentBranchIds.length > 0 ? new Set(recentBranchIds) : (selBranch ? new Set([selBranch]) : null);
+    if (recentView === "branch" && branchSet) list = filteredEntries.filter(e => branchSet.has(e.branch_id));
     else if (recentView === "date") list = filteredEntries.filter(e => e.date === activeRecentDate);
-    else if (recentView === "range" && rangeFrom && rangeTo) list = entries.filter(e => e.date >= rangeFrom && e.date <= rangeTo);
+    else if (recentView === "range" && rangeFrom && rangeTo) {
+      list = entries.filter(e => e.date >= rangeFrom && e.date <= rangeTo);
+      // Layer the branch picker on top when it's set, so "range + branches"
+      // answers "recent entries for X, Y across April" in one shot.
+      if (recentBranchIds.length > 0) list = list.filter(e => branchSet.has(e.branch_id));
+    }
     return list.slice(0, recentLimit);
-  }, [filteredEntries, recentView, selBranch, activeRecentDate, rangeFrom, rangeTo, entries, recentLimit]);
+  }, [filteredEntries, recentView, selBranch, activeRecentDate, rangeFrom, rangeTo, entries, recentLimit, recentBranchIds]);
 
   const exportToExcel = async () => {
     if (visibleEntries.length === 0) return;
@@ -1773,7 +1786,7 @@ export default function EntryPage() {
             {/* View toggles */}
             <div style={{ display: "flex", gap: 3, background: "var(--bg4)", padding: 3, borderRadius: 10 }}>
               {[
-                ["branch", selBranch ? (branchesById.get(selBranch)?.name?.replace("V-CUT ","") || "Branch") : "Branch"],
+                ["branch", recentBranchIds.length > 1 ? `${recentBranchIds.length} branches` : recentBranchIds.length === 1 ? (branchesById.get(recentBranchIds[0])?.name?.replace("V-CUT ","") || "Branch") : (selBranch ? (branchesById.get(selBranch)?.name?.replace("V-CUT ","") || "Branch") : "Branch")],
                 ["date", "Date"],
                 ["range", "Range"],
                 ["all", "All"]
@@ -1784,6 +1797,54 @@ export default function EntryPage() {
                 </button>
               ))}
             </div>
+            {/* Branch multi-select — works for the "branch" AND "range" modes */}
+            {(recentView === "branch" || recentView === "range") && (
+              <div style={{ position: "relative" }}>
+                <button onClick={() => setShowBranchPicker(v => !v)}
+                  style={{ padding: "5px 10px", borderRadius: 8, background: recentBranchIds.length ? "rgba(var(--accent-rgb),0.12)" : "var(--bg4)", border: `1px solid ${recentBranchIds.length ? "rgba(var(--accent-rgb),0.35)" : "var(--border)"}`, color: recentBranchIds.length ? "var(--accent)" : "var(--text3)", fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 }}>
+                  🔎 {recentBranchIds.length > 0 ? `${recentBranchIds.length} selected` : "Pick branches"}
+                  {recentBranchIds.length > 0 && (
+                    <span onClick={(ev) => { ev.stopPropagation(); setRecentBranchIds([]); }}
+                      style={{ color: "var(--red)", fontWeight: 800, cursor: "pointer", marginLeft: 2 }}>×</span>
+                  )}
+                </button>
+                {showBranchPicker && (
+                  <div style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, width: 260, background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 10, boxShadow: "0 10px 30px rgba(0,0,0,0.4)", zIndex: 100, overflow: "hidden" }}>
+                    <div style={{ padding: 8, borderBottom: "1px solid var(--border)" }}>
+                      <input type="text" autoFocus placeholder="Search branch…" value={recentBranchSearch}
+                        onChange={e => setRecentBranchSearch(e.target.value)}
+                        style={{ width: "100%", padding: "7px 10px", background: "var(--bg4)", border: "1px solid var(--border2)", borderRadius: 7, color: "var(--text)", fontSize: 12, outline: "none" }} />
+                    </div>
+                    <div style={{ maxHeight: 240, overflowY: "auto" }}>
+                      {branches
+                        .filter(b => {
+                          const q = recentBranchSearch.trim().toLowerCase();
+                          if (!q) return true;
+                          return (b.name || "").toLowerCase().includes(q);
+                        })
+                        .map(b => {
+                          const checked = recentBranchIds.includes(b.id);
+                          return (
+                            <label key={b.id}
+                              style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 12px", cursor: "pointer", borderBottom: "1px solid var(--border)", background: checked ? "rgba(var(--accent-rgb),0.08)" : "transparent" }}>
+                              <input type="checkbox" checked={checked}
+                                onChange={() => setRecentBranchIds(prev => prev.includes(b.id) ? prev.filter(x => x !== b.id) : [...prev, b.id])}
+                                style={{ accentColor: "var(--accent)", cursor: "pointer" }} />
+                              <span style={{ fontSize: 12, color: "var(--text)", fontWeight: 600 }}>{b.name.replace("V-CUT ", "")}</span>
+                            </label>
+                          );
+                        })}
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between", padding: 8, borderTop: "1px solid var(--border)", background: "var(--bg3)" }}>
+                      <button onClick={() => { setRecentBranchIds(branches.map(b => b.id)); }}
+                        style={{ padding: "5px 10px", borderRadius: 6, background: "var(--bg4)", border: "1px solid var(--border)", color: "var(--text3)", fontSize: 10, fontWeight: 700, cursor: "pointer", textTransform: "uppercase", letterSpacing: 0.5 }}>Select all</button>
+                      <button onClick={() => setShowBranchPicker(false)}
+                        style={{ padding: "5px 10px", borderRadius: 6, background: "linear-gradient(135deg,var(--accent),var(--gold2))", color: "#000", border: "none", fontSize: 10, fontWeight: 800, cursor: "pointer", textTransform: "uppercase", letterSpacing: 0.5 }}>Done</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
             {/* Rows limit */}
             <div style={{ display: "flex", gap: 2, background: "var(--bg4)", padding: 3, borderRadius: 10 }}>
               {[50, 100, 200].map(n => (

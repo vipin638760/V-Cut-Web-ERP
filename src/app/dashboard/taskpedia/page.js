@@ -57,13 +57,18 @@ export default function TaskpediaPage() {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [newModal, setNewModal] = useState(false);
-  const [newForm, setNewForm] = useState({ title: "", description: "", due_date: todayISO(), assignee_id: "", image: null });
+  const [newForm, setNewForm] = useState({ title: "", description: "", due_date: todayISO(), assignee_ids: [], image: null });
   const [uploading, setUploading] = useState(false);
   const [detail, setDetail] = useState(null); // task being viewed
   const [dateChange, setDateChange] = useState(null); // { new_date, reason }
   // Admin filters
   const [fAssignee, setFAssignee] = useState("");
   const [fStatus, setFStatus] = useState("");
+  // Assignee search (inside new-task modal)
+  const [assigneeSearch, setAssigneeSearch] = useState("");
+  // Drag-and-drop between columns
+  const [dragTaskId, setDragTaskId] = useState(null);
+  const [dragOverCol, setDragOverCol] = useState(null);
 
   useEffect(() => {
     if (!db) return;
@@ -79,10 +84,15 @@ export default function TaskpediaPage() {
 
   const usersById = useMemo(() => new Map(users.map(u => [u.id, u])), [users]);
 
+  // Handle both the new assignee_ids[] array and the legacy single
+  // assignee_id so old docs don't vanish after the multi-assignee migration.
+  const taskAssignees = (t) => t?.assignee_ids?.length ? t.assignee_ids : (t?.assignee_id ? [t.assignee_id] : []);
+  const taskHasUser = (t, uid) => taskAssignees(t).includes(uid);
+
   const filtered = useMemo(() => {
     let list = tasks;
     if (isAdmin) {
-      if (fAssignee) list = list.filter(t => t.assignee_id === fAssignee);
+      if (fAssignee) list = list.filter(t => taskHasUser(t, fAssignee));
       if (fStatus)   list = list.filter(t => t.status === fStatus);
     }
     return list;
@@ -96,14 +106,20 @@ export default function TaskpediaPage() {
 
   // ── Create / edit task ────────────────────────────────────────────────
   const openNew = () => {
-    setNewForm({ title: "", description: "", due_date: todayISO(), assignee_id: "", image: null });
+    setNewForm({ title: "", description: "", due_date: todayISO(), assignee_ids: [], image: null });
+    setAssigneeSearch("");
     setNewModal(true);
   };
 
+  const toggleNewAssignee = (uid) => setNewForm(f => {
+    const has = f.assignee_ids.includes(uid);
+    return { ...f, assignee_ids: has ? f.assignee_ids.filter(x => x !== uid) : [...f.assignee_ids, uid] };
+  });
+
   const handleCreate = async () => {
-    const { title, description, due_date, assignee_id, image } = newForm;
-    if (!title.trim() || !assignee_id || !due_date) {
-      toast({ title: "Incomplete", message: "Title, assignee, and due date are required.", type: "warning" });
+    const { title, description, due_date, assignee_ids, image } = newForm;
+    if (!title.trim() || assignee_ids.length === 0 || !due_date) {
+      toast({ title: "Incomplete", message: "Title, at least one assignee, and due date are required.", type: "warning" });
       return;
     }
     setUploading(true);
@@ -117,13 +133,18 @@ export default function TaskpediaPage() {
         }
         image_url = await compressImageToDataUrl(image);
       }
-      const assignee = usersById.get(assignee_id);
+      const assignees = assignee_ids.map(id => usersById.get(id)).filter(Boolean);
+      const assignee_names = assignees.map(a => a.name);
+      // Keep the legacy single-assignee fields populated too so any code path
+      // that still reads them (e.g. older filters) keeps working.
       await addDoc(collection(db, "taskpedia"), {
         title: title.trim(),
         description: description.trim(),
         image_url,
-        assignee_id,
-        assignee_name: assignee?.name || "",
+        assignee_ids,
+        assignee_names,
+        assignee_id: assignee_ids[0],
+        assignee_name: assignee_names[0] || "",
         assigned_by_id: currentUser?.id || "",
         assigned_by_name: currentUser?.name || "",
         due_date,
@@ -134,7 +155,7 @@ export default function TaskpediaPage() {
         date_changes: [],
         read_by_assignee: false,
       });
-      toast({ title: "Task created", message: `"${title.trim()}" assigned to ${assignee?.name}.`, type: "success" });
+      toast({ title: "Task created", message: `"${title.trim()}" assigned to ${assignee_names.join(", ")}.`, type: "success" });
       setNewModal(false);
     } catch (err) {
       toast({ title: "Error", message: err.message, type: "error" });
@@ -156,7 +177,7 @@ export default function TaskpediaPage() {
   // Mark a task as read by the assignee (bell badge clears).
   const markRead = async (task) => {
     if (!task || task.read_by_assignee) return;
-    if (task.assignee_id !== currentUser?.id) return;
+    if (!taskHasUser(task, currentUser?.id)) return;
     await updateDoc(doc(db, "taskpedia", task.id), { read_by_assignee: true });
   };
 
@@ -199,7 +220,25 @@ export default function TaskpediaPage() {
   };
 
   // Count of unread tasks assigned to me — shown as a subtle badge on the page
-  const myUnread = tasks.filter(t => t.assignee_id === currentUser?.id && !t.read_by_assignee && t.status !== "done").length;
+  const myUnread = tasks.filter(t => taskHasUser(t, currentUser?.id) && !t.read_by_assignee && t.status !== "done").length;
+
+  // Drag-and-drop handlers (HTML5). The whole card is draggable; the
+  // column body is the drop zone. No extra dep — keeps this simple.
+  const handleDragStart = (e, task) => {
+    setDragTaskId(task.id);
+    if (e.dataTransfer) { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", task.id); }
+  };
+  const handleDragEnd = () => { setDragTaskId(null); setDragOverCol(null); };
+  const handleColDragOver = (e, colKey) => { e.preventDefault(); if (e.dataTransfer) e.dataTransfer.dropEffect = "move"; if (dragOverCol !== colKey) setDragOverCol(colKey); };
+  const handleColDrop = async (e, colKey) => {
+    e.preventDefault();
+    const id = dragTaskId || e.dataTransfer?.getData("text/plain");
+    setDragOverCol(null); setDragTaskId(null);
+    if (!id) return;
+    const task = tasks.find(t => t.id === id);
+    if (!task || task.status === colKey) return;
+    await moveTo(task, colKey);
+  };
 
   if (loading) return <VLoader fullscreen label="Loading Taskpedia" />;
 
@@ -256,56 +295,79 @@ export default function TaskpediaPage() {
         </div>
       )}
 
-      {/* Kanban columns */}
+      {/* Kanban columns — drag between columns to change status */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16 }}>
-        {COLUMNS.map(col => (
-          <Card key={col.key} style={{ padding: 0, overflow: "hidden" }}>
-            <div style={{ padding: "12px 16px", background: `linear-gradient(135deg, rgba(${col.rgb},0.18), rgba(${col.rgb},0.04))`, borderBottom: `1px solid rgba(${col.rgb},0.25)`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div style={{ fontSize: 11, fontWeight: 800, color: col.color, letterSpacing: 1.5 }}>{col.label}</div>
-              <div style={{ fontSize: 11, fontWeight: 800, color: col.color, padding: "2px 10px", borderRadius: 999, background: `rgba(${col.rgb},0.15)` }}>{byStatus[col.key].length}</div>
-            </div>
-            <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 10, minHeight: 200 }}>
-              {byStatus[col.key].length === 0 && (
-                <div style={{ padding: "40px 12px", textAlign: "center", color: "var(--text3)", fontSize: 11, fontStyle: "italic" }}>No tasks</div>
-              )}
-              {byStatus[col.key].map(t => {
-                const overdue = col.key !== "done" && t.due_date < todayISO();
-                const isMine = t.assignee_id === currentUser?.id;
-                const unread = isMine && !t.read_by_assignee && t.status !== "done";
-                return (
-                  <div key={t.id} className="taskpedia-card"
-                    onClick={() => { setDetail(t); markRead(t); }}
-                    style={{
-                      padding: 12, borderRadius: 10, background: "var(--bg3)",
-                      border: unread ? "1px solid var(--red)" : overdue ? "1px solid rgba(248,113,113,0.4)" : "1px solid var(--border)",
-                      cursor: "pointer",
-                      boxShadow: unread ? "0 0 14px rgba(248,113,113,0.25)" : "none",
-                    }}>
-                    <div style={{ display: "flex", alignItems: "flex-start", gap: 8, marginBottom: 6 }}>
-                      <div style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 700, color: "var(--text)", lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis" }}>{t.title}</div>
-                      {unread && <span title="New for you" style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--red)", flexShrink: 0, marginTop: 4 }} />}
+        {COLUMNS.map(col => {
+          const isDropTarget = dragOverCol === col.key;
+          return (
+            <Card key={col.key} style={{ padding: 0, overflow: "hidden", transition: "border-color .15s, box-shadow .15s", borderColor: isDropTarget ? col.color : undefined, boxShadow: isDropTarget ? `0 0 18px rgba(${col.rgb},0.35)` : undefined }}>
+              <div style={{ padding: "12px 16px", background: `linear-gradient(135deg, rgba(${col.rgb},0.18), rgba(${col.rgb},0.04))`, borderBottom: `1px solid rgba(${col.rgb},0.25)`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div style={{ fontSize: 11, fontWeight: 800, color: col.color, letterSpacing: 1.5 }}>{col.label}</div>
+                <div style={{ fontSize: 11, fontWeight: 800, color: col.color, padding: "2px 10px", borderRadius: 999, background: `rgba(${col.rgb},0.15)` }}>{byStatus[col.key].length}</div>
+              </div>
+              <div
+                onDragOver={(e) => handleColDragOver(e, col.key)}
+                onDragLeave={() => setDragOverCol(null)}
+                onDrop={(e) => handleColDrop(e, col.key)}
+                style={{
+                  padding: 12, display: "flex", flexDirection: "column", gap: 10, minHeight: 200,
+                  background: isDropTarget ? `rgba(${col.rgb},0.06)` : undefined,
+                  transition: "background .15s",
+                }}>
+                {byStatus[col.key].length === 0 && (
+                  <div style={{ padding: "40px 12px", textAlign: "center", color: "var(--text3)", fontSize: 11, fontStyle: "italic" }}>{isDropTarget ? "Drop here" : "No tasks"}</div>
+                )}
+                {byStatus[col.key].map(t => {
+                  const overdue = col.key !== "done" && t.due_date < todayISO();
+                  const isMine = taskHasUser(t, currentUser?.id);
+                  const unread = isMine && !t.read_by_assignee && t.status !== "done";
+                  const assigneeIds = taskAssignees(t);
+                  const assigneeNames = t.assignee_names?.length ? t.assignee_names : (t.assignee_name ? [t.assignee_name] : assigneeIds.map(id => usersById.get(id)?.name || ""));
+                  const isDragging = dragTaskId === t.id;
+                  return (
+                    <div key={t.id} className="taskpedia-card"
+                      draggable="true"
+                      onDragStart={(e) => handleDragStart(e, t)}
+                      onDragEnd={handleDragEnd}
+                      onClick={() => { setDetail(t); markRead(t); }}
+                      style={{
+                        padding: 12, borderRadius: 10, background: "var(--bg3)",
+                        border: unread ? "1px solid var(--red)" : overdue ? "1px solid rgba(248,113,113,0.4)" : "1px solid var(--border)",
+                        cursor: isDragging ? "grabbing" : "grab",
+                        opacity: isDragging ? 0.4 : 1,
+                        boxShadow: unread ? "0 0 14px rgba(248,113,113,0.25)" : "none",
+                      }}>
+                      <div style={{ display: "flex", alignItems: "flex-start", gap: 8, marginBottom: 6 }}>
+                        <div style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 700, color: "var(--text)", lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis" }}>{t.title}</div>
+                        {unread && <span title="New for you" style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--red)", flexShrink: 0, marginTop: 4 }} />}
+                      </div>
+                      {t.description && (
+                        <div style={{ fontSize: 11, color: "var(--text3)", marginBottom: 8, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{t.description}</div>
+                      )}
+                      {t.image_url && (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={t.image_url} alt="" style={{ width: "100%", maxHeight: 120, objectFit: "cover", borderRadius: 8, marginBottom: 8, border: "1px solid var(--border)" }} />
+                      )}
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, fontSize: 10 }}>
+                        <div style={{ display: "flex", gap: 3, minWidth: 0, flex: 1, flexWrap: "wrap" }}>
+                          {assigneeNames.slice(0, 2).map((n, idx) => (
+                            <span key={idx} style={{ padding: "2px 8px", borderRadius: 999, background: "rgba(var(--accent-rgb),0.12)", color: "var(--accent)", fontWeight: 700, whiteSpace: "nowrap" }}>{n || "—"}</span>
+                          ))}
+                          {assigneeNames.length > 2 && (
+                            <span style={{ padding: "2px 6px", borderRadius: 999, background: "var(--bg4)", color: "var(--text3)", fontWeight: 700 }}>+{assigneeNames.length - 2}</span>
+                          )}
+                        </div>
+                        <span style={{ color: overdue ? "var(--red)" : "var(--text3)", fontWeight: overdue ? 800 : 500, whiteSpace: "nowrap" }}>
+                          {overdue && "⚠ "}{t.due_date}
+                        </span>
+                      </div>
                     </div>
-                    {t.description && (
-                      <div style={{ fontSize: 11, color: "var(--text3)", marginBottom: 8, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{t.description}</div>
-                    )}
-                    {t.image_url && (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={t.image_url} alt="" style={{ width: "100%", maxHeight: 120, objectFit: "cover", borderRadius: 8, marginBottom: 8, border: "1px solid var(--border)" }} />
-                    )}
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, fontSize: 10 }}>
-                      <span style={{ padding: "2px 8px", borderRadius: 999, background: "rgba(var(--accent-rgb),0.12)", color: "var(--accent)", fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "50%" }}>
-                        {t.assignee_name || "—"}
-                      </span>
-                      <span style={{ color: overdue ? "var(--red)" : "var(--text3)", fontWeight: overdue ? 800 : 500, whiteSpace: "nowrap" }}>
-                        {overdue && "⚠ "}{t.due_date}
-                      </span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </Card>
-        ))}
+                  );
+                })}
+              </div>
+            </Card>
+          );
+        })}
       </div>
 
       {/* Create Task modal */}
@@ -321,22 +383,60 @@ export default function TaskpediaPage() {
             onChange={e => setNewForm({ ...newForm, description: e.target.value })}
             style={{ padding: "10px 14px", background: "var(--bg4)", border: "1px solid var(--border2)", borderRadius: 8, color: "var(--text)", fontSize: 13, outline: "none", resize: "vertical", fontFamily: "inherit" }} />
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-            <div>
-              <label style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, display: "block", marginBottom: 6 }}>Assign to *</label>
-              <select value={newForm.assignee_id} onChange={e => setNewForm({ ...newForm, assignee_id: e.target.value })}
-                style={{ width: "100%", padding: "10px 14px", background: "var(--bg4)", border: "1px solid var(--border2)", borderRadius: 8, color: "var(--text)", fontSize: 13 }}>
-                <option value="">— Select person —</option>
-                {users.map(u => <option key={u.id} value={u.id}>{u.name} ({u.role})</option>)}
-              </select>
+          <label style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1 }}>
+            Assign to * <span style={{ color: "var(--text3)", fontWeight: 500, textTransform: "none", marginLeft: 4 }}>— pick one or more so teammates can work together</span>
+          </label>
+          <input type="text" placeholder="Search by name or role…" value={assigneeSearch}
+            onChange={e => setAssigneeSearch(e.target.value)}
+            style={{ padding: "10px 14px", background: "var(--bg4)", border: "1px solid var(--border2)", borderRadius: 8, color: "var(--text)", fontSize: 13, outline: "none" }} />
+          {/* Selected chips */}
+          {newForm.assignee_ids.length > 0 && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {newForm.assignee_ids.map(id => {
+                const u = usersById.get(id);
+                return (
+                  <span key={id} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 10px", borderRadius: 999, background: "rgba(var(--accent-rgb),0.15)", border: "1px solid rgba(var(--accent-rgb),0.35)", color: "var(--accent)", fontSize: 11, fontWeight: 700 }}>
+                    {u?.name || id}
+                    <button type="button" onClick={() => toggleNewAssignee(id)}
+                      style={{ background: "none", border: "none", color: "var(--accent)", cursor: "pointer", fontSize: 12, lineHeight: 1, padding: 0 }}>×</button>
+                  </span>
+                );
+              })}
             </div>
-            <div>
-              <label style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, display: "block", marginBottom: 6 }}>Due date *</label>
-              <input type="date" value={newForm.due_date}
-                onChange={e => setNewForm({ ...newForm, due_date: e.target.value })}
-                style={{ width: "100%", padding: "10px 14px", background: "var(--bg4)", border: "1px solid var(--border2)", borderRadius: 8, color: "var(--text)", fontSize: 13 }} />
-            </div>
+          )}
+          {/* Searchable checklist */}
+          <div style={{ maxHeight: 160, overflowY: "auto", border: "1px solid var(--border2)", borderRadius: 8, background: "var(--bg4)" }}>
+            {users
+              .filter(u => {
+                const q = assigneeSearch.trim().toLowerCase();
+                if (!q) return true;
+                return (u.name || "").toLowerCase().includes(q) || (u.role || "").toLowerCase().includes(q);
+              })
+              .map(u => {
+                const checked = newForm.assignee_ids.includes(u.id);
+                return (
+                  <label key={u.id}
+                    style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", borderBottom: "1px solid var(--border)", cursor: "pointer", background: checked ? "rgba(var(--accent-rgb),0.08)" : "transparent" }}>
+                    <input type="checkbox" checked={checked} onChange={() => toggleNewAssignee(u.id)}
+                      style={{ accentColor: "var(--accent)", cursor: "pointer" }} />
+                    <span style={{ flex: 1, fontSize: 13, color: "var(--text)", fontWeight: 600 }}>{u.name}</span>
+                    <span style={{ fontSize: 10, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, fontWeight: 700 }}>{u.role}</span>
+                  </label>
+                );
+              })}
+            {users.filter(u => {
+              const q = assigneeSearch.trim().toLowerCase();
+              if (!q) return true;
+              return (u.name || "").toLowerCase().includes(q) || (u.role || "").toLowerCase().includes(q);
+            }).length === 0 && (
+              <div style={{ padding: 16, textAlign: "center", color: "var(--text3)", fontSize: 11, fontStyle: "italic" }}>No matches</div>
+            )}
           </div>
+
+          <label style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1 }}>Due date *</label>
+          <input type="date" value={newForm.due_date}
+            onChange={e => setNewForm({ ...newForm, due_date: e.target.value })}
+            style={{ padding: "10px 14px", background: "var(--bg4)", border: "1px solid var(--border2)", borderRadius: 8, color: "var(--text)", fontSize: 13 }} />
 
           <label style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1 }}>Attach image (optional)</label>
           <input type="file" accept="image/*" onChange={e => setNewForm({ ...newForm, image: e.target.files?.[0] || null })}
@@ -358,14 +458,20 @@ export default function TaskpediaPage() {
       <Modal isOpen={!!detail} onClose={() => { setDetail(null); setDateChange(null); }} title={detail?.title || ""} width={640}>
         {detail && (() => {
           const currentCol = COLUMNS.find(c => c.key === detail.status);
-          const canEdit = isAdmin || detail.assignee_id === currentUser?.id || detail.assigned_by_id === currentUser?.id;
+          const canEdit = isAdmin || taskHasUser(detail, currentUser?.id) || detail.assigned_by_id === currentUser?.id;
+          const assigneeNames = detail.assignee_names?.length
+            ? detail.assignee_names
+            : (detail.assignee_name ? [detail.assignee_name] : taskAssignees(detail).map(id => usersById.get(id)?.name || ""));
           return (
             <div>
               <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 14, flexWrap: "wrap" }}>
                 <span style={{ padding: "4px 10px", borderRadius: 999, background: `rgba(${currentCol.rgb},0.15)`, color: currentCol.color, fontSize: 10, fontWeight: 800, letterSpacing: 1 }}>{currentCol.label}</span>
-                <span style={{ fontSize: 11, color: "var(--text3)" }}>
-                  Assigned to <strong style={{ color: "var(--accent)" }}>{detail.assignee_name || "—"}</strong>
-                  {detail.assigned_by_name && <> by {detail.assigned_by_name}</>}
+                <span style={{ fontSize: 11, color: "var(--text3)", display: "inline-flex", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
+                  Assigned to
+                  {assigneeNames.filter(Boolean).map((n, i) => (
+                    <strong key={i} style={{ color: "var(--accent)", padding: "2px 8px", borderRadius: 999, background: "rgba(var(--accent-rgb),0.12)", fontSize: 10 }}>{n}</strong>
+                  ))}
+                  {detail.assigned_by_name && <span>by {detail.assigned_by_name}</span>}
                 </span>
               </div>
 
