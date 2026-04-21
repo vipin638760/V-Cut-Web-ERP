@@ -1282,7 +1282,7 @@ function DailyBusinessChart({ entries, filterYear, filterMonth }) {
           </div>
           <div style={{ textAlign: "right" }}>
             <div style={{ fontSize: 9, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, fontWeight: 700 }}>Best Day</div>
-            <div style={{ fontSize: 15, fontWeight: 800, color: "var(--gold)" }}>{byDay[bestIdx] > 0 ? `${bestIdx + 1} · ${INR(byDay[bestIdx])}` : "—"}</div>
+            <div style={{ fontSize: 15, fontWeight: 800, color: "var(--green)" }}>{byDay[bestIdx] > 0 ? `${bestIdx + 1} · ${INR(byDay[bestIdx])}` : "—"}</div>
           </div>
         </div>
       </div>
@@ -1304,7 +1304,7 @@ function DailyBusinessChart({ entries, filterYear, filterMonth }) {
                 </g>
               );
             })}
-            {/* Bars */}
+            {/* Bars — priority: top day (green) > weekend (orange) > today > default */}
             {byDay.map((v, i) => {
               const x = LEFT + i * (BAR_W + GAP);
               const h = v > 0 ? (v / max) * H : 2;
@@ -1312,7 +1312,15 @@ function DailyBusinessChart({ entries, filterYear, filterMonth }) {
               const dateStr = `${prefix}-${String(i + 1).padStart(2, "0")}`;
               const isToday = dateStr === todayStr;
               const isBest = i === bestIdx && v > 0;
-              const fill = isBest ? "url(#bar-gold)" : isToday ? "url(#bar-accent)" : "url(#bar-blue)";
+              const dow = dayOfWeek(i + 1);
+              const isWeekend = dow === "Sat" || dow === "Sun";
+              const fill = isBest
+                ? "url(#bar-green)"
+                : isWeekend
+                  ? "url(#bar-orange)"
+                  : isToday
+                    ? "url(#bar-accent)"
+                    : "url(#bar-blue)";
               return (
                 <g key={i}>
                   <rect x={x} y={y} width={BAR_W} height={h} rx={4} fill={fill}
@@ -1321,11 +1329,11 @@ function DailyBusinessChart({ entries, filterYear, filterMonth }) {
                     style={{ cursor: v > 0 ? "pointer" : "default", transition: "opacity .15s" }}
                     opacity={hover && hover.i !== i ? 0.45 : 1}
                   />
-                  <text x={x + BAR_W / 2} y={PAD_TOP + H + 14} fontSize={9} fill={isToday ? "var(--accent)" : "var(--text3)"} textAnchor="middle" fontWeight={isToday || isBest ? 800 : 600}>
+                  <text x={x + BAR_W / 2} y={PAD_TOP + H + 14} fontSize={9} fill={isBest ? "var(--green)" : isWeekend ? "var(--orange)" : isToday ? "var(--accent)" : "var(--text3)"} textAnchor="middle" fontWeight={isToday || isBest || isWeekend ? 800 : 600}>
                     {i + 1}
                   </text>
-                  <text x={x + BAR_W / 2} y={PAD_TOP + H + 25} fontSize={7} fill="var(--text3)" textAnchor="middle" opacity={0.75}>
-                    {dayOfWeek(i + 1).slice(0, 2)}
+                  <text x={x + BAR_W / 2} y={PAD_TOP + H + 25} fontSize={7} fill={isWeekend ? "var(--orange)" : "var(--text3)"} textAnchor="middle" opacity={isWeekend ? 0.9 : 0.75} fontWeight={isWeekend ? 700 : 400}>
+                    {dow.slice(0, 2)}
                   </text>
                 </g>
               );
@@ -1336,12 +1344,16 @@ function DailyBusinessChart({ entries, filterYear, filterMonth }) {
                 <stop offset="100%" stopColor="rgba(34,211,238,0.35)" />
               </linearGradient>
               <linearGradient id="bar-accent" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="rgba(34,211,238,0.95)" />
+                <stop offset="100%" stopColor="rgba(34,211,238,0.45)" />
+              </linearGradient>
+              <linearGradient id="bar-green" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stopColor="rgba(74,222,128,0.95)" />
                 <stop offset="100%" stopColor="rgba(74,222,128,0.4)" />
               </linearGradient>
-              <linearGradient id="bar-gold" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="rgba(250,204,21,0.95)" />
-                <stop offset="100%" stopColor="rgba(250,204,21,0.4)" />
+              <linearGradient id="bar-orange" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="rgba(251,146,60,0.9)" />
+                <stop offset="100%" stopColor="rgba(251,146,60,0.35)" />
               </linearGradient>
             </defs>
           </svg>

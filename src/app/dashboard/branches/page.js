@@ -2432,6 +2432,10 @@ function DailyCashOnline({ branches, entries, filterMode, filterPrefix, filterYe
   const renderTable = (field, color) => {
     const colTotals = branches.map(b => days.reduce((s, d) => s + cell(b.id, d, field), 0));
     const grandTotal = colTotals.reduce((s, n) => s + n, 0);
+    // Pre-compute per-day totals so we know the max (top-collection day)
+    // without walking the rows twice per render.
+    const rowTotals = days.map(d => branches.reduce((s, b) => s + cell(b.id, d, field), 0));
+    const maxRowTotal = Math.max(0, ...rowTotals);
     return (
       <div style={{ borderTop: "1px solid var(--border)", overflowX: "auto", maxHeight: "60vh" }}>
         <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 11, minWidth: "max-content" }}>
@@ -2444,18 +2448,33 @@ function DailyCashOnline({ branches, entries, filterMode, filterPrefix, filterYe
             </tr>
           </thead>
           <tbody>
-            {days.map(date => {
-              const rowTotal = branches.reduce((s, b) => s + cell(b.id, date, field), 0);
+            {days.map((date, idx) => {
+              const rowTotal = rowTotals[idx];
               const hasAny = rowTotal > 0;
+              const dow = dayOfWeek(date);
+              const isWeekend = dow === "SAT" || dow === "SUN";
+              const isTop = hasAny && rowTotal === maxRowTotal;
+              // Top day wins over weekend when they collide (e.g. a Saturday
+              // that is also the best-collection day reads as "celebrate").
+              const rowTint = isTop
+                ? "rgba(74,222,128,0.08)"   // green
+                : isWeekend
+                  ? "rgba(251,146,60,0.07)" // orange
+                  : "var(--bg3)";
+              const stickyTint = isTop
+                ? "rgba(74,222,128,0.12)"
+                : isWeekend
+                  ? "rgba(251,146,60,0.10)"
+                  : "var(--bg3)";
               return (
-                <tr key={date} style={{ opacity: hasAny ? 1 : 0.45 }}>
-                  <TD style={{ position: "sticky", left: 0, background: "var(--bg3)", fontWeight: 700, color: "var(--text2)", fontSize: 10 }}>{dayOfWeek(date)}</TD>
-                  <TD style={{ position: "sticky", left: 90, background: "var(--bg3)", color: "var(--text3)", fontSize: 10, fontFamily: "monospace" }}>{date}</TD>
+                <tr key={date} style={{ opacity: hasAny ? 1 : 0.45, background: rowTint }}>
+                  <TD style={{ position: "sticky", left: 0, background: stickyTint, fontWeight: 800, color: isTop ? "var(--green)" : isWeekend ? "var(--orange)" : "var(--text2)", fontSize: 10 }}>{dow}</TD>
+                  <TD style={{ position: "sticky", left: 90, background: stickyTint, color: isTop ? "var(--green)" : isWeekend ? "var(--orange)" : "var(--text3)", fontSize: 10, fontFamily: "monospace" }}>{date}</TD>
                   {branches.map(b => {
                     const v = cell(b.id, date, field);
                     return <TD key={b.id} right style={{ color: v > 0 ? color : "var(--text3)", fontWeight: v > 0 ? 600 : 400, fontSize: 11 }}>{v > 0 ? INR(v) : "—"}</TD>;
                   })}
-                  <TD right style={{ fontWeight: 800, color: hasAny ? color : "var(--text3)", borderLeft: "1px solid var(--border2)" }}>{hasAny ? INR(rowTotal) : "—"}</TD>
+                  <TD right style={{ fontWeight: 800, color: isTop ? "var(--green)" : hasAny ? color : "var(--text3)", borderLeft: "1px solid var(--border2)" }}>{hasAny ? INR(rowTotal) : "—"}</TD>
                 </tr>
               );
             })}
