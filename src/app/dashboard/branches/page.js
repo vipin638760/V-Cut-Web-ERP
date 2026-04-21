@@ -1140,10 +1140,6 @@ export default function BranchesPage() {
             { l: "Fixed Costs", v: canEdit ? INR(totalFixedSalaryComp) : "•••••", c: "var(--orange)", click: canEdit ? "fixed" : null },
             { l: "GST Est.", v: canEdit ? INR(totalGstEst) : "•••••", c: "var(--red)" },
             { l: "Total Expense", v: canEdit ? INR(totalVarExp + totalFixedSalaryComp + totalGstEst) : "•••••", c: "var(--red)", click: canEdit ? "total" : null },
-            // Colour Gross Net by Full Net P&L sign so a branch that is
-            // profitable before fixed costs but loss-making after does not
-            // flash a misleading green.
-            { l: "Gross Net", v: canEdit ? INR(netSum) : "•••••", c: fullNetSum >= 0 ? "var(--green)" : "var(--red)" },
             { l: "Full Net P&L", v: canEdit ? (INR(fullNetSum)) : "•••••", c: fullNetSum >= 0 ? "var(--green)" : "var(--red)" },
           ].map(({ l, v, c, click }) => {
             const content = (

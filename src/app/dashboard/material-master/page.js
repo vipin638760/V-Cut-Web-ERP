@@ -1103,7 +1103,7 @@ export default function MaterialMasterPage() {
           setListSearch(""); setGroupFilter("");
           setPriceMin(""); setPriceMax(""); setQtyMin(""); setQtyMax("");
         };
-        const isAdmin = (currentUser?.role || "").toLowerCase() === "admin";
+        const isAdmin = ["admin","accountant"].includes((currentUser?.role || "").toLowerCase());
         const toggleRow = (id) => setSelectedIds(prev => {
           const next = new Set(prev);
           if (next.has(id)) next.delete(id); else next.add(id);

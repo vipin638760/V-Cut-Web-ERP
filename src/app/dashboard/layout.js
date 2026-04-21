@@ -41,6 +41,7 @@ const NAV = {
     { id: "materials", l: "Materials",             icon: "wallet" },
     { id: "material-master", l: "Material Master", icon: "grid" },
     { id: "daily-expenses", l: "Daily Expenses",     icon: "wallet" },
+    { id: "expenses",  l: "Operational Expenses",  icon: "trending" },
     { id: "leaves",    l: "Leave Management",      icon: "checkCircle" },
   ],
   employee: [
