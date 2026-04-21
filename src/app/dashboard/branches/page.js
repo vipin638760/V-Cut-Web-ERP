@@ -1138,7 +1138,10 @@ export default function BranchesPage() {
             { l: "Fixed Costs", v: isAdmin ? INR(totalFixedSalaryComp) : "•••••", c: "var(--orange)", click: isAdmin ? "fixed" : null },
             { l: "GST Est.", v: isAdmin ? INR(totalGstEst) : "•••••", c: "var(--red)" },
             { l: "Total Expense", v: isAdmin ? INR(totalVarExp + totalFixedSalaryComp + totalGstEst) : "•••••", c: "var(--red)", click: isAdmin ? "total" : null },
-            { l: "Gross Net", v: isAdmin ? INR(netSum) : "•••••", c: netSum >= 0 ? "var(--green)" : "var(--red)" },
+            // Colour Gross Net by Full Net P&L sign so a branch that is
+            // profitable before fixed costs but loss-making after does not
+            // flash a misleading green.
+            { l: "Gross Net", v: isAdmin ? INR(netSum) : "•••••", c: fullNetSum >= 0 ? "var(--green)" : "var(--red)" },
             { l: "Full Net P&L", v: isAdmin ? (INR(fullNetSum)) : "•••••", c: fullNetSum >= 0 ? "var(--green)" : "var(--red)" },
           ].map(({ l, v, c, click }) => {
             const content = (
