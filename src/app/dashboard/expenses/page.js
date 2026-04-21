@@ -15,10 +15,12 @@ const loadExcelJS = () => {
 };
 
 const NOW = new Date();
+// Only the six essentials that every branch has a master-setup field for.
+// Any other fixed cost is an opt-in expense_types row (category: "fixed")
+// added via the "+ Add Column" button, and appears alongside CORE_COLS.
 const CORE_COLS = [
   "Shop Rent", "Room Rent", "Electricity Shop", "Electricity Room",
-  "Water Bill", "WiFi Bill", "Maid / Cleaning", "Garbage / Waste", 
-  "Dust Collector Bag", "AC Service", "Electrical Maintenance", "Staff Advance"
+  "Water Bill", "WiFi Bill",
 ];
 
 export default function ExpensesPage() {
@@ -40,14 +42,24 @@ export default function ExpensesPage() {
   // Drill-down modal for Variable cells: { branchId, category } | null
   const [drillDown, setDrillDown] = useState(null);
   const [drillEditing, setDrillEditing] = useState(null); // daily_expenses row being edited
+  // "+ Add Column" dialog — creates a new expense_types row tagged with
+  // the current tab's category so it shows up in Fixed or Variable.
+  const [addColDialog, setAddColDialog] = useState(null); // { category: "fixed" | "operations" } | null
+  const [addColName, setAddColName] = useState("");
   
   const [filterMode, setFilterMode]   = useState("month");
   const [filterYear, setFilterYear]   = useState(NOW.getFullYear());
   const [filterMonth, setFilterMonth] = useState(NOW.getMonth() + 1);
   const filterPrefix = `${filterYear}-${String(filterMonth).padStart(2, "0")}`;
 
-  // Combined columns for the grid (Deduplicated to prevent key collisions)
-  const activeCols = Array.from(new Set([...CORE_COLS, ...customTypes.filter(t => t.active).map(t => t.name)]));
+  // Fixed-tab columns: 6 core essentials + opt-in expense_types where
+  // category === "fixed". Anything without an explicit "fixed" category
+  // lives in the Variable tab — keeps daily-ops categories from leaking
+  // into Fixed and vice-versa.
+  const activeCols = Array.from(new Set([
+    ...CORE_COLS,
+    ...customTypes.filter(t => t.active && t.category === "fixed").map(t => t.name),
+  ]));
 
   // Local grid inputs mapping [branch_id][type] -> amount
   const [localGrid, setLocalGrid] = useState({});
@@ -164,11 +176,12 @@ export default function ExpensesPage() {
     return m;
   }, [dailyEntries]);
 
-  // Variable tab — columns come from every active expense_type (same master list
-  // the Daily Expenses page writes to). Adding a category there instantly creates
-  // a column here.
+  // Variable tab — columns are the opposite of Fixed: every active
+  // expense_type whose category is NOT "fixed". Legacy rows without a
+  // category default to Variable, which matches the Daily Expenses form
+  // (category: "operations" is the default there).
   const variableCols = useMemo(
-    () => customTypes.filter(t => t.active !== false).map(t => t.name).sort((a, b) => a.localeCompare(b)),
+    () => customTypes.filter(t => t.active !== false && t.category !== "fixed").map(t => t.name).sort((a, b) => a.localeCompare(b)),
     [customTypes]
   );
 
@@ -893,6 +906,13 @@ export default function ExpensesPage() {
         </div>
 
         <div style={{ display: "flex", gap: 8 }}>
+          {isAdmin && viewType !== "total" && (
+            <button onClick={() => { setAddColName(""); setAddColDialog({ category: viewType === "variable" ? "operations" : "fixed" }); }}
+              title={`Add a new ${viewType === "variable" ? "Variable" : "Fixed"} column to the master`}
+              style={{ display: "flex", alignItems: "center", gap: 6, padding: "10px 16px", borderRadius: 10, background: "var(--bg3)", color: "var(--gold)", border: "1px solid rgba(250,204,21,0.35)", cursor: "pointer", fontWeight: 700, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5 }}>
+              <Icon name="plus" size={12} /> Add Column
+            </button>
+          )}
           {viewType === "variable" && (
             <button onClick={() => { setRecalcFlash(true); setTimeout(() => setRecalcFlash(false), 900); toast({ title: "Recalculated", message: "Variable totals refreshed from daily_expenses.", type: "success" }); }}
               title="Re-aggregate Variable totals from daily_expenses"
@@ -1369,6 +1389,45 @@ export default function ExpensesPage() {
                   style={{ padding: "10px 18px", borderRadius: 10, background: "linear-gradient(135deg,var(--accent),var(--gold2))", color: "#000", border: "none", fontWeight: 800, fontSize: 12, cursor: committing ? "wait" : "pointer", opacity: (committing || hasErrors || (additions + updates + cleared === 0)) ? 0.5 : 1 }}>
                   {committing ? "Committing..." : `Commit ${additions + updates + cleared} Change(s)`}
                 </button>
+              </div>
+            </div>
+          );
+        })()}
+      </Modal>
+
+      <Modal isOpen={!!addColDialog} onClose={() => setAddColDialog(null)} title={addColDialog ? `Add ${addColDialog.category === "fixed" ? "Fixed" : "Variable"} Column` : ""} width={480}>
+        {addColDialog && (() => {
+          const saveCol = async () => {
+            const name = addColName.trim();
+            if (!name) { toast({ title: "Name required", message: "Enter a column name.", type: "warning" }); return; }
+            if (customTypes.some(t => t.name.toLowerCase() === name.toLowerCase()) || CORE_COLS.some(c => c.toLowerCase() === name.toLowerCase())) {
+              toast({ title: "Exists", message: `"${name}" already exists.`, type: "warning" }); return;
+            }
+            try {
+              await addDoc(collection(db, "expense_types"), {
+                name, category: addColDialog.category, active: true, desc: "",
+                created_at: new Date().toISOString(), created_by: currentUser?.name || "admin",
+              });
+              toast({ title: "Column added", message: `"${name}" is now a ${addColDialog.category === "fixed" ? "Fixed" : "Variable"} column.`, type: "success" });
+              setAddColDialog(null);
+            } catch (err) {
+              toast({ title: "Error", message: err.message, type: "error" });
+            }
+          };
+          return (
+            <div>
+              <div style={{ fontSize: 11, color: "var(--text3)", marginBottom: 12, lineHeight: 1.5 }}>
+                Adds a new column to the <strong style={{ color: "var(--gold)" }}>{addColDialog.category === "fixed" ? "Fixed" : "Variable"}</strong> tab. The column becomes available everywhere this master list feeds — Operational Expenses, Daily Expenses, and exports.
+              </div>
+              <input type="text" placeholder="e.g. Security · Dust Bag · Maid" autoFocus
+                value={addColName} onChange={e => setAddColName(e.target.value)}
+                onKeyDown={e => { if (e.key === "Enter") saveCol(); }}
+                style={{ width: "100%", padding: "12px 14px", background: "var(--bg4)", border: "1px solid rgba(72,72,71,0.3)", borderRadius: 10, color: "var(--text)", fontSize: 14, outline: "none" }} />
+              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 14 }}>
+                <button onClick={() => setAddColDialog(null)}
+                  style={{ padding: "10px 18px", borderRadius: 10, background: "var(--bg3)", color: "var(--text3)", border: "1px solid rgba(72,72,71,0.2)", cursor: "pointer", fontWeight: 700, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5 }}>Cancel</button>
+                <button onClick={saveCol}
+                  style={{ padding: "10px 18px", borderRadius: 10, background: "linear-gradient(135deg,var(--accent),var(--gold2))", color: "#000", border: "none", cursor: "pointer", fontWeight: 800, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5 }}>Add Column</button>
               </div>
             </div>
           );
