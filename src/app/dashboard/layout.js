@@ -26,6 +26,7 @@ const NAV = {
     { id: "pl",        l: "P&L Analytics",         icon: "pie" },
     { id: "leaves",    l: "Leave Management",      icon: "checkCircle" },
     { id: "payroll",   l: "Payroll",               icon: "wallet" },
+    { id: "taskpedia", l: "Taskpedia",             icon: "checkCircle" },
     { id: "users",     l: "Master Setup",          icon: "settings" },
   ],
   accountant: [
@@ -43,12 +44,14 @@ const NAV = {
     { id: "daily-expenses", l: "Daily Expenses",     icon: "wallet" },
     { id: "expenses",  l: "Operational Expenses",  icon: "trending" },
     { id: "leaves",    l: "Leave Management",      icon: "checkCircle" },
+    { id: "taskpedia", l: "Taskpedia",             icon: "checkCircle" },
   ],
   employee: [
     { id: "dashboard",      l: "Dashboard",        icon: "home" },
     { id: "day-working",    l: "Day Working",      icon: "edit" },
     { id: "my-payroll",     l: "My Payroll",       icon: "wallet" },
     { id: "apply-leave",    l: "Apply Leave",      icon: "checkCircle" },
+    { id: "taskpedia",      l: "Taskpedia",        icon: "checkCircle" },
   ],
 };
 

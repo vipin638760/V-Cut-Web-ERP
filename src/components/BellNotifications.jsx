@@ -7,6 +7,7 @@ import { Icon } from "./ui";
 export default function BellNotifications({ currentUser }) {
   const [approvals, setApprovals] = useState([]);
   const [extras, setExtras] = useState([]); // leaves, staff_setup, advances
+  const [taskpedia, setTaskpedia] = useState([]); // tasks assigned to current user + unread
   const [open, setOpen] = useState(false);
   const [loadedExtras, setLoadedExtras] = useState(false);
   const wrapRef = useRef(null);
@@ -20,6 +21,20 @@ export default function BellNotifications({ currentUser }) {
     });
     return () => unsub();
   }, []);
+
+  // Taskpedia — live subscription for tasks assigned to the current user,
+  // client-side filter for unread + not-done so one composite index covers it.
+  useEffect(() => {
+    if (!db || !currentUser?.id) return;
+    const q = query(collection(db, "taskpedia"), where("assignee_id", "==", currentUser.id));
+    const unsub = onSnapshot(q, sn => {
+      const mine = sn.docs
+        .map(d => ({ ...d.data(), id: d.id, _kind: "taskpedia" }))
+        .filter(t => !t.read_by_assignee && t.status !== "done");
+      setTaskpedia(mine);
+    }, () => setTaskpedia([]));
+    return () => unsub();
+  }, [currentUser?.id]);
 
   // Fetch other notifications on-demand when dropdown opens (safe — no persistent subscriptions)
   const fetchExtras = useCallback(async () => {
@@ -70,16 +85,18 @@ export default function BellNotifications({ currentUser }) {
 
   const colFor = (kind) => ({ approval: "approvals", leave: "leaves", advance: "staff_advances" }[kind]);
 
-  const all = [...approvals, ...extras];
+  const all = [...approvals, ...extras, ...taskpedia];
   all.sort((a, b) => (b.requested_at || b.created_at || b.date || "").localeCompare(a.requested_at || a.created_at || a.date || ""));
-  const count = approvals.length + extras.length;
+  // Taskpedia counts toward the badge so assignees see the red dot too
+  const count = approvals.length + extras.length + taskpedia.length;
 
-  const kindLabel = (k) => ({ approval: "Discount", leave: "Leave", staff_setup: "Staff Setup", advance: "Advance" }[k] || k);
+  const kindLabel = (k) => ({ approval: "Discount", leave: "Leave", staff_setup: "Staff Setup", advance: "Advance", taskpedia: "Task" }[k] || k);
   const kindStyle = (k) => ({
     approval:    { bg: "rgba(251,146,60,0.12)", border: "rgba(251,146,60,0.3)", color: "var(--orange)" },
     leave:       { bg: "rgba(96,165,250,0.12)", border: "rgba(96,165,250,0.3)", color: "#60a5fa" },
     staff_setup: { bg: "rgba(0,188,212,0.12)",  border: "rgba(0,188,212,0.3)",  color: "var(--accent)" },
     advance:     { bg: "rgba(255,215,0,0.12)",  border: "rgba(255,215,0,0.3)",  color: "var(--gold)" },
+    taskpedia:   { bg: "rgba(168,85,247,0.12)", border: "rgba(168,85,247,0.3)", color: "#a855f7" },
   }[k] || { bg: "var(--bg4)", border: "var(--border)", color: "var(--text3)" });
 
   return (
@@ -87,14 +104,14 @@ export default function BellNotifications({ currentUser }) {
       <button onClick={() => setOpen(o => !o)} title="Pending notifications"
         style={{
           position: "relative", width: 34, height: 34, borderRadius: 10,
-          background: approvals.length > 0 ? "rgba(var(--accent-rgb),0.12)" : "var(--bg4)",
-          border: `1px solid ${approvals.length > 0 ? "rgba(var(--accent-rgb),0.4)" : "rgba(72,72,71,0.2)"}`,
-          color: approvals.length > 0 ? "var(--accent)" : "var(--text2)",
+          background: (approvals.length + taskpedia.length) > 0 ? "rgba(var(--accent-rgb),0.12)" : "var(--bg4)",
+          border: `1px solid ${(approvals.length + taskpedia.length) > 0 ? "rgba(var(--accent-rgb),0.4)" : "rgba(72,72,71,0.2)"}`,
+          color: (approvals.length + taskpedia.length) > 0 ? "var(--accent)" : "var(--text2)",
           cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center",
           flexShrink: 0, transition: "all .15s",
         }}>
         <Icon name="bell" size={16} />
-        {approvals.length > 0 && (
+        {(approvals.length + taskpedia.length) > 0 && (
           <span style={{
             position: "absolute", top: -4, right: -4,
             minWidth: 16, height: 16, padding: "0 4px",
@@ -102,7 +119,7 @@ export default function BellNotifications({ currentUser }) {
             borderRadius: 8, fontSize: 9, fontWeight: 900,
             display: "inline-flex", alignItems: "center", justifyContent: "center",
             border: "2px solid var(--bg1)",
-          }}>{approvals.length > 99 ? "99+" : approvals.length}</span>
+          }}>{(approvals.length + taskpedia.length) > 99 ? "99+" : (approvals.length + taskpedia.length)}</span>
         )}
       </button>
 
@@ -173,7 +190,21 @@ export default function BellNotifications({ currentUser }) {
                     </>
                   )}
 
-                  {a._kind !== "staff_setup" && (
+                  {a._kind === "taskpedia" && (
+                    <>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text)" }}>{a.title}</div>
+                      {a.assigned_by_name && <div style={{ fontSize: 11, color: "var(--text2)", marginTop: 2 }}>From {a.assigned_by_name}</div>}
+                      <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 2 }}>Due {a.due_date}</div>
+                      <div style={{ marginTop: 8 }}>
+                        <a href="/dashboard/taskpedia"
+                          style={{ display: "inline-block", padding: "6px 12px", background: "rgba(168,85,247,0.12)", border: "1px solid rgba(168,85,247,0.35)", color: "#a855f7", borderRadius: 6, fontSize: 10, fontWeight: 800, letterSpacing: 1, textTransform: "uppercase", textDecoration: "none" }}>
+                          Open Taskpedia
+                        </a>
+                      </div>
+                    </>
+                  )}
+
+                  {a._kind !== "staff_setup" && a._kind !== "taskpedia" && (
                     <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
                       <button onClick={() => handleAction(colFor(a._kind), a.id, "approved")}
                         style={{ flex: 1, padding: "6px 10px", background: "rgba(74,222,128,0.12)", border: "1px solid rgba(74,222,128,0.35)", color: "var(--green)", borderRadius: 6, fontSize: 10, fontWeight: 800, letterSpacing: 1, textTransform: "uppercase", cursor: "pointer" }}>
