@@ -15,21 +15,33 @@ const loadExcelJS = () => {
 
 const NOW = new Date();
 
-const PremiumStatCard = ({ label, value, sub, icon, color = "var(--accent)", trend }) => (
-  <div style={{
-    background: "var(--bg3)",
-    borderRadius: 16,
-    padding: "22px 24px",
-    flex: 1,
-    minWidth: 220,
-    position: "relative",
-    overflow: "hidden",
-    border: "1px solid rgba(72,72,71,0.1)",
-  }}>
+const PremiumStatCard = ({ label, value, sub, icon, color = "var(--accent)", trend, onClick, linkLabel }) => (
+  <div
+    onClick={onClick}
+    role={onClick ? "button" : undefined}
+    tabIndex={onClick ? 0 : undefined}
+    onKeyDown={onClick ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick(); } } : undefined}
+    style={{
+      background: "var(--bg3)",
+      borderRadius: 16,
+      padding: "22px 24px",
+      flex: 1,
+      minWidth: 220,
+      position: "relative",
+      overflow: "hidden",
+      border: "1px solid rgba(72,72,71,0.1)",
+      cursor: onClick ? "pointer" : "default",
+      transition: "transform .15s, box-shadow .15s, border-color .15s",
+    }}
+    onMouseEnter={onClick ? (e) => { e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.boxShadow = `0 6px 20px ${color}33`; e.currentTarget.style.borderColor = `${color}55`; } : undefined}
+    onMouseLeave={onClick ? (e) => { e.currentTarget.style.transform = "none"; e.currentTarget.style.boxShadow = "none"; e.currentTarget.style.borderColor = "rgba(72,72,71,0.1)"; } : undefined}>
     <div style={{ position: "absolute", top: -15, right: -15, width: 80, height: 80, background: color, filter: "blur(40px)", opacity: 0.06, borderRadius: "50%" }} />
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", position: "relative", zIndex: 1 }}>
       <div>
-        <div style={{ fontSize: 10, fontWeight: 600, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.5, marginBottom: 10, fontFamily: "var(--font-body, var(--font-outfit))" }}>{label}</div>
+        <div style={{ fontSize: 10, fontWeight: 600, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.5, marginBottom: 10, fontFamily: "var(--font-body, var(--font-outfit))", display: "flex", alignItems: "center", gap: 6 }}>
+          {label}
+          {onClick && <span title={linkLabel || "Open details"} style={{ color: color, fontSize: 11, opacity: 0.9 }}>↗</span>}
+        </div>
         <div style={{ fontSize: 28, fontWeight: 800, color: color, letterSpacing: -0.5, fontFamily: "var(--font-headline, var(--font-outfit))" }}>{value}</div>
         {sub && <div style={{ fontSize: 11, color: "var(--text3)", fontWeight: 500, marginTop: 4 }}>{sub}</div>}
       </div>
@@ -912,7 +924,8 @@ export default function DashboardPage() {
       {/* Admin Metrics */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 16 }}>
         <PremiumStatCard label="Gross Revenue" value={INR(tI)} sub="Total turnover" icon="trending" color="var(--green)" />
-        <PremiumStatCard label="Operating Cost" value={INR(tE)} sub="Salary + Overheads" icon="wallet" color="var(--red)" />
+        <PremiumStatCard label="Operating Cost" value={INR(tE)} sub="Salary + Overheads" icon="wallet" color="var(--red)"
+          onClick={() => router.push("/dashboard/branches?view=summary")} linkLabel="See expense breakdown" />
         <PremiumStatCard label="Net P&L" value={INR(net)} sub="Bottom line earnings" icon="pie" color={net >= 0 ? "var(--green)" : "var(--red)"} />
         <PremiumStatCard label="Service Force" value={staff.length} sub="Active stylists" icon="users" color="var(--accent)" />
       </div>

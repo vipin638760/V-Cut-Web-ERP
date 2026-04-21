@@ -5,7 +5,7 @@ import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
 import { INR, branchIncomeInPeriod, makeFilterPrefix, periodLabel, proRataSalary, staffLeavesInMonth, staffStatusForMonth, MASK } from "@/lib/calculations";
 import { Icon, IconBtn, Pill, Card, PeriodWidget, ToggleGroup, TH, TD, useConfirm, useToast } from "@/components/ui";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import VLoader from "@/components/VLoader";
 
 
@@ -40,7 +40,13 @@ export default function BranchesPage() {
   const [brTypeFilter, setBrTypeFilter] = useState("all");
   const [brSortCol, setBrSortCol] = useState("name");
   const [brSortDir, setBrSortDir] = useState("asc");
-  const [brView, setBrView] = useState("card");
+  const searchParams = useSearchParams();
+  // Honour ?view=summary|table|card from the URL so deep-links (e.g. from
+  // the dashboard's Operating Cost card) land on the right tab.
+  const [brView, setBrView] = useState(() => {
+    const q = searchParams?.get("view");
+    return q === "summary" || q === "table" || q === "card" ? q : "card";
+  });
   const [summaryTab, setSummaryTab] = useState("summary"); // "summary" | "dailycash"
 
   // Edit form
@@ -2366,9 +2372,11 @@ function SummaryView({ summaryTab, setSummaryTab, branchData, branches, entries,
   );
 }
 
-// ─── Daily Cash & Online pivot ─────────────────────────────────────────────
+// ─── Daily Cash & Online — three collapsible cards ─────────────────────────
 
 function DailyCashOnline({ branches, entries, filterMode, filterPrefix, filterYear, filterMonth }) {
+  const [expanded, setExpanded] = useState(null); // "online" | "cash" | "total" | null
+
   // Build the list of days in the selected period.
   const days = (() => {
     const out = [];
@@ -2376,7 +2384,6 @@ function DailyCashOnline({ branches, entries, filterMode, filterPrefix, filterYe
       const count = new Date(filterYear, filterMonth, 0).getDate();
       for (let d = 1; d <= count; d++) out.push(`${filterPrefix}-${String(d).padStart(2, "0")}`);
     } else {
-      // year mode — still day-level, iterate each month × its length
       for (let m = 1; m <= 12; m++) {
         const prefix = `${filterYear}-${String(m).padStart(2, "0")}`;
         const count = new Date(filterYear, m, 0).getDate();
@@ -2386,7 +2393,7 @@ function DailyCashOnline({ branches, entries, filterMode, filterPrefix, filterYe
     return out;
   })();
 
-  // Map `${branch_id}|${date}` → { online, cash } for O(1) lookup
+  // `${branch_id}|${date}` → { online, cash } for O(1) lookup
   const byKey = new Map();
   entries.forEach(e => {
     if (!e.branch_id || !e.date) return;
@@ -2396,59 +2403,119 @@ function DailyCashOnline({ branches, entries, filterMode, filterPrefix, filterYe
   });
 
   const dayOfWeek = (dateStr) => new Date(`${dateStr}T00:00:00`).toLocaleDateString("en-US", { weekday: "short" }).toUpperCase();
-  const cell = (bid, date, field) => byKey.get(`${bid}|${date}`)?.[field] || 0;
+  // `field` = "online" | "cash" | "total" — total pulls both streams.
+  const cell = (bid, date, field) => {
+    const rec = byKey.get(`${bid}|${date}`);
+    if (!rec) return 0;
+    if (field === "total") return rec.online + rec.cash;
+    return rec[field] || 0;
+  };
 
-  const renderTable = (label, field, color) => {
+  // Per-card stats: grand total + daily average (only days with any business).
+  const stats = (field) => {
+    let total = 0, activeDays = 0;
+    days.forEach(d => {
+      const dayTotal = branches.reduce((s, b) => s + cell(b.id, d, field), 0);
+      total += dayTotal;
+      if (dayTotal > 0) activeDays += 1;
+    });
+    const avg = activeDays ? Math.round(total / activeDays) : 0;
+    return { total, avg, activeDays };
+  };
+
+  const cards = [
+    { key: "online", label: "Daily Online / UPI", color: "var(--blue)", rgb: "34,211,238" },
+    { key: "cash",   label: "Daily Cash",         color: "var(--green)", rgb: "74,222,128" },
+    { key: "total",  label: "Daily Total",        color: "var(--gold)",  rgb: "250,204,21" },
+  ];
+
+  const renderTable = (field, color) => {
     const colTotals = branches.map(b => days.reduce((s, d) => s + cell(b.id, d, field), 0));
     const grandTotal = colTotals.reduce((s, n) => s + n, 0);
     return (
-      <Card style={{ padding: 0, overflow: "hidden", marginBottom: 16 }}>
-        <div style={{ padding: "12px 16px", background: `linear-gradient(135deg, ${color}33, ${color}0a)`, borderBottom: `1px solid ${color}44`, fontWeight: 800, color, fontSize: 13, letterSpacing: 1.5 }}>
-          {label}
-        </div>
-        <div style={{ overflowX: "auto", maxHeight: "60vh" }}>
-          <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 11, minWidth: "max-content" }}>
-            <thead style={{ position: "sticky", top: 0, zIndex: 5 }}>
-              <tr style={{ background: "var(--bg4)" }}>
-                <TH style={{ position: "sticky", left: 0, background: "var(--bg4)", zIndex: 6, fontSize: 10, width: 90 }}>Day</TH>
-                <TH style={{ position: "sticky", left: 90, background: "var(--bg4)", zIndex: 6, fontSize: 10, width: 100 }}>Date</TH>
-                {branches.map(b => <TH key={b.id} right style={{ fontSize: 9, whiteSpace: "nowrap", background: "var(--bg4)" }}>{b.name.replace("V-CUT ", "")}</TH>)}
-                <TH right style={{ fontSize: 10, background: "var(--bg4)", borderLeft: "1px solid var(--border2)" }}>Total</TH>
-              </tr>
-            </thead>
-            <tbody>
-              {days.map(date => {
-                const rowTotal = branches.reduce((s, b) => s + cell(b.id, date, field), 0);
-                const hasAny = rowTotal > 0;
-                return (
-                  <tr key={date} style={{ opacity: hasAny ? 1 : 0.45 }}>
-                    <TD style={{ position: "sticky", left: 0, background: "var(--bg3)", fontWeight: 700, color: "var(--text2)", fontSize: 10 }}>{dayOfWeek(date)}</TD>
-                    <TD style={{ position: "sticky", left: 90, background: "var(--bg3)", color: "var(--text3)", fontSize: 10, fontFamily: "monospace" }}>{date}</TD>
-                    {branches.map(b => {
-                      const v = cell(b.id, date, field);
-                      return <TD key={b.id} right style={{ color: v > 0 ? color : "var(--text3)", fontWeight: v > 0 ? 600 : 400, fontSize: 11 }}>{v > 0 ? INR(v) : "—"}</TD>;
-                    })}
-                    <TD right style={{ fontWeight: 800, color: hasAny ? color : "var(--text3)", borderLeft: "1px solid var(--border2)" }}>{hasAny ? INR(rowTotal) : "—"}</TD>
-                  </tr>
-                );
-              })}
-              <tr style={{ background: "var(--bg4)", borderTop: "2px solid var(--border2)" }}>
-                <TD style={{ position: "sticky", left: 0, background: "var(--bg4)", fontWeight: 800, color: "var(--gold)" }}>TOTAL</TD>
-                <TD style={{ position: "sticky", left: 90, background: "var(--bg4)" }}></TD>
-                {branches.map((b, i) => <TD key={b.id} right style={{ fontWeight: 800, color }}>{INR(colTotals[i])}</TD>)}
-                <TD right style={{ fontWeight: 900, color, borderLeft: "1px solid var(--border2)", fontSize: 13 }}>{INR(grandTotal)}</TD>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </Card>
+      <div style={{ borderTop: "1px solid var(--border)", overflowX: "auto", maxHeight: "60vh" }}>
+        <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 11, minWidth: "max-content" }}>
+          <thead style={{ position: "sticky", top: 0, zIndex: 5 }}>
+            <tr style={{ background: "var(--bg4)" }}>
+              <TH style={{ position: "sticky", left: 0, background: "var(--bg4)", zIndex: 6, fontSize: 10, width: 90 }}>Day</TH>
+              <TH style={{ position: "sticky", left: 90, background: "var(--bg4)", zIndex: 6, fontSize: 10, width: 100 }}>Date</TH>
+              {branches.map(b => <TH key={b.id} right style={{ fontSize: 9, whiteSpace: "nowrap", background: "var(--bg4)" }}>{b.name.replace("V-CUT ", "")}</TH>)}
+              <TH right style={{ fontSize: 10, background: "var(--bg4)", borderLeft: "1px solid var(--border2)" }}>Total</TH>
+            </tr>
+          </thead>
+          <tbody>
+            {days.map(date => {
+              const rowTotal = branches.reduce((s, b) => s + cell(b.id, date, field), 0);
+              const hasAny = rowTotal > 0;
+              return (
+                <tr key={date} style={{ opacity: hasAny ? 1 : 0.45 }}>
+                  <TD style={{ position: "sticky", left: 0, background: "var(--bg3)", fontWeight: 700, color: "var(--text2)", fontSize: 10 }}>{dayOfWeek(date)}</TD>
+                  <TD style={{ position: "sticky", left: 90, background: "var(--bg3)", color: "var(--text3)", fontSize: 10, fontFamily: "monospace" }}>{date}</TD>
+                  {branches.map(b => {
+                    const v = cell(b.id, date, field);
+                    return <TD key={b.id} right style={{ color: v > 0 ? color : "var(--text3)", fontWeight: v > 0 ? 600 : 400, fontSize: 11 }}>{v > 0 ? INR(v) : "—"}</TD>;
+                  })}
+                  <TD right style={{ fontWeight: 800, color: hasAny ? color : "var(--text3)", borderLeft: "1px solid var(--border2)" }}>{hasAny ? INR(rowTotal) : "—"}</TD>
+                </tr>
+              );
+            })}
+            <tr style={{ background: "var(--bg4)", borderTop: "2px solid var(--border2)" }}>
+              <TD style={{ position: "sticky", left: 0, background: "var(--bg4)", fontWeight: 800, color: "var(--gold)" }}>TOTAL</TD>
+              <TD style={{ position: "sticky", left: 90, background: "var(--bg4)" }}></TD>
+              {branches.map((b, i) => <TD key={b.id} right style={{ fontWeight: 800, color }}>{INR(colTotals[i])}</TD>)}
+              <TD right style={{ fontWeight: 900, color, borderLeft: "1px solid var(--border2)", fontSize: 13 }}>{INR(grandTotal)}</TD>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     );
   };
 
   return (
-    <div>
-      {renderTable("DAILY ONLINE / UPI", "online", "var(--blue)")}
-      {renderTable("DAILY CASH", "cash", "var(--green)")}
+    <div style={{ display: "grid", gap: 14 }}>
+      {cards.map(c => {
+        const s = stats(c.key);
+        const isOpen = expanded === c.key;
+        return (
+          <Card key={c.key} style={{ padding: 0, overflow: "hidden" }}>
+            {/* Clickable header — always shows Avg + Total */}
+            <div onClick={() => setExpanded(isOpen ? null : c.key)}
+              role="button" tabIndex={0}
+              onKeyDown={(ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); setExpanded(isOpen ? null : c.key); } }}
+              style={{
+                padding: "16px 20px",
+                background: isOpen
+                  ? `linear-gradient(135deg, rgba(${c.rgb},0.18), rgba(${c.rgb},0.04))`
+                  : `linear-gradient(135deg, rgba(${c.rgb},0.08), rgba(${c.rgb},0.02))`,
+                display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16,
+                cursor: "pointer", userSelect: "none",
+                transition: "all .15s",
+                boxShadow: isOpen ? `0 0 20px rgba(${c.rgb},0.25)` : "none",
+              }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+                <div style={{ fontSize: 16, fontWeight: 800, color: isOpen ? "var(--accent)" : "var(--text3)" }}>{isOpen ? "▼" : "▶"}</div>
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 800, color: c.color, textTransform: "uppercase", letterSpacing: 1.5 }}>{c.label}</div>
+                  <div style={{ fontSize: 10, color: "var(--text3)", marginTop: 2 }}>
+                    {s.activeDays} {s.activeDays === 1 ? "day" : "days"} of business
+                  </div>
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 28, alignItems: "center" }}>
+                <div style={{ textAlign: "right" }}>
+                  <div style={{ fontSize: 9, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, fontWeight: 700 }}>Daily Avg</div>
+                  <div style={{ fontSize: 18, fontWeight: 800, color: c.color, fontFamily: "var(--font-headline, var(--font-outfit))" }}>{INR(s.avg)}</div>
+                </div>
+                <div style={{ textAlign: "right" }}>
+                  <div style={{ fontSize: 9, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, fontWeight: 700 }}>Total</div>
+                  <div style={{ fontSize: 18, fontWeight: 800, color: c.color, fontFamily: "var(--font-headline, var(--font-outfit))" }}>{INR(s.total)}</div>
+                </div>
+              </div>
+            </div>
+            {isOpen && renderTable(c.key, c.color)}
+          </Card>
+        );
+      })}
     </div>
   );
 }
