@@ -5,7 +5,7 @@ import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
 import { INR, branchIncomeInPeriod, makeFilterPrefix, periodLabel, proRataSalary, staffLeavesInMonth, staffStatusForMonth, MASK } from "@/lib/calculations";
 import { Icon, IconBtn, Pill, Card, PeriodWidget, ToggleGroup, TH, TD, useConfirm, useToast } from "@/components/ui";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import VLoader from "@/components/VLoader";
 
 
@@ -40,11 +40,13 @@ export default function BranchesPage() {
   const [brTypeFilter, setBrTypeFilter] = useState("all");
   const [brSortCol, setBrSortCol] = useState("name");
   const [brSortDir, setBrSortDir] = useState("asc");
-  const searchParams = useSearchParams();
   // Honour ?view=summary|table|card from the URL so deep-links (e.g. from
-  // the dashboard's Operating Cost card) land on the right tab.
+  // the dashboard's Operating Cost card) land on the right tab. Read straight
+  // from window.location — useSearchParams() in Next 16 / React 19 requires
+  // a Suspense boundary and the webview dumps the page without one.
   const [brView, setBrView] = useState(() => {
-    const q = searchParams?.get("view");
+    if (typeof window === "undefined") return "card";
+    const q = new URLSearchParams(window.location.search).get("view");
     return q === "summary" || q === "table" || q === "card" ? q : "card";
   });
   const [summaryTab, setSummaryTab] = useState("summary"); // "summary" | "dailycash"
