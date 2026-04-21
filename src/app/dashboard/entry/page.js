@@ -1668,10 +1668,30 @@ export default function EntryPage() {
 
               {/* Expenses */}
               <div style={{ height: 1, background: "linear-gradient(90deg,transparent,var(--border2),transparent)", margin: "16px 0" }} />
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(200px,1fr))", gap: 12, marginBottom: 16 }}>
-                <FG label={<span style={{ display: "flex", alignItems: "center", gap: 6 }}>Other Expenses (₹){dailyExpenses.length > 0 && <button type="button" onClick={() => setShowExpBreakdown(v => !v)} title="Show daily expense breakdown" style={{ background: "none", border: "none", cursor: "pointer", color: "var(--accent)", fontSize: 14, padding: 0, lineHeight: 1 }}>ℹ️</button>}</span>} expense>
-                  <input type="number" placeholder="0" min="0" value={otherExp} onChange={e => setOtherExp(e.target.value)} />
-                  {dailyExpTotal > 0 && <div style={{ fontSize: 10, color: "var(--blue, #60a5fa)", fontWeight: 700, marginTop: 4 }}>Daily expenses: {INR(dailyExpTotal)}</div>}
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(210px,1fr))", gap: 12, marginBottom: 16 }}>
+                <FG label="Other Expenses (₹)" expense>
+                  <input type="number" placeholder="0" min="0" value={otherExp}
+                    onChange={e => setOtherExp(e.target.value)}
+                    style={{ fontSize: 18, fontWeight: 800, padding: "14px 16px", color: Number(otherExp) > 0 ? "var(--red)" : "var(--text)" }} />
+                </FG>
+                {/* Daily Expenses — informational only, NOT deducted from cash. */}
+                <FG label={
+                  <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    Daily Expenses (₹)
+                    {dailyExpenses.length > 0 && (
+                      <button type="button" onClick={() => setShowExpBreakdown(v => !v)}
+                        title={showExpBreakdown ? "Hide breakdown" : "Show breakdown"}
+                        style={{ background: "none", border: "none", cursor: "pointer", color: "var(--accent)", fontSize: 14, padding: 0, lineHeight: 1 }}>
+                        ℹ️
+                      </button>
+                    )}
+                  </span>
+                }>
+                  <div title="Recorded on the Daily Expenses page — informational only, NOT deducted from cash-in-hand"
+                    style={{ padding: "14px 16px", borderRadius: 10, border: "2px solid rgba(96,165,250,0.4)", background: "var(--bg3)", fontSize: 18, fontWeight: 800, color: dailyExpTotal > 0 ? "var(--blue, #60a5fa)" : "var(--text3)", position: "relative" }}>
+                    {dailyExpTotal > 0 ? INR(dailyExpTotal) : "—"}
+                    <span style={{ position: "absolute", top: 4, right: 8, fontSize: 8, fontWeight: 700, color: "var(--text3)", letterSpacing: 1, textTransform: "uppercase" }}>info only</span>
+                  </div>
                   {showExpBreakdown && dailyExpenses.length > 0 && (
                     <div style={{ marginTop: 8, padding: 10, borderRadius: 8, background: "var(--bg3)", border: "1px solid var(--border)", fontSize: 11 }}>
                       {dailyExpenses.map(e => (
@@ -1688,7 +1708,7 @@ export default function EntryPage() {
                 </FG>
                 {/* Petrol removed — now tracked via Daily Expenses page */}
                 <FG label="Cash in Hand (Expected)">
-                  <div style={{ padding: "12px 16px", borderRadius: 10, border: `2px solid ${cashInHand >= 0 ? "var(--green)" : "var(--red)"}`, background: "var(--bg3)", fontSize: 18, fontWeight: 700, color: cashInHand >= 0 ? "var(--green)" : "var(--red)" }}>{INR(cashInHand)}</div>
+                  <div style={{ padding: "14px 16px", borderRadius: 10, border: `2px solid ${cashInHand >= 0 ? "var(--green)" : "var(--red)"}`, background: "var(--bg3)", fontSize: 18, fontWeight: 800, color: cashInHand >= 0 ? "var(--green)" : "var(--red)" }}>{INR(cashInHand)}</div>
                 </FG>
                 <FG label="Actual Cash Counted (₹)">
                   <input type="number" placeholder="leave blank to skip" min="0" step="1" value={actualCash}
