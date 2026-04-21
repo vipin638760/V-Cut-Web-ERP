@@ -166,37 +166,21 @@ export default function DashboardPage() {
       : dateStr.startsWith(String(filterYear));
   };
 
-  const getIncome = (bid) =>
-    entries.filter(e => e.branch_id === bid && inPeriod(e.date))
-      .reduce((s, e) => s + (e.online || 0) + (e.cash || 0) +
-        (e.staff_billing || []).reduce((ss, sb) => ss + (sb.material || 0), 0), 0);
-
   // Material source toggles from Master Setup → Material Expense Source.
   const matUseAllocations = globalSettings?.mat_use_allocations !== false;
   const matUseLumpsum = globalSettings?.mat_use_lumpsum === true;
   const allocsTotal = (arr) => arr.reduce((s, a) => s + (Number(a.total) || (a.items || []).reduce((ss, it) => ss + (Number(it.line_total) || (Number(it.qty) * Number(it.price_at_transfer)) || 0), 0)), 0);
 
-  const getExpenses = (bid) => {
-    const bEntries = entries.filter(e => e.branch_id === bid && inPeriod(e.date));
-    const baseExp = bEntries.reduce((s, e) => s +
-      (e.staff_billing || []).reduce((ss, sb) => ss + (sb.incentive || 0) + (sb.mat_incentive || 0), 0) +
-      (e.others || 0) + (e.petrol || 0), 0);
-    const allocMat = allocsTotal(materialAllocations.filter(a => a.branch_id === bid && inPeriod(a.date || (a.transferred_at || "").slice(0, 10))));
-    const lumpMat = bEntries.reduce((s, e) => s + (Number(e.mat_expense) || 0), 0);
-    return baseExp + (matUseAllocations ? allocMat : 0) + (matUseLumpsum ? lumpMat : 0);
-  };
-
   // Prorata Factor for Fixed Costs
   const isYearly = filterMode === "year";
   const factor = (isYearly && filterYear === NOW.getFullYear()) ? (NOW.getMonth() + 1) : (isYearly ? 12 : 1);
 
-  const tI   = branches.reduce((s, b) => s + getIncome(b.id), 0);
-  const tVE  = branches.reduce((s, b) => s + getExpenses(b.id), 0);
-  const tFE  = branches.reduce((s, b) => s + ((b.shop_rent || 0) + (b.room_rent || 0) + (b.wifi || 0) + (b.shop_elec || 0) + (b.room_elec || 0) + (b.salary_budget || 0)) * factor, 0);
-  const tE   = tVE + tFE;
-  
+  // Network totals are derived from branchData below so Operating Cost =
+  // Full Net P&L's expense side: vInc + vMatE + vOther + fixed + actual
+  // salary + GST estimate. Earlier these were computed ad-hoc with
+  // b.salary_budget × factor and no GST, causing a ~5–10% mismatch with
+  // the branch-detail and Summary-view totals.
   const tG   = entries.filter(e => inPeriod(e.date)).reduce((s, e) => s + (e.total_gst || 0), 0);
-  const net  = tI - tE;
   const pLeaveDays = leaves.filter(l => l.status === "pending")
     .reduce((s, l) => s + (parseInt(l.days) || 1), 0);
 
@@ -262,9 +246,19 @@ export default function DashboardPage() {
       vInc, vMatE, vOther, vPetrol,
       fShopRent, fRoomRent, fWifi, fElec,
       actualSalary, actualLeaves,
-      totalGst, factor 
+      totalGst, factor
     };
   });
+
+  // Network totals computed from the pre-filter branchData so the top KPIs
+  // stay stable regardless of the Profit/Loss/Type filter selection. The
+  // expense side mirrors branchData's Full Net P&L formula (actual salary +
+  // GST estimate + variable + fixed) — this is what the Summary view's
+  // Total Expense card uses, so the two now agree.
+  const tI  = branchData.reduce((s, d) => s + d.i, 0);
+  const tE  = branchData.reduce((s, d) => s + d.e + d.totalGst, 0);
+  const net = branchData.reduce((s, d) => s + d.n, 0);
+
   if (brFilter === "profit") branchData = branchData.filter(d => d.n >= 0);
   if (brFilter === "loss")   branchData = branchData.filter(d => d.n < 0);
   if (brTypeFilter === "mens")   branchData = branchData.filter(d => d.b.type === "mens");

@@ -176,7 +176,16 @@ export default function BranchesPage() {
     const income  = iOnline + iCash + iMatS;
 
     const vInc   = bEntries.reduce((s, e) => s + (e.staff_billing || []).reduce((ss, sb) => ss + (sb.incentive || 0) + (sb.mat_incentive || 0), 0), 0);
-    const vMatE  = bEntries.reduce((s, e) => s + (e.mat_expense || 0), 0);
+    // Material cost honours Master Setup → Material Expense Source toggles
+    // so card/table/Summary use the same source as the branch detail + P&L
+    // pages. Default (allocations only) matches the dashboard's Operating
+    // Cost formula — without this, Summary totals drifted ~tens of thousands.
+    const matUseAllocations = globalSettings?.mat_use_allocations !== false;
+    const matUseLumpsum = globalSettings?.mat_use_lumpsum === true;
+    const allocsTotal = (arr) => arr.reduce((s, a) => s + (Number(a.total) || (a.items || []).reduce((ss, it) => ss + (Number(it.line_total) || (Number(it.qty) * Number(it.price_at_transfer)) || 0), 0)), 0);
+    const vMatAlloc = allocsTotal(materialAllocations.filter(a => a.branch_id === b.id && inPeriod(a.date || (a.transferred_at || "").slice(0, 10))));
+    const vMatLump  = bEntries.reduce((s, e) => s + (Number(e.mat_expense) || 0), 0);
+    const vMatE = (matUseAllocations ? vMatAlloc : 0) + (matUseLumpsum ? vMatLump : 0);
     const vOther = bEntries.reduce((s, e) => s + (e.others || 0) + (e.petrol || 0), 0);
     const vPetrol = bEntries.reduce((s, e) => s + (e.petrol || 0), 0);
     
