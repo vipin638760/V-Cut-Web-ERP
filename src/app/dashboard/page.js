@@ -950,6 +950,11 @@ export default function DashboardPage() {
         </div>
       </div>
 
+      {/* Daily business bar chart — month mode only */}
+      {filterMode === "month" && (dashView === "all" || dashView === "shop") && (
+        <DailyBusinessChart entries={entries} filterYear={filterYear} filterMonth={filterMonth} />
+      )}
+
       {/* Main Admin Grid */}
       <div style={{ display: "grid", gridTemplateColumns: dashView === "all" ? "1.6fr 1fr" : "1fr", gap: 24 }}>
 
@@ -1208,5 +1213,146 @@ function CompactStat({ label, val, col, bold }) {
       <div style={{ fontSize: 8, color: "var(--text3)", textTransform: "uppercase", fontWeight: 600, marginBottom: 2, letterSpacing: 0.3 }}>{label}</div>
       <div style={{ fontSize: 11, fontWeight: bold ? 700 : 600, color: col, whiteSpace: "nowrap", fontFamily: "var(--font-headline, var(--font-outfit))" }}>{val}</div>
     </div>
+  );
+}
+
+// ─── Daily business bar chart — x: day-of-month, y: total business ────────
+
+function DailyBusinessChart({ entries, filterYear, filterMonth }) {
+  const [hover, setHover] = useState(null);
+  const prefix = `${filterYear}-${String(filterMonth).padStart(2, "0")}`;
+  const daysInMonth = new Date(filterYear, filterMonth, 0).getDate();
+  const NOW = new Date();
+  const todayStr = `${NOW.getFullYear()}-${String(NOW.getMonth() + 1).padStart(2, "0")}-${String(NOW.getDate()).padStart(2, "0")}`;
+
+  // One walk over entries: accumulate day-level network totals
+  const byDay = new Array(daysInMonth).fill(0);
+  entries.forEach(e => {
+    if (!e.date || !e.date.startsWith(prefix)) return;
+    const dIdx = Number(e.date.slice(8, 10)) - 1;
+    if (dIdx < 0 || dIdx >= daysInMonth) return;
+    const matSale = (e.staff_billing || []).reduce((s, sb) => s + (sb.material || 0), 0);
+    byDay[dIdx] += (e.online || 0) + (e.cash || 0) + matSale;
+  });
+
+  const max = Math.max(1, ...byDay);
+  const totalBusiness = byDay.reduce((s, v) => s + v, 0);
+  const workingDays = byDay.filter(v => v > 0).length;
+  const avg = workingDays ? Math.round(totalBusiness / workingDays) : 0;
+  const bestIdx = byDay.indexOf(Math.max(...byDay));
+  const monthLabel = new Date(filterYear, filterMonth - 1, 1).toLocaleString("en-US", { month: "long", year: "numeric" });
+
+  // Chart dims
+  const H = 220;               // plot height
+  const BAR_W = 26;
+  const GAP = 6;
+  const LEFT = 48;             // y-axis label gutter
+  const PAD_TOP = 16;
+  const PAD_BOTTOM = 32;       // space for x-axis labels
+  const W = LEFT + daysInMonth * (BAR_W + GAP);
+  const yTicks = 4;
+
+  const dayOfWeek = (d) => {
+    const dt = new Date(filterYear, filterMonth - 1, d);
+    return dt.toLocaleDateString("en-US", { weekday: "short" });
+  };
+
+  return (
+    <Card style={{ padding: 18, marginBottom: 24 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12, marginBottom: 14 }}>
+        <div>
+          <div style={{ fontSize: 11, fontWeight: 800, color: "var(--accent)", textTransform: "uppercase", letterSpacing: 2 }}>Daily Business</div>
+          <div style={{ fontSize: 18, fontWeight: 800, color: "var(--gold)", fontFamily: "var(--font-headline, var(--font-outfit))", marginTop: 2 }}>{monthLabel}</div>
+        </div>
+        <div style={{ display: "flex", gap: 20, alignItems: "center" }}>
+          <div style={{ textAlign: "right" }}>
+            <div style={{ fontSize: 9, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, fontWeight: 700 }}>Total</div>
+            <div style={{ fontSize: 15, fontWeight: 800, color: "var(--green)" }}>{INR(totalBusiness)}</div>
+          </div>
+          <div style={{ textAlign: "right" }}>
+            <div style={{ fontSize: 9, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, fontWeight: 700 }}>Daily Avg</div>
+            <div style={{ fontSize: 15, fontWeight: 800, color: "var(--blue)" }}>{INR(avg)}</div>
+          </div>
+          <div style={{ textAlign: "right" }}>
+            <div style={{ fontSize: 9, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, fontWeight: 700 }}>Best Day</div>
+            <div style={{ fontSize: 15, fontWeight: 800, color: "var(--gold)" }}>{byDay[bestIdx] > 0 ? `${bestIdx + 1} · ${INR(byDay[bestIdx])}` : "—"}</div>
+          </div>
+        </div>
+      </div>
+
+      {totalBusiness === 0 ? (
+        <div style={{ height: H, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text3)", fontStyle: "italic", fontSize: 13 }}>No business entries recorded for {monthLabel} yet.</div>
+      ) : (
+        <div style={{ position: "relative", overflowX: "auto" }}>
+          <svg width={W} height={H + PAD_TOP + PAD_BOTTOM} style={{ display: "block" }}>
+            {/* Y-axis gridlines + labels */}
+            {Array.from({ length: yTicks + 1 }, (_, i) => {
+              const frac = i / yTicks;
+              const y = PAD_TOP + (1 - frac) * H;
+              const v = Math.round(max * frac);
+              return (
+                <g key={i}>
+                  <line x1={LEFT} y1={y} x2={W} y2={y} stroke="rgba(255,255,255,0.05)" strokeWidth={1} />
+                  <text x={LEFT - 6} y={y + 3} fontSize={9} fill="var(--text3)" textAnchor="end">{v >= 1000 ? `${Math.round(v / 1000)}k` : v}</text>
+                </g>
+              );
+            })}
+            {/* Bars */}
+            {byDay.map((v, i) => {
+              const x = LEFT + i * (BAR_W + GAP);
+              const h = v > 0 ? (v / max) * H : 2;
+              const y = PAD_TOP + H - h;
+              const dateStr = `${prefix}-${String(i + 1).padStart(2, "0")}`;
+              const isToday = dateStr === todayStr;
+              const isBest = i === bestIdx && v > 0;
+              const fill = isBest ? "url(#bar-gold)" : isToday ? "url(#bar-accent)" : "url(#bar-blue)";
+              return (
+                <g key={i}>
+                  <rect x={x} y={y} width={BAR_W} height={h} rx={4} fill={fill}
+                    onMouseEnter={() => setHover({ i, v, dateStr })}
+                    onMouseLeave={() => setHover(null)}
+                    style={{ cursor: v > 0 ? "pointer" : "default", transition: "opacity .15s" }}
+                    opacity={hover && hover.i !== i ? 0.45 : 1}
+                  />
+                  <text x={x + BAR_W / 2} y={PAD_TOP + H + 14} fontSize={9} fill={isToday ? "var(--accent)" : "var(--text3)"} textAnchor="middle" fontWeight={isToday || isBest ? 800 : 600}>
+                    {i + 1}
+                  </text>
+                  <text x={x + BAR_W / 2} y={PAD_TOP + H + 25} fontSize={7} fill="var(--text3)" textAnchor="middle" opacity={0.75}>
+                    {dayOfWeek(i + 1).slice(0, 2)}
+                  </text>
+                </g>
+              );
+            })}
+            <defs>
+              <linearGradient id="bar-blue" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="rgba(34,211,238,0.85)" />
+                <stop offset="100%" stopColor="rgba(34,211,238,0.35)" />
+              </linearGradient>
+              <linearGradient id="bar-accent" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="rgba(74,222,128,0.95)" />
+                <stop offset="100%" stopColor="rgba(74,222,128,0.4)" />
+              </linearGradient>
+              <linearGradient id="bar-gold" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="rgba(250,204,21,0.95)" />
+                <stop offset="100%" stopColor="rgba(250,204,21,0.4)" />
+              </linearGradient>
+            </defs>
+          </svg>
+
+          {hover && (
+            <div style={{
+              position: "absolute",
+              left: Math.min(LEFT + hover.i * (BAR_W + GAP) + BAR_W + 10, W - 140),
+              top: 4, pointerEvents: "none",
+              background: "var(--bg4)", border: "1px solid rgba(var(--accent-rgb),0.35)", borderRadius: 8,
+              padding: "8px 12px", boxShadow: "0 6px 20px rgba(0,0,0,0.5)", fontSize: 11, zIndex: 3,
+            }}>
+              <div style={{ fontSize: 9, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, fontWeight: 700 }}>{hover.dateStr} · {dayOfWeek(hover.i + 1)}</div>
+              <div style={{ fontSize: 14, fontWeight: 800, color: "var(--green)", marginTop: 2 }}>{INR(hover.v)}</div>
+            </div>
+          )}
+        </div>
+      )}
+    </Card>
   );
 }

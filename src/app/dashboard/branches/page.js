@@ -41,6 +41,7 @@ export default function BranchesPage() {
   const [brSortCol, setBrSortCol] = useState("name");
   const [brSortDir, setBrSortDir] = useState("asc");
   const [brView, setBrView] = useState("card");
+  const [summaryTab, setSummaryTab] = useState("summary"); // "summary" | "dailycash"
 
   // Edit form
   const [showForm, setShowForm] = useState(false);
@@ -1852,12 +1853,26 @@ export default function BranchesPage() {
           <ToggleGroup options={[["asc","Asc ↑"],["desc","Desc ↓"]]} value={brSortDir} onChange={setBrSortDir} />
         </div>
         <div style={{ marginLeft: "auto" }}>
-          <ToggleGroup label="View" options={[["card","⬛ Cards"],["table","☰ Table"]]} value={brView} onChange={setBrView} />
+          <ToggleGroup label="View" options={[["card","⬛ Cards"],["table","☰ Table"],["summary","📋 Summary"]]} value={brView} onChange={setBrView} />
         </div>
       </div>
 
-      {/* Table View */}
-      {brView === "table" ? (
+      {/* Summary View */}
+      {brView === "summary" ? (
+        <SummaryView
+          summaryTab={summaryTab}
+          setSummaryTab={setSummaryTab}
+          branchData={branchData}
+          branches={branches}
+          entries={entries}
+          globalSettings={globalSettings}
+          filterMode={filterMode}
+          filterPrefix={filterPrefix}
+          filterYear={filterYear}
+          filterMonth={filterMonth}
+          isAdmin={isAdmin}
+        />
+      ) : brView === "table" ? (
         <Card style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 11.5, minWidth: 1000 }}>
             <thead><tr>
@@ -2137,6 +2152,291 @@ function CompactStat({ label, val, col, bold }) {
     <div style={{ textAlign: "center" }}>
       <div style={{ fontSize: 7, color: "var(--text3)", textTransform: "uppercase", fontWeight: 700, marginBottom: 1 }}>{label}</div>
       <div style={{ fontSize: 10.5, fontWeight: bold ? 800 : 700, color: col, whiteSpace: "nowrap" }}>{val}</div>
+    </div>
+  );
+}
+
+// ─── Summary View (read-only Excel-like layout) ─────────────────────────────
+
+function SummaryView({ summaryTab, setSummaryTab, branchData, branches, entries, globalSettings, filterMode, filterPrefix, filterYear, filterMonth, isAdmin }) {
+  const MASK = "•••••";
+  const gstPct = globalSettings?.gst_pct || 0;
+
+  // Per-branch aggregates for the selected period
+  const rows = branchData.map(d => {
+    const b = d.b;
+    const bEntries = entries.filter(e => e.branch_id === b.id && (filterMode === "month" ? e.date?.startsWith(filterPrefix) : e.date?.startsWith(String(filterYear))));
+    const online = bEntries.reduce((s, e) => s + (e.online || 0), 0);
+    const cash   = bEntries.reduce((s, e) => s + (e.cash || 0), 0);
+    const matSale = bEntries.reduce((s, e) => s + (e.staff_billing || []).reduce((ss, sb) => ss + (sb.material || 0), 0), 0);
+    const incomeTotal = online + cash + matSale;
+    const cashExp = bEntries.reduce((s, e) => s + (e.others || 0), 0); // misc cash spent at branch
+    const gst = Math.round((online * gstPct) / 100);
+    const totalExp = d.vInc + d.vMatE + d.vPetrol + d.fShopRent + d.fRoomRent + d.fElec + d.fWifi + d.actualSalary + cashExp + gst;
+    return { b, online, cash, matSale, incomeTotal, cashExp, gst, totalExp, d };
+  });
+
+  const totals = rows.reduce((acc, r) => ({
+    online: acc.online + r.online,
+    cash: acc.cash + r.cash,
+    matSale: acc.matSale + r.matSale,
+    incomeTotal: acc.incomeTotal + r.incomeTotal,
+    cashExp: acc.cashExp + r.cashExp,
+    vInc: acc.vInc + r.d.vInc,
+    actualSalary: acc.actualSalary + r.d.actualSalary,
+    fElec: acc.fElec + r.d.fElec,
+    fWifi: acc.fWifi + r.d.fWifi,
+    fShopRent: acc.fShopRent + r.d.fShopRent,
+    fRoomRent: acc.fRoomRent + r.d.fRoomRent,
+    vPetrol: acc.vPetrol + r.d.vPetrol,
+    vMatE: acc.vMatE + r.d.vMatE,
+    gst: acc.gst + r.gst,
+    totalExp: acc.totalExp + r.totalExp,
+  }), { online: 0, cash: 0, matSale: 0, incomeTotal: 0, cashExp: 0, vInc: 0, actualSalary: 0, fElec: 0, fWifi: 0, fShopRent: 0, fRoomRent: 0, vPetrol: 0, vMatE: 0, gst: 0, totalExp: 0 });
+
+  const grandPL = totals.incomeTotal - totals.totalExp;
+
+  return (
+    <div>
+      {/* Sub-tab toggle — Summary vs Daily Cash & Online */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+        {[["summary", "📊 Summary View"], ["dailycash", "📅 Daily Cash & Online"]].map(([k, label]) => (
+          <button key={k} onClick={() => setSummaryTab(k)}
+            style={{
+              padding: "10px 18px", borderRadius: 10, border: summaryTab === k ? "1px solid var(--accent)" : "1px solid var(--border)",
+              background: summaryTab === k ? "linear-gradient(135deg, rgba(var(--accent-rgb),0.18), rgba(var(--accent-rgb),0.06))" : "var(--bg3)",
+              color: summaryTab === k ? "var(--accent)" : "var(--text2)",
+              fontWeight: 700, fontSize: 12, cursor: "pointer", transition: "all .15s",
+              boxShadow: summaryTab === k ? "0 0 18px rgba(var(--accent-rgb),0.25)" : "none",
+            }}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {summaryTab === "summary" ? (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 16 }}>
+          {/* INCOME TABLE */}
+          <Card style={{ padding: 0, overflow: "hidden" }}>
+            <div style={{ padding: "12px 16px", background: "linear-gradient(135deg, rgba(74,222,128,0.18), rgba(74,222,128,0.04))", borderBottom: "1px solid rgba(74,222,128,0.25)", fontWeight: 800, color: "var(--green)", fontSize: 13, letterSpacing: 1.5, textAlign: "center" }}>INCOME</div>
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                <thead>
+                  <tr style={{ background: "var(--bg4)" }}>
+                    <TH style={{ width: 40 }}>SL</TH>
+                    <TH>Branch</TH>
+                    <TH right>Online</TH>
+                    <TH right>Cash</TH>
+                    <TH right>Total</TH>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((r, i) => (
+                    <tr key={r.b.id}>
+                      <TD style={{ color: "var(--text3)" }}>{i + 1}</TD>
+                      <TD style={{ fontWeight: 700, whiteSpace: "nowrap" }}>{r.b.name.replace("V-CUT ", "")}</TD>
+                      <TD right style={{ color: "var(--blue)" }}>{INR(r.online)}</TD>
+                      <TD right style={{ color: "var(--green)" }}>{INR(r.cash)}</TD>
+                      <TD right style={{ fontWeight: 800, color: "var(--green)" }}>{INR(r.incomeTotal)}</TD>
+                    </tr>
+                  ))}
+                  <tr style={{ background: "var(--bg4)", borderTop: "2px solid var(--border2)" }}>
+                    <TD></TD>
+                    <TD style={{ fontWeight: 800, color: "var(--gold)" }}>SUB TOTAL</TD>
+                    <TD right style={{ fontWeight: 800, color: "var(--blue)" }}>{INR(totals.online)}</TD>
+                    <TD right style={{ fontWeight: 800, color: "var(--green)" }}>{INR(totals.cash)}</TD>
+                    <TD right style={{ fontWeight: 800, color: "var(--green)" }}>{INR(totals.incomeTotal)}</TD>
+                  </tr>
+                  <tr style={{ background: "rgba(74,222,128,0.06)" }}>
+                    <TD></TD>
+                    <TD colSpan={3} style={{ fontWeight: 800, color: "var(--gold)", textAlign: "right" }}>TOTAL</TD>
+                    <TD right style={{ fontWeight: 900, color: "var(--green)", fontSize: 14 }}>{INR(totals.incomeTotal)}</TD>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </Card>
+
+          {/* EXPENSES TABLE */}
+          <Card style={{ padding: 0, overflow: "hidden" }}>
+            <div style={{ padding: "12px 16px", background: "linear-gradient(135deg, rgba(248,113,113,0.2), rgba(248,113,113,0.05))", borderBottom: "1px solid rgba(248,113,113,0.25)", fontWeight: 800, color: "var(--red)", fontSize: 13, letterSpacing: 1.5, textAlign: "center" }}>EXPENSES</div>
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11, minWidth: 1100 }}>
+                <thead>
+                  <tr style={{ background: "var(--bg4)" }}>
+                    <TH style={{ width: 32, fontSize: 9 }}>SL</TH>
+                    <TH style={{ fontSize: 9 }}>Branch</TH>
+                    <TH right style={{ fontSize: 9 }}>Cash Exp</TH>
+                    <TH right style={{ fontSize: 9 }}>Incentives</TH>
+                    <TH right style={{ fontSize: 9 }}>Salary</TH>
+                    <TH right style={{ fontSize: 9 }}>Shop Elec</TH>
+                    <TH right style={{ fontSize: 9 }}>Room Elec</TH>
+                    <TH right style={{ fontSize: 9 }}>WiFi</TH>
+                    <TH right style={{ fontSize: 9 }}>Shop Rent</TH>
+                    <TH right style={{ fontSize: 9 }}>Room Rent</TH>
+                    <TH right style={{ fontSize: 9 }}>Petrol</TH>
+                    <TH right style={{ fontSize: 9 }}>Material</TH>
+                    <TH right style={{ fontSize: 9 }}>GST 5%</TH>
+                    <TH right style={{ fontSize: 9 }}>Total</TH>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((r, i) => (
+                    <tr key={r.b.id}>
+                      <TD style={{ color: "var(--text3)", fontSize: 10 }}>{i + 1}</TD>
+                      <TD style={{ fontWeight: 700, whiteSpace: "nowrap", fontSize: 11 }}>{r.b.name.replace("V-CUT ", "")}</TD>
+                      <TD right style={{ color: "var(--red)" }}>{INR(r.cashExp)}</TD>
+                      <TD right style={{ color: "var(--red)" }}>{INR(r.d.vInc)}</TD>
+                      <TD right style={{ color: "var(--blue)" }}>{isAdmin ? INR(r.d.actualSalary) : MASK}</TD>
+                      <TD right style={{ color: "var(--orange)" }}>{INR(r.d.fElec)}</TD>
+                      <TD right style={{ color: "var(--orange)" }}>—</TD>
+                      <TD right style={{ color: "var(--orange)" }}>{INR(r.d.fWifi)}</TD>
+                      <TD right style={{ color: "var(--orange)" }}>{INR(r.d.fShopRent)}</TD>
+                      <TD right style={{ color: "var(--orange)" }}>{INR(r.d.fRoomRent)}</TD>
+                      <TD right style={{ color: "var(--red)" }}>{INR(r.d.vPetrol)}</TD>
+                      <TD right style={{ color: "var(--red)" }}>{INR(r.d.vMatE)}</TD>
+                      <TD right style={{ color: "var(--red)" }}>{INR(r.gst)}</TD>
+                      <TD right style={{ fontWeight: 800, color: "var(--red)" }}>{isAdmin ? INR(r.totalExp) : MASK}</TD>
+                    </tr>
+                  ))}
+                  <tr style={{ background: "var(--bg4)", borderTop: "2px solid var(--border2)" }}>
+                    <TD></TD>
+                    <TD style={{ fontWeight: 800, color: "var(--gold)" }}>SUB TOTAL</TD>
+                    <TD right style={{ fontWeight: 800, color: "var(--red)" }}>{INR(totals.cashExp)}</TD>
+                    <TD right style={{ fontWeight: 800, color: "var(--red)" }}>{INR(totals.vInc)}</TD>
+                    <TD right style={{ fontWeight: 800, color: "var(--blue)" }}>{isAdmin ? INR(totals.actualSalary) : MASK}</TD>
+                    <TD right style={{ fontWeight: 800, color: "var(--orange)" }}>{INR(totals.fElec)}</TD>
+                    <TD right style={{ fontWeight: 800, color: "var(--orange)" }}>—</TD>
+                    <TD right style={{ fontWeight: 800, color: "var(--orange)" }}>{INR(totals.fWifi)}</TD>
+                    <TD right style={{ fontWeight: 800, color: "var(--orange)" }}>{INR(totals.fShopRent)}</TD>
+                    <TD right style={{ fontWeight: 800, color: "var(--orange)" }}>{INR(totals.fRoomRent)}</TD>
+                    <TD right style={{ fontWeight: 800, color: "var(--red)" }}>{INR(totals.vPetrol)}</TD>
+                    <TD right style={{ fontWeight: 800, color: "var(--red)" }}>{INR(totals.vMatE)}</TD>
+                    <TD right style={{ fontWeight: 800, color: "var(--red)" }}>{INR(totals.gst)}</TD>
+                    <TD right style={{ fontWeight: 900, color: "var(--red)" }}>{isAdmin ? INR(totals.totalExp) : MASK}</TD>
+                  </tr>
+                  <tr style={{ background: "rgba(248,113,113,0.06)" }}>
+                    <TD></TD>
+                    <TD colSpan={12} style={{ fontWeight: 800, color: "var(--gold)", textAlign: "right" }}>TOTAL</TD>
+                    <TD right style={{ fontWeight: 900, color: "var(--red)", fontSize: 14 }}>{isAdmin ? INR(totals.totalExp) : MASK}</TD>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </Card>
+
+          {/* P&L summary card */}
+          <div style={{ gridColumn: "1 / -1", display: "flex", justifyContent: "center", marginTop: 8 }}>
+            <div style={{
+              display: "inline-flex", alignItems: "center", gap: 16, padding: "18px 32px",
+              borderRadius: 14, border: `2px solid ${grandPL >= 0 ? "var(--green)" : "var(--red)"}`,
+              background: grandPL >= 0 ? "rgba(74,222,128,0.08)" : "rgba(248,113,113,0.08)",
+              boxShadow: grandPL >= 0 ? "0 0 24px rgba(74,222,128,0.3)" : "0 0 24px rgba(248,113,113,0.3)",
+            }}>
+              <div style={{ fontSize: 11, fontWeight: 800, color: "var(--gold)", letterSpacing: 1.5 }}>PROFIT / LOSS</div>
+              <div style={{ fontSize: 22, fontWeight: 900, color: grandPL >= 0 ? "var(--green)" : "var(--red)" }}>
+                {isAdmin ? INR(grandPL) : MASK}
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <DailyCashOnline
+          branches={branches}
+          entries={entries}
+          filterMode={filterMode}
+          filterPrefix={filterPrefix}
+          filterYear={filterYear}
+          filterMonth={filterMonth}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── Daily Cash & Online pivot ─────────────────────────────────────────────
+
+function DailyCashOnline({ branches, entries, filterMode, filterPrefix, filterYear, filterMonth }) {
+  // Build the list of days in the selected period.
+  const days = (() => {
+    const out = [];
+    if (filterMode === "month") {
+      const count = new Date(filterYear, filterMonth, 0).getDate();
+      for (let d = 1; d <= count; d++) out.push(`${filterPrefix}-${String(d).padStart(2, "0")}`);
+    } else {
+      // year mode — still day-level, iterate each month × its length
+      for (let m = 1; m <= 12; m++) {
+        const prefix = `${filterYear}-${String(m).padStart(2, "0")}`;
+        const count = new Date(filterYear, m, 0).getDate();
+        for (let d = 1; d <= count; d++) out.push(`${prefix}-${String(d).padStart(2, "0")}`);
+      }
+    }
+    return out;
+  })();
+
+  // Map `${branch_id}|${date}` → { online, cash } for O(1) lookup
+  const byKey = new Map();
+  entries.forEach(e => {
+    if (!e.branch_id || !e.date) return;
+    const k = `${e.branch_id}|${e.date}`;
+    const prev = byKey.get(k) || { online: 0, cash: 0 };
+    byKey.set(k, { online: prev.online + (e.online || 0), cash: prev.cash + (e.cash || 0) });
+  });
+
+  const dayOfWeek = (dateStr) => new Date(`${dateStr}T00:00:00`).toLocaleDateString("en-US", { weekday: "short" }).toUpperCase();
+  const cell = (bid, date, field) => byKey.get(`${bid}|${date}`)?.[field] || 0;
+
+  const renderTable = (label, field, color) => {
+    const colTotals = branches.map(b => days.reduce((s, d) => s + cell(b.id, d, field), 0));
+    const grandTotal = colTotals.reduce((s, n) => s + n, 0);
+    return (
+      <Card style={{ padding: 0, overflow: "hidden", marginBottom: 16 }}>
+        <div style={{ padding: "12px 16px", background: `linear-gradient(135deg, ${color}33, ${color}0a)`, borderBottom: `1px solid ${color}44`, fontWeight: 800, color, fontSize: 13, letterSpacing: 1.5 }}>
+          {label}
+        </div>
+        <div style={{ overflowX: "auto", maxHeight: "60vh" }}>
+          <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 11, minWidth: "max-content" }}>
+            <thead style={{ position: "sticky", top: 0, zIndex: 5 }}>
+              <tr style={{ background: "var(--bg4)" }}>
+                <TH style={{ position: "sticky", left: 0, background: "var(--bg4)", zIndex: 6, fontSize: 10, width: 90 }}>Day</TH>
+                <TH style={{ position: "sticky", left: 90, background: "var(--bg4)", zIndex: 6, fontSize: 10, width: 100 }}>Date</TH>
+                {branches.map(b => <TH key={b.id} right style={{ fontSize: 9, whiteSpace: "nowrap", background: "var(--bg4)" }}>{b.name.replace("V-CUT ", "")}</TH>)}
+                <TH right style={{ fontSize: 10, background: "var(--bg4)", borderLeft: "1px solid var(--border2)" }}>Total</TH>
+              </tr>
+            </thead>
+            <tbody>
+              {days.map(date => {
+                const rowTotal = branches.reduce((s, b) => s + cell(b.id, date, field), 0);
+                const hasAny = rowTotal > 0;
+                return (
+                  <tr key={date} style={{ opacity: hasAny ? 1 : 0.45 }}>
+                    <TD style={{ position: "sticky", left: 0, background: "var(--bg3)", fontWeight: 700, color: "var(--text2)", fontSize: 10 }}>{dayOfWeek(date)}</TD>
+                    <TD style={{ position: "sticky", left: 90, background: "var(--bg3)", color: "var(--text3)", fontSize: 10, fontFamily: "monospace" }}>{date}</TD>
+                    {branches.map(b => {
+                      const v = cell(b.id, date, field);
+                      return <TD key={b.id} right style={{ color: v > 0 ? color : "var(--text3)", fontWeight: v > 0 ? 600 : 400, fontSize: 11 }}>{v > 0 ? INR(v) : "—"}</TD>;
+                    })}
+                    <TD right style={{ fontWeight: 800, color: hasAny ? color : "var(--text3)", borderLeft: "1px solid var(--border2)" }}>{hasAny ? INR(rowTotal) : "—"}</TD>
+                  </tr>
+                );
+              })}
+              <tr style={{ background: "var(--bg4)", borderTop: "2px solid var(--border2)" }}>
+                <TD style={{ position: "sticky", left: 0, background: "var(--bg4)", fontWeight: 800, color: "var(--gold)" }}>TOTAL</TD>
+                <TD style={{ position: "sticky", left: 90, background: "var(--bg4)" }}></TD>
+                {branches.map((b, i) => <TD key={b.id} right style={{ fontWeight: 800, color }}>{INR(colTotals[i])}</TD>)}
+                <TD right style={{ fontWeight: 900, color, borderLeft: "1px solid var(--border2)", fontSize: 13 }}>{INR(grandTotal)}</TD>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </Card>
+    );
+  };
+
+  return (
+    <div>
+      {renderTable("DAILY ONLINE / UPI", "online", "var(--blue)")}
+      {renderTable("DAILY CASH", "cash", "var(--green)")}
     </div>
   );
 }
