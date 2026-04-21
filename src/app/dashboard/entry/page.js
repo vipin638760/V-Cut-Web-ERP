@@ -1692,19 +1692,6 @@ export default function EntryPage() {
                     {dailyExpTotal > 0 ? INR(dailyExpTotal) : "—"}
                     <span style={{ position: "absolute", top: 4, right: 8, fontSize: 8, fontWeight: 700, color: "var(--text3)", letterSpacing: 1, textTransform: "uppercase" }}>info only</span>
                   </div>
-                  {showExpBreakdown && dailyExpenses.length > 0 && (
-                    <div style={{ marginTop: 8, padding: 10, borderRadius: 8, background: "var(--bg3)", border: "1px solid var(--border)", fontSize: 11 }}>
-                      {dailyExpenses.map(e => (
-                        <div key={e.id} style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", borderBottom: "1px solid var(--border)" }}>
-                          <span style={{ color: "var(--text2)" }}>{e.expense_type}</span>
-                          <span style={{ fontWeight: 700, color: "var(--red)" }}>{INR(e.amount)}</span>
-                        </div>
-                      ))}
-                      <div style={{ display: "flex", justifyContent: "space-between", padding: "4px 0", fontWeight: 800, marginTop: 4 }}>
-                        <span>Total</span><span style={{ color: "var(--red)" }}>{INR(dailyExpTotal)}</span>
-                      </div>
-                    </div>
-                  )}
                 </FG>
                 {/* Petrol removed — now tracked via Daily Expenses page */}
                 <FG label="Cash in Hand (Expected)">
@@ -2156,6 +2143,33 @@ export default function EntryPage() {
               style={{ flex: 1, padding: "10px", borderRadius: 10, background: "var(--bg3)", color: "var(--text2)", border: "1px solid var(--border)", cursor: "pointer", fontWeight: 700 }}>Done</button>
           </div>
         </div>
+      </Modal>
+
+      <Modal isOpen={showExpBreakdown} onClose={() => setShowExpBreakdown(false)} title="Daily Expenses Breakdown" width={480}>
+        <div style={{ fontSize: 11, color: "var(--text3)", marginBottom: 12, lineHeight: 1.5 }}>
+          Recorded on the <strong style={{ color: "var(--accent)" }}>Daily Expenses</strong> page. These are paid by the head-office cashier and are <strong>not</strong> deducted from the branch cash-in-hand.
+        </div>
+        {dailyExpenses.length === 0 ? (
+          <div style={{ padding: "24px 12px", textAlign: "center", color: "var(--text3)", fontStyle: "italic", fontSize: 12 }}>
+            No daily expenses recorded for this day.
+          </div>
+        ) : (
+          <div style={{ borderRadius: 10, overflow: "hidden", border: "1px solid var(--border)" }}>
+            {dailyExpenses.map(e => (
+              <div key={e.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", borderBottom: "1px solid var(--border)", background: "var(--bg3)" }}>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text)" }}>{e.expense_type}</div>
+                  {e.note && <div style={{ fontSize: 10, color: "var(--text3)", marginTop: 2 }}>{e.note}</div>}
+                </div>
+                <div style={{ fontSize: 14, fontWeight: 800, color: "var(--red)" }}>{INR(e.amount)}</div>
+              </div>
+            ))}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 14px", background: "var(--bg4)", borderTop: "2px solid rgba(var(--gold-rgb),0.3)" }}>
+              <div style={{ fontSize: 11, fontWeight: 800, color: "var(--gold)", letterSpacing: 1, textTransform: "uppercase" }}>Total</div>
+              <div style={{ fontSize: 16, fontWeight: 900, color: "var(--red)" }}>{INR(dailyExpTotal)}</div>
+            </div>
+          </div>
+        )}
       </Modal>
 
       {ConfirmDialog}
