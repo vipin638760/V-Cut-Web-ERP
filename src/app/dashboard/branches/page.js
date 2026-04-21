@@ -2050,7 +2050,7 @@ function DraggableBranchGrid({ branchData, isAdmin, canSelect, selectedBranches,
                 ? "2px dashed var(--gold)"
                 : isSelected
                   ? "2px solid var(--accent)"
-                  : `2px solid ${n >= 0 ? "var(--green)" : "var(--red)"}`,
+                  : `2px solid ${n > 0 ? "var(--green)" : "var(--red)"}`,
               borderRadius: 12,
               overflow: "hidden",
               cursor: isDragging ? "grabbing" : "grab",
@@ -2063,7 +2063,7 @@ function DraggableBranchGrid({ branchData, isAdmin, canSelect, selectedBranches,
                   ? "0 12px 32px rgba(0,0,0,0.5)"
                   : isSelected
                     ? "0 4px 20px rgba(var(--accent-rgb),0.35)"
-                    : n >= 0 ? "0 4px 16px rgba(74,222,128,.15)" : "0 4px 16px rgba(248,113,113,.15)",
+                    : n > 0 ? "0 4px 16px rgba(74,222,128,.15)" : "0 4px 16px rgba(248,113,113,.15)",
               userSelect: "none"
             }}
             onMouseEnter={ev => {
