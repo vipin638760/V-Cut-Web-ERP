@@ -198,7 +198,9 @@ export default function BranchesPage() {
       actualLeaves += activeStaffInMonth.reduce((s, st) => s + staffLeavesInMonth(st.id, mPrefix, leaves), 0);
     }
 
-    const expenses = vInc + vMatE + vOther + fFixedTot + actualSalary;
+    const gstPct = globalSettings?.gst_pct || 0;
+    const gstEst = (iOnline * gstPct) / 100;
+    const expenses = vInc + vMatE + vOther + fFixedTot + actualSalary + gstEst;
     const net      = income - expenses;
     const totalGst = bEntries.reduce((s, ent) => s + (ent.total_gst || 0), 0);
 
