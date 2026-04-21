@@ -2194,7 +2194,13 @@ function SummaryView({ summaryTab, setSummaryTab, branchData, branches, entries,
     totalExp: acc.totalExp + r.totalExp,
   }), { online: 0, cash: 0, matSale: 0, incomeTotal: 0, cashExp: 0, vInc: 0, actualSalary: 0, fElec: 0, fWifi: 0, fShopRent: 0, fRoomRent: 0, vPetrol: 0, vMatE: 0, gst: 0, totalExp: 0 });
 
+  // Salary stays hidden for non-admin, but totals should still be useful —
+  // compute the displayed total / P&L excluding salary so accountant sees
+  // real numbers instead of a row of dots. Admin sees the full figure.
   const grandPL = totals.incomeTotal - totals.totalExp;
+  const grandPLExSalary = totals.incomeTotal - (totals.totalExp - totals.actualSalary);
+  const displayGrandPL = isAdmin ? grandPL : grandPLExSalary;
+  const displayGrandTotalExp = isAdmin ? totals.totalExp : (totals.totalExp - totals.actualSalary);
 
   return (
     <div>
@@ -2296,7 +2302,7 @@ function SummaryView({ summaryTab, setSummaryTab, branchData, branches, entries,
                       <TD right style={{ color: "var(--red)" }}>{INR(r.d.vPetrol)}</TD>
                       <TD right style={{ color: "var(--red)" }}>{INR(r.d.vMatE)}</TD>
                       <TD right style={{ color: "var(--red)" }}>{INR(r.gst)}</TD>
-                      <TD right style={{ fontWeight: 800, color: "var(--red)" }}>{isAdmin ? INR(r.totalExp) : MASK}</TD>
+                      <TD right style={{ fontWeight: 800, color: "var(--red)" }}>{INR(isAdmin ? r.totalExp : r.totalExp - r.d.actualSalary)}</TD>
                     </tr>
                   ))}
                   <tr style={{ background: "var(--bg4)", borderTop: "2px solid var(--border2)" }}>
@@ -2313,12 +2319,12 @@ function SummaryView({ summaryTab, setSummaryTab, branchData, branches, entries,
                     <TD right style={{ fontWeight: 800, color: "var(--red)" }}>{INR(totals.vPetrol)}</TD>
                     <TD right style={{ fontWeight: 800, color: "var(--red)" }}>{INR(totals.vMatE)}</TD>
                     <TD right style={{ fontWeight: 800, color: "var(--red)" }}>{INR(totals.gst)}</TD>
-                    <TD right style={{ fontWeight: 900, color: "var(--red)" }}>{isAdmin ? INR(totals.totalExp) : MASK}</TD>
+                    <TD right style={{ fontWeight: 900, color: "var(--red)" }}>{INR(displayGrandTotalExp)}</TD>
                   </tr>
                   <tr style={{ background: "rgba(248,113,113,0.06)" }}>
                     <TD></TD>
-                    <TD colSpan={12} style={{ fontWeight: 800, color: "var(--gold)", textAlign: "right" }}>TOTAL</TD>
-                    <TD right style={{ fontWeight: 900, color: "var(--red)", fontSize: 14 }}>{isAdmin ? INR(totals.totalExp) : MASK}</TD>
+                    <TD colSpan={12} style={{ fontWeight: 800, color: "var(--gold)", textAlign: "right" }}>TOTAL{!isAdmin && <span style={{ fontSize: 9, color: "var(--text3)", marginLeft: 6, fontWeight: 600 }}>(ex. salary)</span>}</TD>
+                    <TD right style={{ fontWeight: 900, color: "var(--red)", fontSize: 14 }}>{INR(displayGrandTotalExp)}</TD>
                   </tr>
                 </tbody>
               </table>
@@ -2329,13 +2335,15 @@ function SummaryView({ summaryTab, setSummaryTab, branchData, branches, entries,
           <div style={{ gridColumn: "1 / -1", display: "flex", justifyContent: "center", marginTop: 8 }}>
             <div style={{
               display: "inline-flex", alignItems: "center", gap: 16, padding: "18px 32px",
-              borderRadius: 14, border: `2px solid ${grandPL >= 0 ? "var(--green)" : "var(--red)"}`,
-              background: grandPL >= 0 ? "rgba(74,222,128,0.08)" : "rgba(248,113,113,0.08)",
-              boxShadow: grandPL >= 0 ? "0 0 24px rgba(74,222,128,0.3)" : "0 0 24px rgba(248,113,113,0.3)",
+              borderRadius: 14, border: `2px solid ${displayGrandPL >= 0 ? "var(--green)" : "var(--red)"}`,
+              background: displayGrandPL >= 0 ? "rgba(74,222,128,0.08)" : "rgba(248,113,113,0.08)",
+              boxShadow: displayGrandPL >= 0 ? "0 0 24px rgba(74,222,128,0.3)" : "0 0 24px rgba(248,113,113,0.3)",
             }}>
-              <div style={{ fontSize: 11, fontWeight: 800, color: "var(--gold)", letterSpacing: 1.5 }}>PROFIT / LOSS</div>
-              <div style={{ fontSize: 22, fontWeight: 900, color: grandPL >= 0 ? "var(--green)" : "var(--red)" }}>
-                {isAdmin ? INR(grandPL) : MASK}
+              <div style={{ fontSize: 11, fontWeight: 800, color: "var(--gold)", letterSpacing: 1.5 }}>
+                PROFIT / LOSS{!isAdmin && <span style={{ fontSize: 9, color: "var(--text3)", marginLeft: 8, fontWeight: 600 }}>(ex. salary)</span>}
+              </div>
+              <div style={{ fontSize: 22, fontWeight: 900, color: displayGrandPL >= 0 ? "var(--green)" : "var(--red)" }}>
+                {INR(displayGrandPL)}
               </div>
             </div>
           </div>
