@@ -117,7 +117,18 @@ export default function BellNotifications({ currentUser }) {
   const colFor = (kind) => ({ approval: "approvals", leave: "leaves", advance: "staff_advances" }[kind]);
 
   const all = [...approvals, ...extras, ...taskpedia];
-  all.sort((a, b) => (b.requested_at || b.created_at || b.date || "").localeCompare(a.requested_at || a.created_at || a.date || ""));
+  // Firestore Timestamps are objects, not strings — coerce to a sortable ISO string
+  // so legacy string dates and Timestamp.toDate() docs sort in a single comparator.
+  const sortKey = (x) => {
+    const v = x.requested_at || x.created_at || x.date || "";
+    if (!v) return "";
+    if (typeof v === "string") return v;
+    if (typeof v === "number") return new Date(v).toISOString();
+    if (v && typeof v.toDate === "function") { try { return v.toDate().toISOString(); } catch { return ""; } }
+    if (v instanceof Date) return v.toISOString();
+    return String(v);
+  };
+  all.sort((a, b) => sortKey(b).localeCompare(sortKey(a)));
   // Taskpedia counts toward the badge so assignees see the red dot too
   const count = approvals.length + extras.length + taskpedia.length;
 
