@@ -1132,19 +1132,19 @@ export default function BranchesPage() {
 
         <PeriodWidget filterMode={filterMode} setFilterMode={setFilterMode} filterYear={filterYear} setFilterYear={setFilterYear} filterMonth={filterMonth} setFilterMonth={setFilterMonth} />
 
-        {/* KPIs — admin can click Variable Exp, Fixed Costs, or Total Expense for breakdown */}
+        {/* KPIs — admin/accountant can click Variable Exp, Fixed Costs, or Total Expense for breakdown */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 16, marginBottom: 24 }}>
           {[
             { l: "Total Income", v: INR(totalIncSum), c: "var(--green)" },
-            { l: "Variable Exp", v: INR(totalVarExp), c: "var(--red)", click: isAdmin ? "variable" : null },
-            { l: "Fixed Costs", v: isAdmin ? INR(totalFixedSalaryComp) : "•••••", c: "var(--orange)", click: isAdmin ? "fixed" : null },
-            { l: "GST Est.", v: isAdmin ? INR(totalGstEst) : "•••••", c: "var(--red)" },
-            { l: "Total Expense", v: isAdmin ? INR(totalVarExp + totalFixedSalaryComp + totalGstEst) : "•••••", c: "var(--red)", click: isAdmin ? "total" : null },
+            { l: "Variable Exp", v: INR(totalVarExp), c: "var(--red)", click: canEdit ? "variable" : null },
+            { l: "Fixed Costs", v: canEdit ? INR(totalFixedSalaryComp) : "•••••", c: "var(--orange)", click: canEdit ? "fixed" : null },
+            { l: "GST Est.", v: canEdit ? INR(totalGstEst) : "•••••", c: "var(--red)" },
+            { l: "Total Expense", v: canEdit ? INR(totalVarExp + totalFixedSalaryComp + totalGstEst) : "•••••", c: "var(--red)", click: canEdit ? "total" : null },
             // Colour Gross Net by Full Net P&L sign so a branch that is
             // profitable before fixed costs but loss-making after does not
             // flash a misleading green.
-            { l: "Gross Net", v: isAdmin ? INR(netSum) : "•••••", c: fullNetSum >= 0 ? "var(--green)" : "var(--red)" },
-            { l: "Full Net P&L", v: isAdmin ? (INR(fullNetSum)) : "•••••", c: fullNetSum >= 0 ? "var(--green)" : "var(--red)" },
+            { l: "Gross Net", v: canEdit ? INR(netSum) : "•••••", c: fullNetSum >= 0 ? "var(--green)" : "var(--red)" },
+            { l: "Full Net P&L", v: canEdit ? (INR(fullNetSum)) : "•••••", c: fullNetSum >= 0 ? "var(--green)" : "var(--red)" },
           ].map(({ l, v, c, click }) => {
             const content = (
               <>
@@ -1192,7 +1192,7 @@ export default function BranchesPage() {
         </div>
 
         {/* KPI breakdown popup */}
-        {kpiBreakdown && isAdmin && (() => {
+        {kpiBreakdown && canEdit && (() => {
           const nMonths = factor; // number of months summed for this period
           const shopRent = (b.shop_rent || 0) * nMonths;
           const roomRent = (b.room_rent || 0) * nMonths;
