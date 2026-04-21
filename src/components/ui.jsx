@@ -219,7 +219,7 @@ export function Card({ children, style }) {
         </div>
       )}
       <div style={{ position: "relative" }}>
-        <div ref={ref} style={{ background: "var(--bg3)", borderRadius: 16, overflowX: "auto", marginBottom: 0, border: "1px solid rgba(72,72,71,0.12)", ...style }}>
+        <div ref={ref} style={{ background: "var(--bg3)", borderRadius: 16, overflowX: "auto", marginBottom: 0, border: "1px solid rgba(var(--accent-rgb),0.18)", boxShadow: "0 0 18px rgba(var(--accent-rgb),0.12), 0 0 1px rgba(var(--accent-rgb),0.25) inset", ...style }}>
           {children}
         </div>
         {overflow && !scrollPos.atEnd && (
@@ -236,9 +236,11 @@ export function Card({ children, style }) {
 // Stats card
 export function StatCard({ label, value, subtext, icon, trend, color = "accent" }) {
   const colors = { accent: "var(--accent)", green: "var(--green)", red: "var(--red)", gold: "var(--gold)", orange: "var(--orange)", purple: "#a855f7" };
+  const rgbs = { accent: "34,211,238", green: "74,222,128", red: "248,113,113", gold: "250,204,21", orange: "251,146,60", purple: "168,85,247" };
   const c = colors[color] || colors.accent;
+  const rgb = rgbs[color] || rgbs.accent;
   return (
-    <div style={{ background: "var(--bg3)", borderRadius: 16, padding: "22px 24px", flex: 1, minWidth: 200, position: "relative", overflow: "hidden", border: "1px solid rgba(72,72,71,0.1)" }}>
+    <div style={{ background: "var(--bg3)", borderRadius: 16, padding: "22px 24px", flex: 1, minWidth: 200, position: "relative", overflow: "hidden", border: `1px solid rgba(${rgb},0.35)`, boxShadow: `0 0 20px rgba(${rgb},0.22), 0 0 1px rgba(${rgb},0.45) inset` }}>
       <div style={{ position: "absolute", top: -15, right: -15, width: 80, height: 80, background: c, opacity: 0.04, borderRadius: "50%", filter: "blur(20px)" }} />
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
         <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.5, fontFamily: "var(--font-body, var(--font-outfit))" }}>{label}</div>

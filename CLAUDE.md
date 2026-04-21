@@ -107,6 +107,7 @@ On settle, if bill is linked to a customer, update their doc with `last_visit_da
 - **Incentive is always `Math.round(...)`** — at source (`updateStaffRow`) and at display. Ditto mat_incentive, staff_total_inc, totals.
 - **No-print class** — `.no-print` hides elements during `window.print()` (CSS in globals.css).
 - **Loaders** — every `if (loading) return <VLoader fullscreen label="..." />`. Don't write plain "Loading..." strings.
+- **Card glow** — `Card` and `StatCard` in `components/ui.jsx` render with a coloured halo (`box-shadow` + tinted border). Branch cards go further: green glow for `n > 0`, red for `n <= 0` (zero-net counts as not-profitable, not neutral). Keep the `n > 0` convention when adding new P&L-coloured surfaces — never `n >= 0`.
 
 ## Don'ts
 

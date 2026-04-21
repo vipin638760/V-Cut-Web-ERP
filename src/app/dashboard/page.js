@@ -1158,6 +1158,7 @@ function DraggableCardGrid({ branchData, isAdmin, isYearly, factor, cardOrder, s
               borderRight: isOver ? "1px solid rgba(var(--accent-rgb),0.3)" : "1px solid rgba(72,72,71,0.08)",
               borderBottom: isOver ? "1px solid rgba(var(--accent-rgb),0.3)" : "1px solid rgba(72,72,71,0.08)",
               borderLeft: `3px solid ${n > 0 ? "var(--green)" : "var(--red)"}`,
+              boxShadow: isOver ? "0 8px 24px rgba(var(--accent-rgb),0.25)" : n > 0 ? "0 0 18px rgba(74,222,128,.35)" : "0 0 18px rgba(248,113,113,.35)",
             }}
             onMouseEnter={ev => { if (!isDragging) ev.currentTarget.style.background = "var(--bg4)"; }}
             onMouseLeave={ev => { if (!isDragging && !isOver) ev.currentTarget.style.background = "var(--bg3)"; }}
