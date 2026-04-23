@@ -3,7 +3,7 @@ import { useEffect, useState, useRef } from "react";
 import { collection, onSnapshot, query, orderBy, where, getDocs, deleteDoc, doc, addDoc, updateDoc, writeBatch } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
-import { INR, branchIncomeInPeriod, makeFilterPrefix, periodLabel, proRataSalary, staffLeavesInMonth, staffStatusForMonth, MASK } from "@/lib/calculations";
+import { INR, branchIncomeInPeriod, makeFilterPrefix, periodLabel, proRataSalary, staffLeavesInMonth, staffStatusForMonth, parseLocalDate, MASK } from "@/lib/calculations";
 import { Icon, IconBtn, Pill, Card, PeriodWidget, ToggleGroup, TH, TD, Modal, SearchSelect, useConfirm, useToast, useSort } from "@/components/ui";
 import { useRouter } from "next/navigation";
 import VLoader from "@/components/VLoader";
@@ -2019,8 +2019,8 @@ export default function BranchesPage() {
             const mStart = new Date(yr, mo - 1, 1);
             const mEnd = new Date(yr, mo, 0);
             return (s) => {
-              const jd = s.join ? new Date(s.join) : null;
-              const ed = s.exit_date ? new Date(s.exit_date) : null;
+              const jd = parseLocalDate(s.join);
+              const ed = parseLocalDate(s.exit_date);
               const now = new Date();
               const isCurrent = now.getFullYear() === yr && now.getMonth() + 1 === mo;
               let capEnd = mEnd;

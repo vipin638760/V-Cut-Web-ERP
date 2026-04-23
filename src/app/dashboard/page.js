@@ -3,7 +3,7 @@ import { useEffect, useState, useRef, useMemo } from "react";
 import { collection, onSnapshot, query, orderBy, doc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
-import { INR, staffBillingInPeriod, makeFilterPrefix, periodLabel, proRataSalary, staffLeavesInMonth, staffStatusForMonth, staffIncentivesInPeriod, MASK } from "@/lib/calculations";
+import { INR, staffBillingInPeriod, makeFilterPrefix, periodLabel, proRataSalary, staffLeavesInMonth, staffStatusForMonth, staffIncentivesInPeriod, parseLocalDate, MASK } from "@/lib/calculations";
 import { PeriodWidget, ToggleGroup, Card, Pill, TH, TD, Icon, Modal, TabNav, ProgressBar, useToast } from "@/components/ui";
 import { useRouter } from "next/navigation";
 // ExcelJS is ~200KB — load only when Export is actually used.
@@ -246,8 +246,8 @@ export default function DashboardPage() {
       projectedSalary += activeStaffInMonth.reduce((s, st) => {
         const baseSal = Number(st.salary) || 0;
         if (!baseSal) return s;
-        const jd = st.join ? new Date(st.join) : null;
-        const ed = st.exit_date ? new Date(st.exit_date) : null;
+        const jd = parseLocalDate(st.join);
+        const ed = parseLocalDate(st.exit_date);
         const effStart = (jd && jd > mStart) ? jd : mStart;
         const effEnd = (ed && ed < mEnd) ? ed : mEnd;
         if (effStart > effEnd) return s;
@@ -964,9 +964,19 @@ export default function DashboardPage() {
       {(() => {
         const projectedToEarn = Math.max(0, tEProjected - tI);
         const surplus = tI - tEProjected;
+        // Days still outstanding between yesterday and month-end — drives the
+        // "N days salary" breakout in Projected Cost's sub label.
+        const nowD = new Date();
+        const isCurMo = filterMode === "month" && filterYear === nowD.getFullYear() && filterMonth === nowD.getMonth() + 1;
+        const daysInMonth = new Date(filterYear, filterMonth, 0).getDate();
+        const daysRemaining = isCurMo ? Math.max(0, daysInMonth - (nowD.getDate() - 1)) : 0;
+        const delta = tEProjected - tE;
+        const projSub = delta > 0 && daysRemaining > 0
+          ? `${INR(tE)} operating + ${daysRemaining}d salary ${INR(delta)}`
+          : `Month-end forecast${delta > 0 ? ` · +${INR(delta)}` : ""}`;
         return (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 16 }}>
-            <PremiumStatCard label="Projected Cost" value={INR(tEProjected)} sub={`Month-end forecast${tEProjected > tE ? ` · +${INR(tEProjected - tE)}` : ""}`} icon="trending" color="var(--orange)" />
+            <PremiumStatCard label="Projected Cost" value={INR(tEProjected)} sub={projSub} icon="trending" color="var(--orange)" />
             <PremiumStatCard
               label="Projected To Earn"
               value={projectedToEarn > 0 ? INR(projectedToEarn) : INR(0)}
@@ -974,7 +984,7 @@ export default function DashboardPage() {
                 ? `Revenue needed to break even at forecast`
                 : `Target met · ${INR(surplus)} surplus`}
               icon="pie"
-              color={projectedToEarn > 0 ? "var(--gold)" : "var(--green)"}
+              color={projectedToEarn > 0 ? "var(--purple, #c084fc)" : "var(--green)"}
             />
           </div>
         );

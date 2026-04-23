@@ -8,6 +8,13 @@ export const INR = (v) => { const n = Math.round(v || 0); return (n < 0 ? '-₹'
 export const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 export const MASK = '•••••';
 
+// Parse a YYYY-MM-DD string as *local* midnight. `new Date("2026-04-22")` is
+// UTC midnight, which in IST resolves to 05:30 on the same calendar date —
+// when compared against a locally-constructed date (e.g. `new Date(y, m, d)`)
+// this looks like "later" and breaks same-day join/exit comparisons (Ayan
+// joined Apr 22 but salary computed as 0 because effectiveStart > effectiveEnd).
+export const parseLocalDate = (ymd) => (ymd ? new Date(ymd + "T00:00") : null);
+
 /** Get staff salary for a given month from salary_history or fallback to base */
 export function getStaffSalaryForMonth(staffId, monthStr, salaryHistory, staffList) {
   const s = staffList?.find(x => x.id === staffId);
@@ -52,8 +59,8 @@ export function proRataSalary(st, monthStr, branches, salaryHistory, staffList, 
 
   const monthStart = new Date(yr, mo - 1, 1);
   const monthEnd = new Date(yr, mo, 0);
-  const joinDate = st.join ? new Date(st.join) : null;
-  const exitDate = st.exit_date ? new Date(st.exit_date) : null;
+  const joinDate = parseLocalDate(st.join);
+  const exitDate = parseLocalDate(st.exit_date);
 
   // For the current month, cap the effective end to yesterday.
   const now = new Date();
@@ -86,7 +93,7 @@ export function proRataSalary(st, monthStr, branches, salaryHistory, staffList, 
 /** Staff overall status — active/inactive relative to a given month */
 export function staffOverallStatus(st, forMonth) {
   if (!st.exit_date) return 'active';
-  const exit = new Date(st.exit_date);
+  const exit = parseLocalDate(st.exit_date);
   if (forMonth) {
     const [yr, mo] = forMonth.split('-').map(Number);
     return exit < new Date(yr, mo - 1, 1) ? 'inactive' : 'active';
@@ -120,8 +127,8 @@ export function staffStatusForMonth(st, monthStr, opts = {}) {
     }
   }
 
-  const joinDate = st.join ? new Date(st.join) : null;
-  const exitDate = st.exit_date ? new Date(st.exit_date) : null;
+  const joinDate = parseLocalDate(st.join);
+  const exitDate = parseLocalDate(st.exit_date);
 
   if (joinDate && joinDate > monthEnd) return { status: 'inactive', daysWorked: 0 };
   if (exitDate && exitDate < monthStart) return { status: 'inactive', daysWorked: 0 };
