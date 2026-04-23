@@ -228,13 +228,39 @@ export default function DashboardPage() {
     // so we do not cut it by active days here either.
     let actualSalary = 0;
     let actualLeaves = 0;
+    // Projected salary mirrors `actualSalary` but skips proRataSalary's yesterday cap
+    // so the current month is valued through month-end. Past months + year mode are
+    // unaffected (cap only applies to the active month).
+    let projectedSalary = 0;
     const startM = isYearly ? 1 : filterMonth;
     const endM   = isYearly ? factor : filterMonth;
     for (let m = startM; m <= endM; m++) {
       const mPrefix = `${filterYear}-${String(m).padStart(2, '0')}`;
+      const [yr, mo] = mPrefix.split('-').map(Number);
+      const daysInMo = new Date(yr, mo, 0).getDate();
+      const mStart = new Date(yr, mo - 1, 1);
+      const mEnd = new Date(yr, mo, 0);
       const activeStaffInMonth = staff.filter(s => s.branch_id === b.id && staffStatusForMonth(s, mPrefix).status !== 'inactive');
       actualSalary += activeStaffInMonth.reduce((s, st) => s + proRataSalary(st, mPrefix, branches, salHistory, staff, globalSettings), 0);
       actualLeaves += activeStaffInMonth.reduce((s, st) => s + staffLeavesInMonth(st.id, mPrefix, leaves), 0);
+      projectedSalary += activeStaffInMonth.reduce((s, st) => {
+        const baseSal = Number(st.salary) || 0;
+        if (!baseSal) return s;
+        const jd = st.join ? new Date(st.join) : null;
+        const ed = st.exit_date ? new Date(st.exit_date) : null;
+        const effStart = (jd && jd > mStart) ? jd : mStart;
+        const effEnd = (ed && ed < mEnd) ? ed : mEnd;
+        if (effStart > effEnd) return s;
+        const cal = Math.round((effEnd - effStart) / 86400000) + 1;
+        let q = b.type === 'unisex' ? 3 : 2;
+        if (b.type === 'mens' && globalSettings?.mens_leaves !== undefined) q = globalSettings.mens_leaves;
+        if (b.type === 'unisex' && globalSettings?.unisex_leaves !== undefined) q = globalSettings.unisex_leaves;
+        const proPaid = Math.ceil(q * cal / daysInMo);
+        const mL = staffLeavesInMonth(st.id, mPrefix, leaves);
+        const unpaid = Math.max(0, mL - proPaid);
+        const payable = Math.max(0, cal - unpaid);
+        return s + Math.round((baseSal / daysInMo) * payable);
+      }, 0);
     }
 
     // GST is derived from online revenue at the configured global rate so it
@@ -257,7 +283,10 @@ export default function DashboardPage() {
       staffCount: staff.filter(s => s.branch_id === b.id).length,
       vInc, vMatE, vOther, vPetrol,
       fShopRent, fRoomRent, fWifi, fElec,
-      actualSalary, actualLeaves,
+      actualSalary, actualLeaves, projectedSalary,
+      // Projected expense = what Operating Cost will be once the current month finishes —
+      // same formula as `e + totalGst` but uses the un-capped salary.
+      projectedExp: vInc + vMatE + vOther + fFixedTot + projectedSalary + totalGst,
       totalGst, factor
     };
   });
@@ -269,6 +298,7 @@ export default function DashboardPage() {
   // Total Expense card uses, so the two now agree.
   const tI  = branchData.reduce((s, d) => s + d.i, 0);
   const tE  = branchData.reduce((s, d) => s + d.e + d.totalGst, 0);
+  const tEProjected = branchData.reduce((s, d) => s + d.projectedExp, 0);
   const net = branchData.reduce((s, d) => s + d.n, 0);
 
   if (brFilter === "profit") branchData = branchData.filter(d => d.n >= 0);
@@ -926,6 +956,7 @@ export default function DashboardPage() {
         <PremiumStatCard label="Gross Revenue" value={INR(tI)} sub="Total turnover" icon="trending" color="var(--green)" />
         <PremiumStatCard label="Operating Cost" value={INR(tE)} sub="Salary + Overheads" icon="wallet" color="var(--red)"
           onClick={() => router.push("/dashboard/branches?view=summary")} linkLabel="See expense breakdown" />
+        <PremiumStatCard label="Projected Cost" value={INR(tEProjected)} sub={`Month-end forecast${tEProjected > tE ? ` · +${INR(tEProjected - tE)}` : ""}`} icon="trending" color="var(--orange)" />
         <PremiumStatCard label="Net P&L" value={INR(net)} sub="Bottom line earnings" icon="pie" color={net >= 0 ? "var(--green)" : "var(--red)"} />
         <PremiumStatCard label="Service Force" value={staff.length} sub="Active stylists" icon="users" color="var(--accent)" />
       </div>
