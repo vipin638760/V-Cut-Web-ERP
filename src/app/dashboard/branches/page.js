@@ -1129,6 +1129,28 @@ export default function BranchesPage() {
                       ))}
                     </div>
                   )}
+
+                  {/* Total Business — sum of billing across present + loan staff for the selected day. */}
+                  {(() => {
+                    const totalBusiness =
+                      activeRoster.present.reduce((s, p) => s + (p.billing || 0), 0) +
+                      activeRoster.loan.reduce((s, p) => s + (p.billing || 0), 0);
+                    const headCount = activeRoster.present.length + activeRoster.loan.length;
+                    if (headCount === 0 && totalBusiness === 0) return null;
+                    return (
+                      <div style={{ marginTop: 14, padding: "12px 14px", borderRadius: 12, background: "linear-gradient(135deg, rgba(74,222,128,0.08), rgba(74,222,128,0.02))", border: "1px solid rgba(74,222,128,0.3)", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+                        <div>
+                          <div style={{ fontSize: 10, fontWeight: 800, color: "var(--green)", textTransform: "uppercase", letterSpacing: 1.2 }}>Total Business</div>
+                          <div style={{ fontSize: 10, color: "var(--text3)", marginTop: 2 }}>
+                            {headCount} staff billed
+                          </div>
+                        </div>
+                        <div style={{ fontSize: 18, fontWeight: 800, color: "var(--green)", fontFamily: "var(--font-headline, var(--font-outfit))" }}>
+                          {INR(totalBusiness)}
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
               ) : (
                 <div style={{ padding: 30, textAlign: "center", color: "var(--text3)", fontSize: 12, background: "var(--bg3)", border: "1px dashed var(--border2)", borderRadius: 12 }}>
@@ -1284,89 +1306,114 @@ export default function BranchesPage() {
   ) : null;
 
   // ── Admin-only Salary Breakdown modal ──────────────────────────────
-  const salaryDetailEl = salaryDetail ? (
-    <Modal isOpen={!!salaryDetail} onClose={() => setSalaryDetail(null)} title="Salary Breakdown" width={620}>
-      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 10 }}>
-          <div>
-            <div style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>
-              {salaryDetail.branchName}
+  const salaryDetailEl = salaryDetail ? (() => {
+    const statusPill = (status) => {
+      const map = {
+        present: { label: "Present", bg: "rgba(74,222,128,0.12)", fg: "var(--green)", bd: "rgba(74,222,128,0.35)" },
+        paid_leave: { label: "Paid Leave", bg: "rgba(96,165,250,0.12)", fg: "var(--blue)", bd: "rgba(96,165,250,0.35)" },
+        absent: { label: "Absent", bg: "rgba(248,113,113,0.12)", fg: "var(--red)", bd: "rgba(248,113,113,0.4)" },
+        not_active: { label: "Not Active", bg: "rgba(156,163,175,0.08)", fg: "var(--text3)", bd: "rgba(156,163,175,0.25)" },
+      };
+      const c = map[status] || map.present;
+      return (
+        <span style={{ display: "inline-block", padding: "2px 8px", borderRadius: 10, fontSize: 9, fontWeight: 800, letterSpacing: 0.4, textTransform: "uppercase", background: c.bg, color: c.fg, border: `1px solid ${c.bd}` }}>{c.label}</span>
+      );
+    };
+    const isDaily = salaryDetail.mode === "month";
+    return (
+      <Modal isOpen={!!salaryDetail} onClose={() => setSalaryDetail(null)} title="Salary Breakdown" width={700}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 10 }}>
+            <div>
+              <div style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>
+                {salaryDetail.branchName}
+              </div>
+              <div style={{ fontSize: 15, fontWeight: 800, color: "var(--gold)", marginTop: 2 }}>
+                {salaryDetail.label}
+              </div>
             </div>
-            <div style={{ fontSize: 15, fontWeight: 800, color: "var(--gold)", marginTop: 2 }}>
-              {salaryDetail.label}
+            <div style={{ textAlign: "right" }}>
+              <div style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>
+                {isDaily ? "This day's salary (Σ day shares)" : "Monthly salary"}
+              </div>
+              <div style={{ fontSize: 20, fontWeight: 800, color: "var(--blue)", marginTop: 2 }}>
+                {INR(Math.round(isDaily ? salaryDetail.dayTotal : salaryDetail.monthlyTotal))}
+              </div>
             </div>
           </div>
-          <div style={{ textAlign: "right" }}>
-            <div style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>
-              {salaryDetail.mode === "month" ? "This day's salary share" : "Monthly salary"}
+
+          {isDaily && (
+            <div style={{ padding: "10px 14px", borderRadius: 10, background: "var(--bg3)", border: "1px solid var(--border)", fontSize: 12, color: "var(--text2)", lineHeight: 1.5 }}>
+              <div style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>How each staff&apos;s day share is computed</div>
+              Day share = <strong>base salary ÷ {salaryDetail.daysInMonth}</strong> when the employee is
+              <strong style={{ color: "var(--green)" }}> present</strong> or on
+              <strong style={{ color: "var(--blue)" }}> paid leave</strong>. Drops to
+              <strong style={{ color: "var(--red)" }}> ₹0</strong> on unpaid-leave / absent days.
             </div>
-            <div style={{ fontSize: 20, fontWeight: 800, color: "var(--blue)", marginTop: 2 }}>
-              {INR(salaryDetail.salary)}
-            </div>
+          )}
+
+          <div style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>
+            Active staff ({salaryDetail.staffRows.length})
           </div>
-        </div>
 
-        {salaryDetail.mode === "month" && (
-          <div style={{ padding: "10px 14px", borderRadius: 10, background: "var(--bg3)", border: "1px solid var(--border)", fontSize: 12, color: "var(--text2)", lineHeight: 1.5 }}>
-            <div style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>How this day&apos;s ₹ was computed</div>
-            Monthly salary total for this branch <strong style={{ color: "var(--blue)" }}>{INR(salaryDetail.monthlyTotal)}</strong> ÷ <strong>{salaryDetail.daysInMonth}</strong> days in month
-            {" = "}
-            <strong style={{ color: "var(--blue)" }}>{INR(Math.round(salaryDetail.monthlyTotal / salaryDetail.daysInMonth))}</strong> per day.
-          </div>
-        )}
-
-        <div style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>
-          Active staff ({salaryDetail.staffRows.length}) — pro-rated for the month
-        </div>
-
-        <Card style={{ padding: 0, overflowX: "auto", maxHeight: "50vh" }}>
-          <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
-            <thead>
-              <tr style={{ background: "var(--bg4)" }}>
-                <TH>Staff</TH>
-                <TH>Role</TH>
-                <TH right>Base Salary</TH>
-                <TH right>Pro-rated</TH>
-                {salaryDetail.mode === "month" && <TH right>Day Share</TH>}
-              </tr>
-            </thead>
-            <tbody>
-              {salaryDetail.staffRows.length === 0 && (
-                <tr><td colSpan={salaryDetail.mode === "month" ? 5 : 4} style={{ padding: 20, textAlign: "center", color: "var(--text3)", fontSize: 12 }}>No active staff in this month.</td></tr>
-              )}
-              {salaryDetail.staffRows.map(r => (
-                <tr key={r.id} style={{ borderBottom: "1px solid var(--border)" }}>
-                  <TD style={{ fontWeight: 600 }}>{r.name}</TD>
-                  <TD style={{ color: "var(--text3)", fontSize: 11 }}>{r.role || "—"}</TD>
-                  <TD right style={{ color: "var(--text3)" }}>{INR(r.base)}</TD>
-                  <TD right style={{ fontWeight: 700, color: "var(--blue)" }}>{INR(Math.round(r.proRated))}</TD>
-                  {salaryDetail.mode === "month" && (
-                    <TD right style={{ color: "var(--accent)" }}>{INR(Math.round(r.proRated / salaryDetail.daysInMonth))}</TD>
-                  )}
+          <Card style={{ padding: 0, overflowX: "auto", maxHeight: "50vh" }}>
+            <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
+              <thead>
+                <tr style={{ background: "var(--bg4)" }}>
+                  <TH>Staff</TH>
+                  <TH>Role</TH>
+                  <TH right>Base Salary</TH>
+                  <TH right>Pro-rated</TH>
+                  {isDaily && <TH>Status</TH>}
+                  {isDaily && <TH right>Day Share</TH>}
                 </tr>
-              ))}
-              {salaryDetail.staffRows.length > 0 && (
-                <tr style={{ background: "var(--bg3)", borderTop: "2px solid var(--border2)", fontWeight: 800 }}>
-                  <TD style={{ color: "var(--gold)" }}>TOTAL</TD>
-                  <TD></TD>
-                  <TD right style={{ color: "var(--text2)" }}>{INR(salaryDetail.staffRows.reduce((s, r) => s + r.base, 0))}</TD>
-                  <TD right style={{ color: "var(--blue)" }}>{INR(Math.round(salaryDetail.monthlyTotal))}</TD>
-                  {salaryDetail.mode === "month" && (
-                    <TD right style={{ color: "var(--accent)" }}>{INR(Math.round(salaryDetail.monthlyTotal / salaryDetail.daysInMonth))}</TD>
-                  )}
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </Card>
+              </thead>
+              <tbody>
+                {salaryDetail.staffRows.length === 0 && (
+                  <tr><td colSpan={isDaily ? 6 : 4} style={{ padding: 20, textAlign: "center", color: "var(--text3)", fontSize: 12 }}>No active staff in this month.</td></tr>
+                )}
+                {salaryDetail.staffRows.map(r => {
+                  const isMuted = r.dayStatus === 'absent' || r.dayStatus === 'not_active';
+                  return (
+                    <tr key={r.id} style={{ borderBottom: "1px solid var(--border)" }}>
+                      <TD style={{ fontWeight: 600, color: isMuted ? "var(--text3)" : "var(--text)", textDecoration: isMuted ? "line-through" : "none" }}>{r.name}</TD>
+                      <TD style={{ color: "var(--text3)", fontSize: 11 }}>{r.role || "—"}</TD>
+                      <TD right style={{ color: "var(--text3)" }}>{INR(r.base)}</TD>
+                      <TD right style={{ fontWeight: 700, color: "var(--blue)" }}>{INR(Math.round(r.proRated))}</TD>
+                      {isDaily && <TD>{statusPill(r.dayStatus)}</TD>}
+                      {isDaily && (
+                        <TD right style={{ color: r.dayShare > 0 ? "var(--accent)" : "var(--red)", fontWeight: r.dayShare > 0 ? 700 : 500 }}>
+                          {r.dayShare > 0 ? INR(Math.round(r.dayShare)) : "—"}
+                        </TD>
+                      )}
+                    </tr>
+                  );
+                })}
+                {salaryDetail.staffRows.length > 0 && (
+                  <tr style={{ background: "var(--bg3)", borderTop: "2px solid var(--border2)", fontWeight: 800 }}>
+                    <TD style={{ color: "var(--gold)" }}>TOTAL</TD>
+                    <TD></TD>
+                    <TD right style={{ color: "var(--text2)" }}>{INR(salaryDetail.staffRows.reduce((s, r) => s + r.base, 0))}</TD>
+                    <TD right style={{ color: "var(--blue)" }}>{INR(Math.round(salaryDetail.monthlyTotal))}</TD>
+                    {isDaily && <TD></TD>}
+                    {isDaily && (
+                      <TD right style={{ color: "var(--accent)" }}>{INR(Math.round(salaryDetail.dayTotal))}</TD>
+                    )}
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </Card>
 
-        <div style={{ fontSize: 11, color: "var(--text3)", lineHeight: 1.5 }}>
-          Pro-rated uses each staff&apos;s join/exit dates, mid-month transfers, and any approved unpaid leaves.
-          Staff marked inactive for the entire month are excluded.
+          <div style={{ fontSize: 11, color: "var(--text3)", lineHeight: 1.5 }}>
+            Pro-rated uses each staff&apos;s join/exit dates, mid-month transfers, and approved unpaid leaves.
+            Leave quota is the branch type&apos;s monthly allowance (overridden by global settings if set); the
+            first N approved leave days of the month are paid, anything beyond is unpaid.
+          </div>
         </div>
-      </div>
-    </Modal>
-  ) : null;
+      </Modal>
+    );
+  })() : null;
 
   // ── Branch Detail View ───────────────────────────────────────────
   if (selectedBranch) {
@@ -1428,7 +1475,7 @@ export default function BranchesPage() {
           // column so actual Salary totals stay comparable, and Est. Expense captures the whole day's projection.
           const estExpense = dFixedFees + dSalaryShare;
           breakdownStats.push({
-            label,
+            label, date: dayPrefix,
             income: 0, incentives: 0, material: 0, lumpsumMat: 0, others: 0,
             shopRent: dShopRent, roomRent: dRoomRent, elec: dElec, wifi: dWifi,
             salary: 0, futureSalary: dSalaryShare,
@@ -1456,7 +1503,7 @@ export default function BranchesPage() {
         const dExpenses = dIncExp + dMatExp + dOtherExp + dFixedFees + dSalaryShare + dGst;
 
         breakdownStats.push({
-          label,
+          label, date: dayPrefix,
           income: dIncome,
           incentives: dIncExp,
           material: dAllocMat,
@@ -1910,8 +1957,35 @@ export default function BranchesPage() {
                 let billing = 0, matSale = 0, tips = 0, staffTInc = 0;
 
                 // Salary & Leaves logic
-                let curSalary = 0, leavesTaken = 0, daysWorked = 0, paidLeaves = 0, lop = 0;
+                let curSalary = 0, leavesTaken = 0, daysWorked = 0, paidLeaves = 0, lop = 0, payrollDays = 0;
                 const quotaPerMonth = (b.type === 'unisex' ? globalSettings?.unisex_leaves : globalSettings?.mens_leaves) || (b.type === 'unisex' ? 3 : 2);
+
+                // Mirror proRataSalary's internal window (cap current month to yesterday, subtract LOP).
+                // Shown under the salary cell so the number audit-trails: salary ≈ (monthly / daysInMo) × payrollDays.
+                const computePayrollDays = (mPrefix) => {
+                  const [yr, mo] = mPrefix.split('-').map(Number);
+                  const daysInMo = new Date(yr, mo, 0).getDate();
+                  const mStart = new Date(yr, mo - 1, 1);
+                  const mEnd = new Date(yr, mo, 0);
+                  const jd = s.join ? new Date(s.join) : null;
+                  const ed = s.exit_date ? new Date(s.exit_date) : null;
+                  const now = new Date();
+                  const isCurrent = now.getFullYear() === yr && now.getMonth() + 1 === mo;
+                  let capEnd = mEnd;
+                  if (isCurrent) {
+                    const y = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+                    if (y < mStart) return 0;
+                    if (y < mEnd) capEnd = y;
+                  }
+                  const effStart = (jd && jd > mStart) ? jd : mStart;
+                  const effEnd = (ed && ed < capEnd) ? ed : capEnd;
+                  if (effStart > effEnd) return 0;
+                  const cal = Math.round((effEnd - effStart) / 86400000) + 1;
+                  const mLeaves = staffLeavesInMonth(s.id, mPrefix, leaves);
+                  const proPaid = Math.ceil(quotaPerMonth * cal / daysInMo);
+                  const unpaid = Math.max(0, mLeaves - proPaid);
+                  return Math.max(0, cal - unpaid);
+                };
 
                 if (filterMode === 'month') {
                   curSalary = proRataSalary(s, filterPrefix, branches, salHistory, staff, globalSettings);
@@ -1921,6 +1995,7 @@ export default function BranchesPage() {
                   // prevents a staff with 2 leaves in two different months from being marked LOP at a 3-leave quota.
                   paidLeaves = Math.min(leavesTaken, quotaPerMonth);
                   lop = Math.max(0, leavesTaken - quotaPerMonth);
+                  payrollDays = computePayrollDays(filterPrefix);
                 } else {
                   for (let m = 1; m <= endMonth; m++) {
                     const mPrefix = `${filterYear}-${String(m).padStart(2, '0')}`;
@@ -1930,6 +2005,7 @@ export default function BranchesPage() {
                     paidLeaves += Math.min(mLeaves, quotaPerMonth);
                     lop += Math.max(0, mLeaves - quotaPerMonth);
                     daysWorked += staffStatusForMonth(s, mPrefix).daysWorked || 0;
+                    payrollDays += computePayrollDays(mPrefix);
                   }
                 }
 
@@ -1963,7 +2039,14 @@ export default function BranchesPage() {
                     <TD right style={{ fontWeight: 700, color: "var(--blue, #60a5fa)" }}>{daysWorked}</TD>
                     <TD right style={{ fontWeight: 700, color: paidLeaves > 0 ? "var(--green)" : "var(--text3)" }}>{paidLeaves}</TD>
                     <TD right style={{ fontWeight: 700, color: lop > 0 ? "var(--red)" : "var(--text3)" }}>{lop}</TD>
-                    {isAdmin && <TD right style={{ color: "var(--gold)", fontWeight: 600 }}>{INR(curSalary)}</TD>}
+                    {isAdmin && (
+                      <TD right style={{ color: "var(--gold)", fontWeight: 600 }}>
+                        {INR(curSalary)}
+                        <div style={{ fontSize: 10, color: "var(--text3)", marginTop: 2, fontWeight: 600 }} title="Payable days used for the pro-rata calc (current month caps at yesterday, LOP subtracted)">
+                          {payrollDays} day{payrollDays === 1 ? "" : "s"} paid
+                        </div>
+                      </TD>
+                    )}
                     <TD right>
                       <span style={{ color: pct >= 100 ? "var(--green)" : "var(--blue)", fontWeight: 600 }}>{INR(billing)}</span>
                       <div style={{ height: 4, background: "var(--border2)", borderRadius: 4, marginTop: 4, overflow: "hidden", minWidth: 60 }}>
@@ -2114,14 +2197,61 @@ export default function BranchesPage() {
                                 if (!monthPrefix) return;
                                 const daysInMonth = new Date(Number(monthPrefix.slice(0, 4)), Number(monthPrefix.slice(5, 7)), 0).getDate();
                                 const monthStaff = staff.filter(s => s.branch_id === b.id && staffStatusForMonth(s, monthPrefix).status !== 'inactive');
-                                const staffRows = monthStaff.map(s => ({
-                                  id: s.id,
-                                  name: s.name,
-                                  role: s.role || "",
-                                  base: Number(s.salary) || 0,
-                                  proRated: proRataSalary(s, monthPrefix, branches, salHistory, staff, globalSettings),
-                                })).sort((a, z) => z.proRated - a.proRated);
+                                // For daily mode we also work out per-staff presence on THAT specific day,
+                                // so each row's "Day Share" reflects base/30 when present (or on paid leave)
+                                // and 0 when absent — matching the salon's actual payroll arithmetic.
+                                const specificDate = filterMode === "month" ? m.date : null;
+                                const staffRows = monthStaff.map(s => {
+                                  const base = Number(s.salary) || 0;
+                                  const proRated = proRataSalary(s, monthPrefix, branches, salHistory, staff, globalSettings);
+                                  let dayStatus = 'present';
+                                  let dayShare = base / daysInMonth;
+                                  if (specificDate) {
+                                    const dateObj = new Date(specificDate + "T00:00");
+                                    const joinDate = s.join ? new Date(s.join) : null;
+                                    const exitDate = s.exit_date ? new Date(s.exit_date) : null;
+                                    if ((joinDate && dateObj < joinDate) || (exitDate && dateObj > exitDate)) {
+                                      dayStatus = 'not_active';
+                                      dayShare = 0;
+                                    } else {
+                                      // Approved leaves this month for this staff, ordered — first N (per branch type quota)
+                                      // are paid; anything beyond is unpaid.
+                                      const staffLeaves = leaves.filter(l => l.staff_id === s.id && l.status === 'approved' && l.date?.startsWith(monthPrefix))
+                                        .sort((x, y) => (x.date || '').localeCompare(y.date || ''));
+                                      const branch = branches.find(x => x.id === s.branch_id);
+                                      let quota = branch?.type === 'unisex' ? 3 : 2;
+                                      if (branch?.type === 'mens' && globalSettings?.mens_leaves !== undefined) quota = globalSettings.mens_leaves;
+                                      if (branch?.type === 'unisex' && globalSettings?.unisex_leaves !== undefined) quota = globalSettings.unisex_leaves;
+                                      // Running count of paid-leave days as we walk ordered leaves — once quota is hit,
+                                      // the next day of leave is unpaid.
+                                      let paidUsed = 0;
+                                      let thisLeave = null;
+                                      let thisLeavePaid = false;
+                                      for (const l of staffLeaves) {
+                                        const days = Number(l.days) || 1;
+                                        const paidHere = Math.min(days, Math.max(0, quota - paidUsed));
+                                        if (l.date === specificDate) {
+                                          thisLeave = l;
+                                          thisLeavePaid = paidHere > 0;
+                                          break;
+                                        }
+                                        paidUsed += paidHere;
+                                      }
+                                      if (thisLeave) {
+                                        if (thisLeavePaid) {
+                                          dayStatus = 'paid_leave';
+                                          dayShare = base / daysInMonth;
+                                        } else {
+                                          dayStatus = 'absent';
+                                          dayShare = 0;
+                                        }
+                                      }
+                                    }
+                                  }
+                                  return { id: s.id, name: s.name, role: s.role || "", base, proRated, dayStatus, dayShare };
+                                }).sort((a, z) => z.dayShare - a.dayShare || z.proRated - a.proRated);
                                 const monthlyTotal = staffRows.reduce((s, r) => s + r.proRated, 0);
+                                const dayTotal = staffRows.reduce((s, r) => s + r.dayShare, 0);
                                 setSalaryDetail({
                                   branchName: b.name,
                                   label: m.label,
@@ -2129,6 +2259,7 @@ export default function BranchesPage() {
                                   daysInMonth,
                                   monthlyTotal,
                                   salary: m.salary,
+                                  dayTotal,
                                   staffRows,
                                 });
                               }}
