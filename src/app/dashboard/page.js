@@ -355,6 +355,47 @@ export default function DashboardPage() {
     })
     .sort((a, b) => b.sale - a.sale);
 
+  // ── Top Performers reconciliation ────────────────────────────────────
+  // Gross Revenue = online + cash + sum(sb.material), across all entries in period.
+  // Total Billing (Top Performers) = sum of sb.billing for staff that exist
+  // *and* pass the branch-type filter. The difference is broken down so the
+  // gap is explainable rather than a mystery.
+  const staffIdSet = new Set(staff.map(s => s.id));
+  const visibleStaffIdSet = new Set(staffData.map(r => r.s.id));
+  const periodEntries = entries.filter(e => inPeriod(e.date));
+  let reconMaterial = 0;
+  let reconOnlineCash = 0;
+  let reconBillingAll = 0;
+  let reconBillingAttributed = 0;
+  let reconBillingOrphaned = 0;        // staff_id has no matching staff doc
+  let reconBillingFilteredOut = 0;     // matches a real staff but filtered out by type
+  periodEntries.forEach(e => {
+    reconOnlineCash += (e.online || 0) + (e.cash || 0);
+    (e.staff_billing || []).forEach(sb => {
+      const bill = Number(sb.billing) || 0;
+      reconMaterial += Number(sb.material) || 0;
+      reconBillingAll += bill;
+      if (sb.staff_id && visibleStaffIdSet.has(sb.staff_id)) reconBillingAttributed += bill;
+      else if (sb.staff_id && staffIdSet.has(sb.staff_id)) reconBillingFilteredOut += bill;
+      else reconBillingOrphaned += bill;
+    });
+  });
+  const reconGross = reconOnlineCash + reconMaterial;
+  // Anything paid that didn't end up in any staff_billing[].billing row —
+  // tips, rounding, services without a stylist split.
+  const reconUnattributed = Math.max(0, reconOnlineCash - reconBillingAll);
+  const recon = {
+    gross: reconGross,
+    attributed: reconBillingAttributed,
+    diff: reconGross - reconBillingAttributed,
+    material: reconMaterial,
+    orphaned: reconBillingOrphaned,
+    filteredOut: reconBillingFilteredOut,
+    unattributed: reconUnattributed,
+    onlineCash: reconOnlineCash,
+    billingAll: reconBillingAll,
+  };
+
   if (loading) return (
     <div style={{ textAlign: "center", color: "var(--gold)", fontWeight: 700, padding: 40 }}>
       Loading Dashboard...
@@ -1104,6 +1145,7 @@ export default function DashboardPage() {
             setStaffView={setStaffView}
             staffChartLimit={staffChartLimit}
             setStaffChartLimit={setStaffChartLimit}
+            recon={recon}
           />
         )}
       </div>
@@ -1332,7 +1374,8 @@ function CompactStat({ label, val, col, bold }) {
 // ─── Daily business bar chart — x: day-of-month, y: total business ────────
 
 // ─── Top Performers: chart + table + KPI strip ────────────────────────────────
-function TopPerformersSection({ staffData, branchesById, brTypeFilter, staffView, setStaffView, staffChartLimit, setStaffChartLimit }) {
+function TopPerformersSection({ staffData, branchesById, brTypeFilter, staffView, setStaffView, staffChartLimit, setStaffChartLimit, recon }) {
+  const [showRecon, setShowRecon] = useState(false);
   const totalBilling = staffData.reduce((s, r) => s + (r.sale || 0), 0);
   const nonZero = staffData.filter(r => (r.sale || 0) > 0);
   const avg = nonZero.length ? Math.round(totalBilling / nonZero.length) : 0;
@@ -1378,6 +1421,50 @@ function TopPerformersSection({ staffData, branchesById, brTypeFilter, staffView
         <MiniKPI label="Avg per Active Stylist" value={INR(avg)} color="var(--accent)" sub="Excludes zero-billing" />
         <MiniKPI label={`Top ${topN} Share`} value={`${Math.round(topNShare * 100)}%`} color="var(--blue, #60a5fa)" sub={`${INR(chartRows.reduce((s, r) => s + r.sale, 0))} of ${INR(totalBilling)}`} />
       </div>
+
+      {/* Reconciliation banner — expands to an exact break-up of the
+          Gross Revenue ⇄ Total Billing gap. */}
+      {recon && recon.diff !== 0 && (
+        <div style={{ borderRadius: 10, border: "1px dashed var(--border2)", background: "var(--bg3)" }}>
+          <button onClick={() => setShowRecon(v => !v)}
+            style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", background: "transparent", border: "none", color: "var(--text2)", cursor: "pointer", fontSize: 12, textAlign: "left" }}>
+            <span>
+              <span style={{ fontSize: 10, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, marginRight: 8 }}>Gross Revenue ↔ Total Billing</span>
+              <span style={{ color: "var(--green)", fontWeight: 700 }}>{INR(recon.gross)}</span>
+              <span style={{ color: "var(--text3)", margin: "0 6px" }}>−</span>
+              <span style={{ color: "var(--accent)", fontWeight: 700 }}>{INR(recon.attributed)}</span>
+              <span style={{ color: "var(--text3)", margin: "0 6px" }}>=</span>
+              <span style={{ color: recon.diff >= 0 ? "var(--orange)" : "var(--red)", fontWeight: 800 }}>{recon.diff >= 0 ? INR(recon.diff) : `-${INR(Math.abs(recon.diff))}`}</span>
+            </span>
+            <span style={{ fontSize: 10, color: "var(--accent)", fontWeight: 800, textTransform: "uppercase", letterSpacing: 1 }}>
+              {showRecon ? "Hide ▲" : "Break down ▼"}
+            </span>
+          </button>
+          {showRecon && (
+            <div style={{ padding: "0 14px 14px", borderTop: "1px solid var(--border)" }}>
+              <div style={{ marginTop: 10, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 8 }}>
+                <ReconRow label="Material sales" value={recon.material} hint="In Gross Revenue; excluded from stylist billing" color="#c084fc" />
+                <ReconRow label="Unattributed service pay" value={recon.unattributed} hint="online + cash left over after summing every staff_billing[].billing row — tips, walk-ins without a staff split, rounding" color="var(--orange)" />
+                <ReconRow label="Orphaned billing" value={recon.orphaned} hint="staff_billing rows whose staff_id no longer matches any staff record" color="var(--red)" />
+                {recon.filteredOut > 0 && (
+                  <ReconRow label={`Filtered out (${brTypeFilter})`} value={recon.filteredOut} hint="Real staff hidden by the Mens / Unisex filter" color="var(--text3)" />
+                )}
+              </div>
+              <div style={{ marginTop: 10, padding: "8px 12px", borderRadius: 8, background: "var(--bg4)", fontSize: 11, color: "var(--text2)", lineHeight: 1.5 }}>
+                <strong style={{ color: "var(--text)" }}>Check:&nbsp;</strong>
+                Material {INR(recon.material)} + Unattributed {INR(recon.unattributed)} + Orphaned {INR(recon.orphaned)}
+                {recon.filteredOut > 0 ? ` + Filtered ${INR(recon.filteredOut)}` : ""}
+                {" = "}
+                <strong style={{ color: "var(--orange)" }}>{INR(recon.material + recon.unattributed + recon.orphaned + recon.filteredOut)}</strong>
+                {(recon.material + recon.unattributed + recon.orphaned + recon.filteredOut) === recon.diff
+                  ? <span style={{ color: "var(--green)", fontWeight: 700 }}> ✓ matches the gap</span>
+                  : <span style={{ color: "var(--red)", fontWeight: 700 }}> (residual {INR(recon.diff - (recon.material + recon.unattributed + recon.orphaned + recon.filteredOut))} = rounding on per-row totals)</span>
+                }
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {staffView === "chart" ? (
         <Card style={{ padding: 16 }}>
@@ -1462,6 +1549,18 @@ function TopPerformersSection({ staffData, branchesById, brTypeFilter, staffView
           </table>
         </Card>
       )}
+    </div>
+  );
+}
+
+function ReconRow({ label, value, hint, color }) {
+  return (
+    <div style={{ padding: "8px 10px", borderRadius: 8, background: "var(--bg4)", border: "1px solid var(--border)" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
+        <span style={{ fontSize: 11, fontWeight: 700, color: "var(--text2)" }}>{label}</span>
+        <span style={{ fontSize: 13, fontWeight: 800, color: color || "var(--text)" }}>{INR(value || 0)}</span>
+      </div>
+      {hint && <div style={{ fontSize: 10, color: "var(--text3)", marginTop: 2, lineHeight: 1.4 }}>{hint}</div>}
     </div>
   );
 }
