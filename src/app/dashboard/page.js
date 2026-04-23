@@ -1227,23 +1227,31 @@ function CompactStat({ label, val, col, bold }) {
 
 function DailyBusinessChart({ entries, filterYear, filterMonth }) {
   const [hover, setHover] = useState(null);
+  const [showAvg, setShowAvg] = useState(false);
   const prefix = `${filterYear}-${String(filterMonth).padStart(2, "0")}`;
   const daysInMonth = new Date(filterYear, filterMonth, 0).getDate();
   const NOW = new Date();
   const todayStr = `${NOW.getFullYear()}-${String(NOW.getMonth() + 1).padStart(2, "0")}-${String(NOW.getDate()).padStart(2, "0")}`;
 
-  // One walk over entries: accumulate day-level network totals
+  // Split cash vs non-cash so the stacked bar shows the mix at a glance.
+  // Non-cash bucket = online + material sale (the "digital + upsell" portion).
   const byDay = new Array(daysInMonth).fill(0);
+  const byDayCash = new Array(daysInMonth).fill(0);
+  const byDayNonCash = new Array(daysInMonth).fill(0);
   entries.forEach(e => {
     if (!e.date || !e.date.startsWith(prefix)) return;
     const dIdx = Number(e.date.slice(8, 10)) - 1;
     if (dIdx < 0 || dIdx >= daysInMonth) return;
     const matSale = (e.staff_billing || []).reduce((s, sb) => s + (sb.material || 0), 0);
+    byDayCash[dIdx] += (e.cash || 0);
+    byDayNonCash[dIdx] += (e.online || 0) + matSale;
     byDay[dIdx] += (e.online || 0) + (e.cash || 0) + matSale;
   });
 
   const max = Math.max(1, ...byDay);
   const totalBusiness = byDay.reduce((s, v) => s + v, 0);
+  const totalCash = byDayCash.reduce((s, v) => s + v, 0);
+  const totalNonCash = byDayNonCash.reduce((s, v) => s + v, 0);
   const workingDays = byDay.filter(v => v > 0).length;
   const avg = workingDays ? Math.round(totalBusiness / workingDays) : 0;
   const bestIdx = byDay.indexOf(Math.max(...byDay));
@@ -1271,10 +1279,18 @@ function DailyBusinessChart({ entries, filterYear, filterMonth }) {
           <div style={{ fontSize: 11, fontWeight: 800, color: "var(--accent)", textTransform: "uppercase", letterSpacing: 2 }}>Daily Business</div>
           <div style={{ fontSize: 18, fontWeight: 800, color: "var(--gold)", fontFamily: "var(--font-headline, var(--font-outfit))", marginTop: 2 }}>{monthLabel}</div>
         </div>
-        <div style={{ display: "flex", gap: 20, alignItems: "center" }}>
+        <div style={{ display: "flex", gap: 20, alignItems: "center", flexWrap: "wrap" }}>
           <div style={{ textAlign: "right" }}>
             <div style={{ fontSize: 9, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, fontWeight: 700 }}>Total</div>
             <div style={{ fontSize: 15, fontWeight: 800, color: "var(--green)" }}>{INR(totalBusiness)}</div>
+          </div>
+          <div style={{ textAlign: "right" }}>
+            <div style={{ fontSize: 9, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, fontWeight: 700 }}>Cash / Online+Mat</div>
+            <div style={{ fontSize: 13, fontWeight: 800 }}>
+              <span style={{ color: "#c084fc" }}>{INR(totalCash)}</span>
+              <span style={{ color: "var(--text3)", margin: "0 4px" }}>·</span>
+              <span style={{ color: "var(--blue)" }}>{INR(totalNonCash)}</span>
+            </div>
           </div>
           <div style={{ textAlign: "right" }}>
             <div style={{ fontSize: 9, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, fontWeight: 700 }}>Daily Avg</div>
@@ -1284,6 +1300,10 @@ function DailyBusinessChart({ entries, filterYear, filterMonth }) {
             <div style={{ fontSize: 9, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, fontWeight: 700 }}>Best Day</div>
             <div style={{ fontSize: 15, fontWeight: 800, color: "var(--green)" }}>{byDay[bestIdx] > 0 ? `${bestIdx + 1} · ${INR(byDay[bestIdx])}` : "—"}</div>
           </div>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer", padding: "6px 10px", background: showAvg ? "rgba(96,165,250,0.12)" : "var(--bg3)", border: `1px solid ${showAvg ? "rgba(96,165,250,0.4)" : "var(--border)"}`, borderRadius: 8, fontSize: 10, fontWeight: 700, color: showAvg ? "var(--blue)" : "var(--text3)", textTransform: "uppercase", letterSpacing: 1, userSelect: "none" }}>
+            <input type="checkbox" checked={showAvg} onChange={e => setShowAvg(e.target.checked)} style={{ accentColor: "var(--blue, #60a5fa)", cursor: "pointer" }} />
+            Avg line
+          </label>
         </div>
       </div>
 
@@ -1304,31 +1324,44 @@ function DailyBusinessChart({ entries, filterYear, filterMonth }) {
                 </g>
               );
             })}
-            {/* Bars — priority: top day (green) > weekend (orange) > today > default */}
+            {/* Stacked bars — cash on bottom (purple demarcation), online+material on top
+                using the existing priority palette (best > weekend > today > default). */}
             {byDay.map((v, i) => {
               const x = LEFT + i * (BAR_W + GAP);
-              const h = v > 0 ? (v / max) * H : 2;
-              const y = PAD_TOP + H - h;
+              const totalH = v > 0 ? (v / max) * H : 2;
+              const cashH = v > 0 ? (byDayCash[i] / max) * H : 0;
+              const topH = Math.max(0, totalH - cashH);
+              const yTop = PAD_TOP + H - totalH;
+              const yCash = PAD_TOP + H - cashH;
               const dateStr = `${prefix}-${String(i + 1).padStart(2, "0")}`;
               const isToday = dateStr === todayStr;
               const isBest = i === bestIdx && v > 0;
               const dow = dayOfWeek(i + 1);
               const isWeekend = dow === "Sat" || dow === "Sun";
-              const fill = isBest
+              const topFill = isBest
                 ? "url(#bar-green)"
                 : isWeekend
                   ? "url(#bar-orange)"
                   : isToday
                     ? "url(#bar-accent)"
                     : "url(#bar-blue)";
+              const dim = hover && hover.i !== i ? 0.45 : 1;
               return (
-                <g key={i}>
-                  <rect x={x} y={y} width={BAR_W} height={h} rx={4} fill={fill}
-                    onMouseEnter={() => setHover({ i, v, dateStr })}
-                    onMouseLeave={() => setHover(null)}
-                    style={{ cursor: v > 0 ? "pointer" : "default", transition: "opacity .15s" }}
-                    opacity={hover && hover.i !== i ? 0.45 : 1}
-                  />
+                <g key={i}
+                  onMouseEnter={() => setHover({ i, v, cash: byDayCash[i], nonCash: byDayNonCash[i], dateStr })}
+                  onMouseLeave={() => setHover(null)}
+                  style={{ cursor: v > 0 ? "pointer" : "default" }}>
+                  {/* Non-cash (online + material) — colour-coded top segment */}
+                  {topH > 0 && (
+                    <rect x={x} y={yTop} width={BAR_W} height={topH} rx={4} ry={4} fill={topFill} opacity={dim} style={{ transition: "opacity .15s" }} />
+                  )}
+                  {/* Cash — purple bottom segment, clearly demarcated */}
+                  {cashH > 0 && (
+                    <rect x={x} y={yCash} width={BAR_W} height={cashH} rx={4} ry={4} fill="url(#bar-purple)" opacity={dim} style={{ transition: "opacity .15s" }} />
+                  )}
+                  {v === 0 && (
+                    <rect x={x} y={PAD_TOP + H - 2} width={BAR_W} height={2} rx={1} fill="rgba(255,255,255,0.06)" />
+                  )}
                   <text x={x + BAR_W / 2} y={PAD_TOP + H + 14} fontSize={9} fill={isBest ? "var(--green)" : isWeekend ? "var(--orange)" : isToday ? "var(--accent)" : "var(--text3)"} textAnchor="middle" fontWeight={isToday || isBest || isWeekend ? 800 : 600}>
                     {i + 1}
                   </text>
@@ -1338,6 +1371,17 @@ function DailyBusinessChart({ entries, filterYear, filterMonth }) {
                 </g>
               );
             })}
+            {/* Optional average reference line — only drawn when the checkbox is ticked. */}
+            {showAvg && avg > 0 && (() => {
+              const yAvg = PAD_TOP + H - (avg / max) * H;
+              return (
+                <g>
+                  <line x1={LEFT} y1={yAvg} x2={W} y2={yAvg} stroke="var(--blue, #60a5fa)" strokeWidth={1.4} strokeDasharray="5 4" />
+                  <rect x={LEFT + 4} y={yAvg - 9} width={72} height={14} rx={3} fill="rgba(96,165,250,0.18)" stroke="rgba(96,165,250,0.45)" />
+                  <text x={LEFT + 8} y={yAvg + 1} fontSize={9} fill="var(--blue, #60a5fa)" fontWeight={800}>AVG {INR(avg)}</text>
+                </g>
+              );
+            })()}
             <defs>
               <linearGradient id="bar-blue" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stopColor="rgba(34,211,238,0.85)" />
@@ -1355,19 +1399,31 @@ function DailyBusinessChart({ entries, filterYear, filterMonth }) {
                 <stop offset="0%" stopColor="rgba(251,146,60,0.9)" />
                 <stop offset="100%" stopColor="rgba(251,146,60,0.35)" />
               </linearGradient>
+              <linearGradient id="bar-purple" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="rgba(192,132,252,0.95)" />
+                <stop offset="100%" stopColor="rgba(168,85,247,0.55)" />
+              </linearGradient>
             </defs>
           </svg>
 
           {hover && (
             <div style={{
               position: "absolute",
-              left: Math.min(LEFT + hover.i * (BAR_W + GAP) + BAR_W + 10, W - 140),
+              left: Math.min(LEFT + hover.i * (BAR_W + GAP) + BAR_W + 10, W - 160),
               top: 4, pointerEvents: "none",
               background: "var(--bg4)", border: "1px solid rgba(var(--accent-rgb),0.35)", borderRadius: 8,
-              padding: "8px 12px", boxShadow: "0 6px 20px rgba(0,0,0,0.5)", fontSize: 11, zIndex: 3,
+              padding: "8px 12px", boxShadow: "0 6px 20px rgba(0,0,0,0.5)", fontSize: 11, zIndex: 3, minWidth: 150,
             }}>
               <div style={{ fontSize: 9, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, fontWeight: 700 }}>{hover.dateStr} · {dayOfWeek(hover.i + 1)}</div>
               <div style={{ fontSize: 14, fontWeight: 800, color: "var(--green)", marginTop: 2 }}>{INR(hover.v)}</div>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 10, marginTop: 4 }}>
+                <span style={{ color: "#c084fc", fontWeight: 700 }}>Cash</span>
+                <span style={{ color: "#c084fc" }}>{INR(hover.cash || 0)}</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 10 }}>
+                <span style={{ color: "var(--blue, #60a5fa)", fontWeight: 700 }}>Online + Mat</span>
+                <span style={{ color: "var(--blue, #60a5fa)" }}>{INR(hover.nonCash || 0)}</span>
+              </div>
             </div>
           )}
         </div>
