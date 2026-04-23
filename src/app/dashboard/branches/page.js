@@ -1311,18 +1311,47 @@ export default function BranchesPage() {
       const daysCount = new Date(filterYear, filterMonth, 0).getDate();
       const endDay = isFutureMonth ? 0 : (isCurrentMonth ? NOW.getDate() : daysCount);
       const dayFactor = 1 / daysCount;
+      const gstPctLocal = globalSettings?.gst_pct || 0;
 
-      for (let d = 1; d <= endDay; d++) {
+      // Active staff + month salary are constant for the month — hoist out of the loop.
+      const activeStaffInMonth = staff.filter(s => s.branch_id === b.id && staffStatusForMonth(s, filterPrefix).status !== 'inactive');
+      const mActualSalary = activeStaffInMonth.reduce((s, st) => s + proRataSalary(st, filterPrefix, branches, salHistory, staff, globalSettings), 0);
+
+      // Iterate every day in the month. Past days with no entry/leave are still skipped
+      // (closed / holiday), but future days always render with their projected fixed cost
+      // + pro-rated salary so the daily total reconciles with the top Full Net P&L.
+      for (let d = 1; d <= daysCount; d++) {
         const dayPrefix = `${filterYear}-${String(filterMonth).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+        const isFutureDay = d > endDay;
         const dEntries = entries.filter(e => e.branch_id === b.id && e.date === dayPrefix);
-
-        // Active staff for the month (needed for leaves + salary)
-        const activeStaffInMonth = staff.filter(s => s.branch_id === b.id && staffStatusForMonth(s, filterPrefix).status !== 'inactive');
         const dLeaves = leaves.filter(l => l.staff_id && activeStaffInMonth.some(as => as.id === l.staff_id) && l.status === 'approved' && l.date === dayPrefix).reduce((s, l) => s + (l.days || 1), 0);
 
-        // Skip days that have no entries and no approved leaves — avoids
-        // stale rows persisting after the daily entry is deleted.
-        if (dEntries.length === 0 && dLeaves === 0) continue;
+        if (!isFutureDay && dEntries.length === 0 && dLeaves === 0) continue;
+
+        const dShopRent = (b.shop_rent || 0) * dayFactor;
+        const dRoomRent = (b.room_rent || 0) * dayFactor;
+        const dElec = ((b.shop_elec || 0) + (b.room_elec || 0)) * dayFactor;
+        const dWifi = (b.wifi || 0) * dayFactor;
+        const dFixedFees = dShopRent + dRoomRent + dElec + dWifi;
+        const dSalaryShare = mActualSalary * dayFactor;
+        const label = `${d} ${new Date(filterYear, filterMonth - 1).toLocaleString('default', { month: 'short' })}`;
+
+        if (isFutureDay) {
+          // Projected row — fixed cost accrues regardless of activity, salary sits in the "Future Salary"
+          // column so past-day Salary totals stay comparable, and Est. Expense captures the whole day's projection.
+          const estExpense = dFixedFees + dSalaryShare;
+          breakdownStats.push({
+            label,
+            income: 0, incentives: 0, material: 0, lumpsumMat: 0, others: 0,
+            shopRent: dShopRent, roomRent: dRoomRent, elec: dElec, wifi: dWifi,
+            salary: 0, futureSalary: dSalaryShare,
+            gst: 0, estExpense,
+            leaves: 0,
+            pl: -estExpense,
+            isFuture: true,
+          });
+          continue;
+        }
 
         const dOnline = dEntries.reduce((s, e) => s + (e.online || 0), 0);
         const dCash = dEntries.reduce((s, e) => s + (e.cash || 0), 0);
@@ -1330,40 +1359,30 @@ export default function BranchesPage() {
         const dIncExp = dEntries.reduce((s, e) => s + (e.staff_billing || []).reduce((ss, sb) => ss + (sb.incentive || 0) + (sb.mat_incentive || 0), 0), 0);
         // Pull the day's material cost from the allocations collection rather
         // than stored entry.mat_expense so the numbers match Materials Received.
-        // Allocation-based material for this day (always computed for display).
         const dAllocMat = allocsTotal(materialAllocations.filter(a => a.branch_id === b.id && (a.date || (a.transferred_at || "").slice(0, 10)) === dayPrefix));
-        // Lumpsum material typed into the Daily Entry form.
         const dLumpMat = dEntries.reduce((s, e) => s + (Number(e.mat_expense) || 0), 0);
-        // Effective material cost that flows into expenses / P&L, based on
-        // the admin's toggles in Master Setup → Material Expense Source.
         const dMatExp = (matUseAllocations ? dAllocMat : 0) + (matUseLumpsum ? dLumpMat : 0);
         const dOtherExp = dEntries.reduce((s, e) => s + (e.others || 0) + (e.petrol || 0), 0);
-
-        // Fixed costs pro-rated for the day
-        const mFixed = (b.shop_rent || 0) + (b.room_rent || 0) + (b.wifi || 0) + (b.shop_elec || 0) + (b.room_elec || 0);
-        const dFixed = mFixed * dayFactor;
-
-        // Actual Salary for the month pro-rated for that day
-        const mActualSalary = activeStaffInMonth.reduce((s, st) => s + proRataSalary(st, filterPrefix, branches, salHistory, staff, globalSettings), 0);
-        const dSalary = mActualSalary * dayFactor;
+        const dGst = (dOnline * gstPctLocal) / 100;
 
         const dIncome = dOnline + dCash + dMatInc;
-        const dExpenses = dIncExp + dMatExp + dOtherExp + dFixed + dSalary;
-        
+        const dExpenses = dIncExp + dMatExp + dOtherExp + dFixedFees + dSalaryShare + dGst;
+
         breakdownStats.push({
-          label: `${d} ${new Date(filterYear, filterMonth - 1).toLocaleString('default', { month: 'short' })}`,
+          label,
           income: dIncome,
           incentives: dIncExp,
           material: dAllocMat,
           lumpsumMat: dLumpMat,
           others: dOtherExp,
-          shopRent: (b.shop_rent || 0) * dayFactor,
-          roomRent: (b.room_rent || 0) * dayFactor,
-          elec: ((b.shop_elec || 0) + (b.room_elec || 0)) * dayFactor,
-          wifi: (b.wifi || 0) * dayFactor,
-          salary: dSalary,
+          shopRent: dShopRent, roomRent: dRoomRent, elec: dElec, wifi: dWifi,
+          salary: dSalaryShare,
+          futureSalary: 0,
+          gst: dGst,
+          estExpense: dGst,
           leaves: dLeaves,
-          pl: dIncome - dExpenses
+          pl: dIncome - dExpenses,
+          isFuture: false,
         });
       }
     } else {
@@ -1401,8 +1420,12 @@ export default function BranchesPage() {
           elec: (b.shop_elec || 0) + (b.room_elec || 0),
           wifi: (b.wifi || 0),
           salary: mActualSalary,
+          futureSalary: 0,
+          gst: 0,
+          estExpense: 0,
           leaves: mLeaves,
-          pl: mIncome - mExpenses
+          pl: mIncome - mExpenses,
+          isFuture: false,
         });
       }
     }
@@ -1952,23 +1975,30 @@ export default function BranchesPage() {
                   <TH right>Elec.</TH>
                   <TH right>WiFi</TH>
                   <TH right>Salary</TH>
+                  <TH right title="Projected salary for future days not yet entered">Future Salary</TH>
+                  <TH right title="GST extraction on online income (past) or full projected expense (future)">Est. Expense</TH>
                   <TH right>{filterMode === "month" ? "Leave Entry" : "Leaves"}</TH>
                   <TH right>Net P&L</TH>
                 </tr></thead>
                 <tbody>
                   {breakdownStats.map(m => (
-                    <tr key={m.label}>
-                      <TD style={{ fontWeight: 600 }}>{m.label} {filterYear}</TD>
-                      <TD right style={{ color: "var(--green)" }}>{INR(m.income)}</TD>
-                      <TD right style={{ color: "var(--red)" }}>{INR(m.incentives)}</TD>
-                      <TD right style={{ color: "var(--red)" }}>{INR(m.material)}</TD>
+                    <tr key={m.label} style={m.isFuture ? { background: "rgba(251,146,60,0.04)" } : undefined}>
+                      <TD style={{ fontWeight: 600, color: m.isFuture ? "var(--text3)" : undefined }}>
+                        {m.label} {filterYear}
+                        {m.isFuture && <span style={{ marginLeft: 6, fontSize: 9, padding: "1px 5px", borderRadius: 4, background: "rgba(251,146,60,0.15)", color: "var(--orange)", fontWeight: 700, letterSpacing: 0.5 }}>EST</span>}
+                      </TD>
+                      <TD right style={{ color: "var(--green)" }}>{m.income > 0 ? INR(m.income) : "—"}</TD>
+                      <TD right style={{ color: "var(--red)" }}>{m.incentives > 0 ? INR(m.incentives) : "—"}</TD>
+                      <TD right style={{ color: "var(--red)" }}>{m.material > 0 ? INR(m.material) : "—"}</TD>
                       <TD right style={{ color: "var(--accent)" }}>{(m.lumpsumMat || 0) > 0 ? INR(m.lumpsumMat) : "—"}</TD>
-                      <TD right style={{ color: "var(--red)" }}>{INR(m.others)}</TD>
+                      <TD right style={{ color: "var(--red)" }}>{m.others > 0 ? INR(m.others) : "—"}</TD>
                       <TD right style={{ color: "var(--orange)" }}>{INR(m.shopRent)}</TD>
                       <TD right style={{ color: "var(--orange)" }}>{INR(m.roomRent)}</TD>
                       <TD right style={{ color: "var(--orange)" }}>{INR(m.elec)}</TD>
                       <TD right style={{ color: "var(--orange)" }}>{INR(m.wifi)}</TD>
-                      <TD right style={{ color: "var(--blue)" }}>{INR(m.salary)}</TD>
+                      <TD right style={{ color: "var(--blue)" }}>{m.salary > 0 ? INR(m.salary) : "—"}</TD>
+                      <TD right style={{ color: "var(--purple, #c084fc)" }}>{(m.futureSalary || 0) > 0 ? INR(m.futureSalary) : "—"}</TD>
+                      <TD right style={{ color: m.isFuture ? "var(--orange)" : "var(--red)" }}>{(m.estExpense || 0) > 0 ? INR(m.estExpense) : "—"}</TD>
                       <TD right style={{ fontWeight: 600, color: "var(--text3)" }}>{m.leaves}</TD>
                       <TD right style={{ fontWeight: 700, color: m.pl >= 0 ? "var(--green)" : "var(--red)" }}>{isAdmin ? (INR(m.pl)) : "•••••"}</TD>
                     </tr>
@@ -1986,6 +2016,8 @@ export default function BranchesPage() {
                       <TD right style={{ fontWeight: 800, color: "var(--orange)" }}>{INR(breakdownStats.reduce((s, m) => s + m.elec, 0))}</TD>
                       <TD right style={{ fontWeight: 800, color: "var(--orange)" }}>{INR(breakdownStats.reduce((s, m) => s + m.wifi, 0))}</TD>
                       <TD right style={{ fontWeight: 800, color: "var(--blue)" }}>{INR(breakdownStats.reduce((s, m) => s + m.salary, 0))}</TD>
+                      <TD right style={{ fontWeight: 800, color: "var(--purple, #c084fc)" }}>{INR(breakdownStats.reduce((s, m) => s + (m.futureSalary || 0), 0))}</TD>
+                      <TD right style={{ fontWeight: 800, color: "var(--red)" }}>{INR(breakdownStats.reduce((s, m) => s + (m.estExpense || 0), 0))}</TD>
                       <TD right style={{ fontWeight: 800, color: "var(--text2)" }}>{breakdownStats.reduce((s, m) => s + m.leaves, 0)}</TD>
                       <TD right style={{ fontWeight: 800, color: breakdownStats.reduce((s, m) => s + m.pl, 0) >= 0 ? "var(--green)" : "var(--red)" }}>
                         {isAdmin ? INR(breakdownStats.reduce((s, m) => s + m.pl, 0)) : "•••••"}
