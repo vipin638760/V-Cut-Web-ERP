@@ -192,17 +192,20 @@ export function Pill({ label, color = "gold" }) {
 export function Card({ children, style }) {
   const ref = useRef(null);
   const [overflow, setOverflow] = useState(false);
-  const [scrollPos, setScrollPos] = useState({ atStart: true, atEnd: false });
+  const [scrollPos, setScrollPos] = useState({ atStart: true, atEnd: false, left: 0, max: 0 });
 
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
     const check = () => {
-      const hasOverflow = el.scrollWidth > el.clientWidth + 1;
+      const maxLeft = Math.max(0, el.scrollWidth - el.clientWidth);
+      const hasOverflow = maxLeft > 1;
       setOverflow(hasOverflow);
       setScrollPos({
         atStart: el.scrollLeft <= 2,
         atEnd: el.scrollLeft + el.clientWidth >= el.scrollWidth - 2,
+        left: el.scrollLeft,
+        max: maxLeft,
       });
     };
     check();
@@ -238,7 +241,7 @@ export function Card({ children, style }) {
     <div style={{ position: "relative" }}>
       {overflow && (
         <div style={{
-          display: "flex", alignItems: "center", justifyContent: "space-between",
+          display: "flex", alignItems: "center", gap: 10,
           padding: "7px 14px", marginBottom: 8,
           background: "linear-gradient(90deg, rgba(var(--accent-rgb),0.08) 0%, rgba(var(--accent-rgb),0.03) 100%)",
           border: "1px solid rgba(var(--accent-rgb),0.18)",
@@ -248,7 +251,7 @@ export function Card({ children, style }) {
         }}>
           <button type="button" onClick={() => scrollBy(-1)} disabled={scrollPos.atStart}
             style={{
-              display: "inline-flex", alignItems: "center", gap: 5,
+              display: "inline-flex", alignItems: "center", gap: 5, flexShrink: 0,
               opacity: scrollPos.atStart ? 0.35 : 1,
               transition: "opacity .15s",
               background: "none", border: "none", color: "inherit",
@@ -258,12 +261,16 @@ export function Card({ children, style }) {
             <span style={{ fontSize: 13, lineHeight: 1 }}>←</span>
             <span>Scroll</span>
           </button>
-          <span style={{ color: "var(--text3)", fontWeight: 600, letterSpacing: 0.5 }}>
-            More data hidden — swipe or click
-          </span>
+          {/* Drag-to-scroll slider mirroring scrollLeft — thumb position matches the visible window in the overflow. */}
+          <input type="range" min={0} max={Math.max(1, scrollPos.max)} value={scrollPos.left}
+            onChange={(e) => { if (ref.current) ref.current.scrollLeft = Number(e.target.value); }}
+            aria-label="Horizontal scroll"
+            className="card-scroll-slider"
+            style={{ flex: 1, minWidth: 0, accentColor: "var(--accent)", height: 4 }}
+          />
           <button type="button" onClick={() => scrollBy(1)} disabled={scrollPos.atEnd}
             style={{
-              display: "inline-flex", alignItems: "center", gap: 5,
+              display: "inline-flex", alignItems: "center", gap: 5, flexShrink: 0,
               opacity: scrollPos.atEnd ? 0.35 : 1,
               transition: "opacity .15s",
               background: "none", border: "none", color: "inherit",

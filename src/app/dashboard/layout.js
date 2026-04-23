@@ -356,7 +356,57 @@ export default function DashboardLayout({ children }) {
 
         {children}
       </main>
+      <PageScrollSlider />
       {ConfirmDialog}
+    </div>
+  );
+}
+
+// Fixed vertical drag-to-scroll slider on the right edge of the viewport. Only shows
+// when the page has scrollable vertical overflow, so tall pages get a drag handle and
+// short ones stay clean. Mirrors + drives window.scrollY.
+function PageScrollSlider() {
+  const [state, setState] = useState({ y: 0, max: 0, overflow: false });
+
+  useEffect(() => {
+    const check = () => {
+      const max = Math.max(0, (document.documentElement.scrollHeight || 0) - (window.innerHeight || 0));
+      setState({ y: window.scrollY || 0, max, overflow: max > 80 });
+    };
+    check();
+    window.addEventListener("scroll", check, { passive: true });
+    window.addEventListener("resize", check);
+    const ro = new ResizeObserver(check);
+    ro.observe(document.documentElement);
+    return () => { window.removeEventListener("scroll", check); window.removeEventListener("resize", check); ro.disconnect(); };
+  }, []);
+
+  if (!state.overflow) return null;
+  return (
+    <div style={{
+      position: "fixed", right: 8, top: "50%", transform: "translateY(-50%)",
+      zIndex: 50, display: "flex", flexDirection: "column", alignItems: "center",
+      gap: 6, padding: "8px 4px", background: "rgba(var(--accent-rgb),0.08)",
+      border: "1px solid rgba(var(--accent-rgb),0.2)", borderRadius: 12,
+      backdropFilter: "blur(8px)",
+    }}>
+      <button type="button" onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
+        aria-label="Scroll to top"
+        style={{ background: "none", border: "none", color: "var(--accent)", cursor: "pointer", fontSize: 14, fontWeight: 800, padding: 2 }}>⇈</button>
+      <input type="range" min={0} max={Math.max(1, state.max)} value={state.y}
+        onChange={(e) => window.scrollTo({ top: Number(e.target.value) })}
+        aria-label="Page vertical scroll"
+        className="page-scroll-slider"
+        style={{
+          writingMode: "bt-lr",
+          WebkitAppearance: "slider-vertical",
+          appearance: "slider-vertical",
+          width: 6, height: 220,
+          accentColor: "var(--accent)",
+        }} />
+      <button type="button" onClick={() => window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "smooth" })}
+        aria-label="Scroll to bottom"
+        style={{ background: "none", border: "none", color: "var(--accent)", cursor: "pointer", fontSize: 14, fontWeight: 800, padding: 2 }}>⇊</button>
     </div>
   );
 }
