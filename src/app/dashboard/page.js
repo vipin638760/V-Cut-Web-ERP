@@ -1150,7 +1150,8 @@ export default function DashboardPage() {
         )}
       </div>
       {ToastContainer}
-      {/* Projected-cost breakdown modal — same pattern as Branch Detail's Variable / Fixed / Total Expense drill-down. */}
+      {/* Projected-cost breakdown modal — leads with Operating Cost as the summary row,
+          then its components, then the forecast delta (remaining salary) on top. */}
       {showProjBreakdown && (() => {
         const totals = branchData.reduce((acc, d) => {
           acc.vInc += d.vInc;
@@ -1166,24 +1167,26 @@ export default function DashboardPage() {
           return acc;
         }, { vInc: 0, vMatE: 0, vOther: 0, fShopRent: 0, fRoomRent: 0, fWifi: 0, fElec: 0, projectedSalary: 0, actualSalary: 0, totalGst: 0 });
         const remainingSalary = totals.projectedSalary - totals.actualSalary;
-        const rows = [
+        const operatingCost = totals.vInc + totals.vMatE + totals.vOther
+          + totals.fShopRent + totals.fRoomRent + totals.fWifi + totals.fElec
+          + totals.actualSalary + totals.totalGst;
+        const operatingSubRows = [
           { label: "Variable — Staff Incentives", value: totals.vInc, hint: "Sum of incentive + mat_incentive on every entry in the period", color: "var(--red)" },
           { label: "Variable — Material Cost", value: totals.vMatE, hint: "Per Master Setup → Material Expense Source (allocations / lumpsum / both)", color: "var(--red)" },
           { label: "Variable — Other / Petrol", value: totals.vOther, hint: "others + petrol lines on daily entries", color: "var(--red)" },
-          { label: "Fixed — Shop Rent", value: totals.fShopRent, hint: `Charged for the full period regardless of working days`, color: "var(--orange)" },
-          { label: "Fixed — Room Rent", value: totals.fRoomRent, hint: `Full-period accrual`, color: "var(--orange)" },
-          { label: "Fixed — Electricity", value: totals.fElec, hint: `Shop + room electricity`, color: "var(--orange)" },
-          { label: "Fixed — WiFi", value: totals.fWifi, hint: `Full-period accrual`, color: "var(--orange)" },
-          { label: "Salary — Accrued (capped yesterday)", value: totals.actualSalary, hint: "Same salary value the Operating Cost card uses", color: "var(--blue)" },
-          { label: "Salary — Remaining till month-end", value: remainingSalary, hint: "Full-month pro-rata minus what's already accrued — the only delta from Operating Cost", color: "var(--purple, #c084fc)" },
+          { label: "Fixed — Shop Rent", value: totals.fShopRent, hint: "Charged for the full period regardless of working days", color: "var(--orange)" },
+          { label: "Fixed — Room Rent", value: totals.fRoomRent, hint: "Full-period accrual", color: "var(--orange)" },
+          { label: "Fixed — Electricity", value: totals.fElec, hint: "Shop + room electricity", color: "var(--orange)" },
+          { label: "Fixed — WiFi", value: totals.fWifi, hint: "Full-period accrual", color: "var(--orange)" },
+          { label: "Salary — Accrued (capped yesterday)", value: totals.actualSalary, hint: "Pro-rata salary × (days elapsed / days in month)", color: "var(--blue)" },
           { label: "GST Estimate", value: totals.totalGst, hint: "GST extracted from online revenue at the configured rate", color: "var(--red)" },
         ];
-        const grand = rows.reduce((s, r) => s + r.value, 0);
+        const grand = operatingCost + remainingSalary;
         return (
           <div onClick={() => setShowProjBreakdown(false)}
             style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.55)", backdropFilter: "blur(6px)", zIndex: 1100, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
             <div onClick={ev => ev.stopPropagation()}
-              style={{ width: "100%", maxWidth: 620, maxHeight: "90vh", overflowY: "auto", background: "var(--bg2)", borderRadius: 16, boxShadow: "0 24px 80px rgba(0,0,0,0.5)" }}>
+              style={{ width: "100%", maxWidth: 640, maxHeight: "90vh", overflowY: "auto", background: "var(--bg2)", borderRadius: 16, boxShadow: "0 24px 80px rgba(0,0,0,0.5)" }}>
               <div style={{ padding: "18px 22px", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, position: "sticky", top: 0, background: "var(--bg2)", zIndex: 1 }}>
                 <div>
                   <div style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Breakdown</div>
@@ -1193,19 +1196,42 @@ export default function DashboardPage() {
                 <button onClick={() => setShowProjBreakdown(false)}
                   style={{ background: "var(--bg4)", border: "1px solid var(--border2)", color: "var(--text2)", borderRadius: 8, width: 32, height: 32, cursor: "pointer", fontSize: 14, fontWeight: 700 }}>✕</button>
               </div>
-              <div style={{ padding: "10px 22px 18px" }}>
-                {rows.map(r => (
-                  <div key={r.label} style={{ padding: "12px 0", borderBottom: "1px solid var(--border)" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12 }}>
-                      <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text)" }}>{r.label}</span>
-                      <span style={{ fontSize: 14, fontWeight: 800, color: r.color, whiteSpace: "nowrap" }}>{INR(r.value)}</span>
-                    </div>
-                    <div style={{ fontSize: 10.5, color: "var(--text3)", marginTop: 3 }}>{r.hint}</div>
+
+              <div style={{ padding: "14px 22px 18px" }}>
+                {/* Section 1 — Operating Cost summary + its components nested below */}
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.3)", borderRadius: 10, padding: "12px 14px", marginBottom: 4 }}>
+                  <div>
+                    <div style={{ fontSize: 10, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1 }}>Operating Cost</div>
+                    <div style={{ fontSize: 10, color: "var(--text3)", marginTop: 2 }}>What&apos;s accrued so far (the Operating Cost card value)</div>
                   </div>
-                ))}
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 10, paddingTop: 12, borderTop: "2px solid var(--border2)" }}>
+                  <span style={{ fontSize: 17, fontWeight: 800, color: "var(--red)", whiteSpace: "nowrap" }}>{INR(operatingCost)}</span>
+                </div>
+                <div style={{ padding: "0 6px", borderLeft: "2px solid var(--border2)", margin: "0 4px 14px" }}>
+                  {operatingSubRows.map(r => (
+                    <div key={r.label} style={{ padding: "10px 10px", borderBottom: "1px solid var(--border)" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12 }}>
+                        <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--text2)" }}>{r.label}</span>
+                        <span style={{ fontSize: 13, fontWeight: 700, color: r.color, whiteSpace: "nowrap" }}>{INR(r.value)}</span>
+                      </div>
+                      <div style={{ fontSize: 10, color: "var(--text3)", marginTop: 2 }}>{r.hint}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Section 2 — Forecast addition on top of Operating Cost */}
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "rgba(192,132,252,0.08)", border: "1px solid rgba(192,132,252,0.3)", borderRadius: 10, padding: "12px 14px" }}>
+                  <div>
+                    <div style={{ fontSize: 10, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1 }}>Forecast addition</div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text)", marginTop: 4 }}>Salary — Remaining till month-end</div>
+                    <div style={{ fontSize: 10, color: "var(--text3)", marginTop: 2 }}>Full-month pro-rata minus what&apos;s accrued — the only delta from Operating Cost</div>
+                  </div>
+                  <span style={{ fontSize: 17, fontWeight: 800, color: "var(--purple, #c084fc)", whiteSpace: "nowrap" }}>+{INR(remainingSalary)}</span>
+                </div>
+
+                {/* Grand total */}
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 14, paddingTop: 12, borderTop: "2px solid var(--border2)" }}>
                   <span style={{ fontSize: 12, fontWeight: 800, color: "var(--gold)", letterSpacing: 1 }}>TOTAL PROJECTED</span>
-                  <span style={{ fontSize: 18, fontWeight: 800, color: "var(--orange)" }}>{INR(grand)}</span>
+                  <span style={{ fontSize: 20, fontWeight: 800, color: "var(--orange)" }}>{INR(grand)}</span>
                 </div>
               </div>
             </div>
