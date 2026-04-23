@@ -456,36 +456,68 @@ export default function BranchesPage() {
     return () => unsubs.forEach(u => u());
   }, []);
 
-  // Sync state from URL (Dashboard deep-linking)
+  // Sync state from URL (Dashboard deep-linking).
+  // Why: Next 16 App Router keeps the page mounted when only query params change,
+  // so `useState` lazy-init (and this effect on [branches]) don't re-run on re-entry.
+  // We listen for pushState/popstate so a second visit with a different `?view=` or
+  // `?branchId=` actually takes effect instead of showing the previous detail view.
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const params = new URLSearchParams(window.location.search);
-    const bid  = params.get("branchId");
-    const mode = params.get("mode");
-    const yr   = params.get("year");
-    const mo   = params.get("month");
-    const cal  = params.get("calendar");
 
-    if (bid)  setSelectedBranch(bid);
-    if (mode) setFilterMode(mode);
-    if (yr)   setFilterYear(Number(yr));
-    if (mo)   setFilterMonth(Number(mo));
-    if (bid && cal === "1") {
-      // Default to the active filter month, or the current month if not set.
-      const prefix = (mode === "year")
-        ? `${yr || NOW.getFullYear()}-${String(NOW.getMonth() + 1).padStart(2, "0")}`
-        : `${yr || NOW.getFullYear()}-${String(mo || NOW.getMonth() + 1).padStart(2, "0")}`;
-      setAttendanceCalendar(bid);
-      setAttendanceMonth(prefix);
-      setAttendanceSelectedDay(null);
-    }
+    const applyUrlState = () => {
+      const params = new URLSearchParams(window.location.search);
+      const bid  = params.get("branchId");
+      const view = params.get("view");
+      const mode = params.get("mode");
+      const yr   = params.get("year");
+      const mo   = params.get("month");
+      const cal  = params.get("calendar");
 
-    // Optional: Clean URL params to avoid re-syncing on refresh if user changes it
-    if (bid || mode || yr || mo || cal) {
-      const newUrl = window.location.pathname;
-      window.history.replaceState({}, "", newUrl);
-    }
-  }, [branches]); // Wait for branches to be loaded so setSelectedBranch is meaningful
+      if (view === "summary" || view === "table" || view === "card") {
+        setBrView(view);
+        // A ?view= deep-link targets the list/summary tab — never a single branch.
+        setSelectedBranch(null);
+      }
+      if (bid)  setSelectedBranch(bid);
+      if (mode) setFilterMode(mode);
+      if (yr)   setFilterYear(Number(yr));
+      if (mo)   setFilterMonth(Number(mo));
+      if (bid && cal === "1") {
+        // Default to the active filter month, or the current month if not set.
+        const prefix = (mode === "year")
+          ? `${yr || NOW.getFullYear()}-${String(NOW.getMonth() + 1).padStart(2, "0")}`
+          : `${yr || NOW.getFullYear()}-${String(mo || NOW.getMonth() + 1).padStart(2, "0")}`;
+        setAttendanceCalendar(bid);
+        setAttendanceMonth(prefix);
+        setAttendanceSelectedDay(null);
+      }
+
+      // Clean URL params so a refresh doesn't re-apply stale deep-link state.
+      if (bid || view || mode || yr || mo || cal) {
+        window.history.replaceState({}, "", window.location.pathname);
+      }
+    };
+
+    applyUrlState();
+
+    // Next's client-side router uses history.pushState; patch it to emit an event
+    // so this page can re-sync when the user arrives via router.push while the
+    // component is still mounted.
+    const origPush = window.history.pushState;
+    window.history.pushState = function (...args) {
+      const result = origPush.apply(this, args);
+      window.dispatchEvent(new Event("vcut:urlchange"));
+      return result;
+    };
+    window.addEventListener("vcut:urlchange", applyUrlState);
+    window.addEventListener("popstate", applyUrlState);
+
+    return () => {
+      window.history.pushState = origPush;
+      window.removeEventListener("vcut:urlchange", applyUrlState);
+      window.removeEventListener("popstate", applyUrlState);
+    };
+  }, [branches]);
 
   const inPeriod = (dateStr) => {
     if (!dateStr) return false;
@@ -2207,10 +2239,13 @@ export default function BranchesPage() {
                                   let dayStatus = 'present';
                                   let dayShare = base / daysInMonth;
                                   if (specificDate) {
-                                    const dateObj = new Date(specificDate + "T00:00");
-                                    const joinDate = s.join ? new Date(s.join) : null;
-                                    const exitDate = s.exit_date ? new Date(s.exit_date) : null;
-                                    if ((joinDate && dateObj < joinDate) || (exitDate && dateObj > exitDate)) {
+                                    // String-compare YYYY-MM-DD values — lexicographic order equals chronological
+                                    // and avoids the timezone mismatch between `new Date("2026-04-01")` (UTC midnight)
+                                    // and `new Date("2026-04-01T00:00")` (local midnight). In IST the latter was
+                                    // 5.5h earlier, so a staff joining on the same day was wrongly flagged NOT_ACTIVE.
+                                    const sameOrAfterJoin = !s.join || specificDate >= s.join;
+                                    const sameOrBeforeExit = !s.exit_date || specificDate <= s.exit_date;
+                                    if (!sameOrAfterJoin || !sameOrBeforeExit) {
                                       dayStatus = 'not_active';
                                       dayShare = 0;
                                     } else {
