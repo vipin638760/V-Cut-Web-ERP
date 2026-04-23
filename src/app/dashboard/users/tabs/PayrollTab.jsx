@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState, Fragment } from "react";
+import { useEffect, useState, Fragment, useRef } from "react";
 import { collection, onSnapshot, doc, setDoc, addDoc, query, orderBy } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useCurrentUser, getCurrentUser } from "@/lib/currentUser";
@@ -115,6 +115,25 @@ export default function PayrollTab() {
   const [filterMonth, setFilterMonth] = useState(new Date().getMonth() + 1);
   const filterPrefix = filterMode === "month" ? makeFilterPrefix(filterYear, filterMonth) : String(filterYear);
 
+  // Branch filter — empty Set = show every branch. Non-empty = show only those branches.
+  const [branchFilter, setBranchFilter] = useState(() => new Set());
+  const [branchFilterOpen, setBranchFilterOpen] = useState(false);
+  const [branchSearch, setBranchSearch] = useState("");
+  const branchFilterRef = useRef(null);
+
+  // Multi-select for bulk release (staff_id set).
+  const [selectedStaff, setSelectedStaff] = useState(() => new Set());
+  const toggleStaff = (id) => setSelectedStaff(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const clearSelection = () => setSelectedStaff(new Set());
+
+  // Close the branch dropdown when clicking outside it.
+  useEffect(() => {
+    if (!branchFilterOpen) return;
+    const onDown = (e) => { if (branchFilterRef.current && !branchFilterRef.current.contains(e.target)) setBranchFilterOpen(false); };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [branchFilterOpen]);
+
   const currentUser = useCurrentUser() || {};
   const isAdmin = currentUser.role === "admin";
   const isAccountant = currentUser.role === "accountant";
@@ -175,6 +194,31 @@ export default function PayrollTab() {
     if (!releaseModal) return;
     try {
       const user = getCurrentUser() || {};
+
+      // Bulk mode: release every selected staff with the same mode + date. Payslip auto-opening is
+      // skipped in bulk (too many tabs) — users can click the PDF icon per row afterwards.
+      if (releaseModal.bulk && Array.isArray(releaseModal.rows)) {
+        const rows = releaseModal.rows;
+        const at = new Date().toISOString();
+        await Promise.all(rows.map(r => setDoc(doc(db, "payroll_releases", `${r.staffId}_${filterPrefix}`), {
+          staff_id: r.staffId,
+          staff_name: r.name,
+          period: filterPrefix,
+          net: r.net,
+          earned: r.earned,
+          base_salary: r.baseSalary,
+          mode: releaseMode,
+          payment_date: releaseDate,
+          released_by: user.id || "admin",
+          released_at: at,
+        })));
+        const total = rows.reduce((s, r) => s + (r.net || 0), 0);
+        toast({ title: `Released ${rows.length} Salaries`, message: `${INR(total)} released via ${releaseMode} on ${releaseDate}.`, type: "success" });
+        setReleaseModal(null);
+        clearSelection();
+        return;
+      }
+
       const releaseKey = `${releaseModal.staffId}_${filterPrefix}`;
       await setDoc(doc(db, "payroll_releases", releaseKey), {
         staff_id: releaseModal.staffId,
@@ -229,11 +273,137 @@ export default function PayrollTab() {
       <PeriodWidget filterMode={filterMode} setFilterMode={setFilterMode} filterYear={filterYear} setFilterYear={setFilterYear} filterMonth={filterMonth} setFilterMonth={setFilterMonth} />
 
       {/* Salary View */}
-      {viewTab === "salary" && <Card style={{ padding: 0, overflow: "hidden" }}>
+      {viewTab === "salary" && (() => {
+        const visibleStaff = staff.filter(s => {
+          if (branchFilter.size > 0 && !branchFilter.has(s.branch_id)) return false;
+          if (filterMode === 'month') return staffStatusForMonth(s, filterPrefix).status !== 'inactive';
+          return s.status !== 'inactive';
+        }).sort((a, b) => a.name.localeCompare(b.name));
+
+        // Rows that are eligible for release (not already released + completed month) —
+        // these are the ones that get a checkbox and count toward bulk release.
+        const now = new Date();
+        const currentYM = now.getFullYear() * 12 + now.getMonth();
+        const selectedYM = filterYear * 12 + (filterMonth - 1);
+        const isCompletedMonth = filterMode === 'month' && selectedYM < currentYM;
+        const eligibleStaff = isCompletedMonth
+          ? visibleStaff.filter(s => !getRelease(s.id))
+          : [];
+        const selectedIds = [...selectedStaff].filter(id => eligibleStaff.some(s => s.id === id));
+        const allEligibleSelected = eligibleStaff.length > 0 && selectedIds.length === eligibleStaff.length;
+        const someEligibleSelected = selectedIds.length > 0 && !allEligibleSelected;
+        const toggleSelectAll = () => setSelectedStaff(prev => {
+          if (allEligibleSelected) {
+            const n = new Set(prev);
+            eligibleStaff.forEach(s => n.delete(s.id));
+            return n;
+          }
+          const n = new Set(prev);
+          eligibleStaff.forEach(s => n.add(s.id));
+          return n;
+        });
+
+        const branchMatches = branches.filter(br => !branchSearch || br.name.toLowerCase().includes(branchSearch.toLowerCase()));
+        const toggleBranch = (id) => setBranchFilter(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+
+        const openBulkRelease = () => {
+          // Build a release-row payload for every currently selected eligible staff.
+          const rows = selectedIds.map(id => {
+            const s = eligibleStaff.find(x => x.id === id);
+            if (!s) return null;
+            const b = branches.find(x => x.id === s.branch_id);
+            let earned = 0;
+            if (filterMode === 'year') {
+              const limit = (filterYear === new Date().getFullYear()) ? new Date().getMonth() + 1 : 12;
+              for (let m = 1; m <= limit; m++) earned += proRataSalary(s, `${filterYear}-${String(m).padStart(2, '0')}`, branches, salHistory, staff);
+            } else {
+              earned = proRataSalary(s, filterPrefix, branches, salHistory, staff);
+            }
+            const periodAdvances = getStaffAdvances(s.id);
+            const advApproved = periodAdvances.filter(a => a.status === 'approved').reduce((sum, a) => sum + Number(a.amount), 0);
+            const net = earned - advApproved;
+            return { staffId: s.id, name: s.name, net, earned, baseSalary: s.salary || 0, employee: s, branch: b };
+          }).filter(Boolean);
+          setReleaseModal({ bulk: true, rows, totalNet: rows.reduce((sum, r) => sum + r.net, 0) });
+          setReleaseMode("Bank Transfer");
+          setReleaseDate(new Date().toISOString().split("T")[0]);
+        };
+
+        return (<>
+          {/* Filter + bulk action bar */}
+          <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 12 }}>
+            {/* Branch multi-select with search */}
+            <div ref={branchFilterRef} style={{ position: "relative" }}>
+              <button onClick={() => setBranchFilterOpen(o => !o)}
+                style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "10px 14px", borderRadius: 10, background: "var(--bg3)", border: `1px solid ${branchFilter.size > 0 ? "var(--accent)" : "var(--border)"}`, color: branchFilter.size > 0 ? "var(--accent)" : "var(--text2)", fontSize: 12, fontWeight: 700, cursor: "pointer", letterSpacing: 0.5, textTransform: "uppercase", minWidth: 200 }}>
+                <Icon name="grid" size={14} />
+                <span style={{ flex: 1, textAlign: "left" }}>
+                  {branchFilter.size === 0 ? "All Branches" : `${branchFilter.size} branch${branchFilter.size > 1 ? "es" : ""} selected`}
+                </span>
+                <span style={{ fontSize: 10, opacity: 0.7 }}>{branchFilterOpen ? "▲" : "▼"}</span>
+              </button>
+              {branchFilterOpen && (
+                <div style={{ position: "absolute", top: "calc(100% + 6px)", left: 0, zIndex: 20, minWidth: 280, maxWidth: 340, background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 12, boxShadow: "0 20px 50px -10px rgba(0,0,0,0.6)", overflow: "hidden" }}>
+                  <div style={{ padding: "10px 12px", borderBottom: "1px solid var(--border2)", display: "flex", alignItems: "center", gap: 8 }}>
+                    <Icon name="search" size={14} color="var(--text3)" />
+                    <input autoFocus value={branchSearch} onChange={e => setBranchSearch(e.target.value)}
+                      placeholder="Search branch..."
+                      style={{ flex: 1, background: "transparent", border: "none", outline: "none", fontSize: 12, color: "var(--text)", fontWeight: 600 }} />
+                    {branchFilter.size > 0 && (
+                      <button onClick={() => setBranchFilter(new Set())} style={{ fontSize: 10, color: "var(--red)", background: "none", border: "none", cursor: "pointer", fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5 }}>Clear</button>
+                    )}
+                  </div>
+                  <div style={{ maxHeight: 260, overflowY: "auto", padding: 6 }}>
+                    {branchMatches.length === 0 && (
+                      <div style={{ padding: 16, textAlign: "center", color: "var(--text3)", fontSize: 11 }}>No branches match &ldquo;{branchSearch}&rdquo;</div>
+                    )}
+                    {branchMatches.map(br => {
+                      const on = branchFilter.has(br.id);
+                      return (
+                        <label key={br.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", borderRadius: 8, cursor: "pointer", background: on ? "rgba(var(--accent-rgb),0.08)" : "transparent", transition: "background .15s", userSelect: "none" }}
+                          onMouseEnter={e => { if (!on) e.currentTarget.style.background = "rgba(255,255,255,0.03)"; }}
+                          onMouseLeave={e => { if (!on) e.currentTarget.style.background = "transparent"; }}>
+                          <input type="checkbox" checked={on} onChange={() => toggleBranch(br.id)} style={{ accentColor: "var(--accent)", cursor: "pointer" }} />
+                          <span style={{ fontSize: 12, fontWeight: 600, color: on ? "var(--accent)" : "var(--text)" }}>{br.name}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Bulk release bar — only shows when at least one eligible row is ticked */}
+            {selectedIds.length > 0 && (
+              <div style={{ flex: 1, minWidth: 220, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "8px 14px", background: "linear-gradient(90deg, rgba(var(--accent-rgb),0.12), rgba(var(--accent-rgb),0.04))", border: "1px solid rgba(var(--accent-rgb),0.35)", borderRadius: 10, flexWrap: "wrap" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 11, fontWeight: 800, color: "var(--accent)", textTransform: "uppercase", letterSpacing: 1 }}>
+                    {selectedIds.length} selected
+                  </span>
+                  <button onClick={clearSelection} style={{ fontSize: 10, color: "var(--text3)", background: "none", border: "none", cursor: "pointer", fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5 }}>Clear</button>
+                </div>
+                <button onClick={openBulkRelease}
+                  style={{ padding: "8px 16px", borderRadius: 8, background: "linear-gradient(135deg, var(--accent), var(--gold2))", color: "#000", border: "none", cursor: "pointer", fontSize: 11, fontWeight: 800, textTransform: "uppercase", letterSpacing: 0.8 }}>
+                  Release {selectedIds.length} Selected
+                </button>
+              </div>
+            )}
+          </div>
+
+      <Card style={{ padding: 0, overflow: "hidden" }}>
         <div style={{ overflowX: "auto" }}>
         <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
           <thead>
             <tr>
+              <TH>
+                {eligibleStaff.length > 0 ? (
+                  <input type="checkbox" checked={allEligibleSelected}
+                    ref={el => { if (el) el.indeterminate = someEligibleSelected; }}
+                    onChange={toggleSelectAll}
+                    style={{ accentColor: "var(--accent)", cursor: "pointer" }}
+                    title={allEligibleSelected ? "Unselect all" : "Select all releasable"} />
+                ) : <span style={{ opacity: 0 }}>·</span>}
+              </TH>
               <TH>Employee</TH>
               <TH>Branch</TH>
               {!isAccountant && <TH right>Base Salary</TH>}
@@ -246,13 +416,7 @@ export default function PayrollTab() {
             </tr>
           </thead>
           <tbody>
-            {staff.filter(s => {
-              if (filterMode === 'month') {
-                const ms = staffStatusForMonth(s, filterPrefix);
-                return ms.status !== 'inactive';
-              }
-              return s.status !== 'inactive';
-            }).sort((a,b) => a.name.localeCompare(b.name)).map(s => {
+            {visibleStaff.map(s => {
               const b = branches.find(x => x.id === s.branch_id);
               let earned = 0;
               if (filterMode === 'year') {
@@ -277,11 +441,22 @@ export default function PayrollTab() {
               const selectedYM = filterYear * 12 + (filterMonth - 1);
               const isCompletedMonth = filterMode === 'month' && selectedYM < currentYM;
 
+              const rel = getRelease(s.id);
+              const isEligibleForRelease = isCompletedMonth && !rel;
+              const isSelected = selectedStaff.has(s.id);
+
               return (
                 <Fragment key={s.id}>
-                  <tr style={{ transition: "background 0.15s" }}
-                    onMouseEnter={e => e.currentTarget.style.background = "var(--bg4)"}
-                    onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                  <tr style={{ transition: "background 0.15s", background: isSelected ? "rgba(var(--accent-rgb),0.06)" : "transparent" }}
+                    onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = "var(--bg4)"; }}
+                    onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = "transparent"; }}>
+                    <TD>
+                      {isEligibleForRelease ? (
+                        <input type="checkbox" checked={isSelected} onChange={() => toggleStaff(s.id)}
+                          style={{ accentColor: "var(--accent)", cursor: "pointer" }}
+                          title={`Select ${s.name} for bulk release`} />
+                      ) : <span style={{ opacity: 0 }}>·</span>}
+                    </TD>
                     <TD style={{ fontWeight: 700 }}>{s.name}</TD>
                     <TD style={{ color: "var(--text3)", fontSize: 11 }}>{b?.name?.replace("V-CUT ","") || "—"}</TD>
                     {!isAccountant && <TD right style={{ color: "var(--text3)" }}>{INR(s.salary)}</TD>}
@@ -330,7 +505,7 @@ export default function PayrollTab() {
                   {/* Expanded advance log for this employee */}
                   {isExpanded && periodAdvances.length > 0 && (
                     <tr>
-                      <td colSpan={isAccountant ? 8 : 9} style={{ padding: 0, background: "var(--bg4)" }}>
+                      <td colSpan={isAccountant ? 9 : 10} style={{ padding: 0, background: "var(--bg4)" }}>
                         <div style={{ padding: "12px 20px 16px" }}>
                           <div style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.5, marginBottom: 10 }}>Advance Log — {s.name}</div>
                           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
@@ -376,7 +551,9 @@ export default function PayrollTab() {
           </tbody>
         </table>
         </div>
-      </Card>}
+      </Card>
+        </>);
+      })()}
 
       {/* Advances View */}
       {viewTab === "advances" && <Card style={{ padding: 0, overflow: "hidden" }}>
@@ -469,10 +646,27 @@ export default function PayrollTab() {
         )}
       </Modal>
 
-      {/* Salary Release Modal — ask mode + date */}
-      <Modal isOpen={!!releaseModal} onClose={() => setReleaseModal(null)} title="Release Salary">
+      {/* Salary Release Modal — ask mode + date. Bulk variant lists every staff being released. */}
+      <Modal isOpen={!!releaseModal} onClose={() => setReleaseModal(null)} title={releaseModal?.bulk ? `Release ${releaseModal.rows?.length || 0} Salaries` : "Release Salary"}>
         {releaseModal && (
           <div style={{ padding: 24, display: "flex", flexDirection: "column", gap: 20 }}>
+            {releaseModal.bulk ? (
+              <div style={{ background: "var(--bg4)", padding: 16, borderRadius: 10 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, marginBottom: 10 }}>Bulk Release — {filterPrefix}</div>
+                <div style={{ maxHeight: 180, overflowY: "auto", marginBottom: 10, borderBottom: "1px solid var(--border2)", paddingBottom: 8 }}>
+                  {releaseModal.rows.map(r => (
+                    <div key={r.staffId} style={{ display: "flex", justifyContent: "space-between", padding: "4px 0", fontSize: 12 }}>
+                      <span style={{ color: "var(--text2)", fontWeight: 600 }}>{r.name}</span>
+                      <span style={{ color: "var(--accent)", fontWeight: 700, fontFamily: "var(--font-headline, var(--font-outfit))" }}>{INR(r.net)}</span>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0 0", fontSize: 13 }}>
+                  <span style={{ color: "var(--text3)", fontWeight: 700 }}>Total Payout</span>
+                  <strong style={{ color: "var(--accent)", fontSize: 18, fontFamily: "var(--font-headline, var(--font-outfit))" }}>{INR(releaseModal.totalNet)}</strong>
+                </div>
+              </div>
+            ) : (
             <div style={{ background: "var(--bg4)", padding: 16, borderRadius: 10 }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, marginBottom: 10 }}>Summary</div>
               <div style={{ display: "flex", justifyContent: "space-between", padding: "4px 0", fontSize: 13 }}>
@@ -488,6 +682,7 @@ export default function PayrollTab() {
                 <strong style={{ color: "var(--accent)", fontSize: 16, fontFamily: "var(--font-headline, var(--font-outfit))" }}>{INR(releaseModal.net)}</strong>
               </div>
             </div>
+            )}
 
             <div>
               <label style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, marginBottom: 6, display: "block" }}>Payment Mode</label>
@@ -510,7 +705,7 @@ export default function PayrollTab() {
             <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
               <button onClick={handleReleaseSalary}
                 style={{ flex: 1, padding: "12px 0", borderRadius: 10, background: "linear-gradient(135deg, var(--accent), var(--gold2))", color: "#000", border: "none", fontWeight: 700, fontSize: 13, cursor: "pointer", textTransform: "uppercase", letterSpacing: 0.5 }}>
-                Release &amp; Generate Payslip
+                {releaseModal?.bulk ? `Release ${releaseModal.rows?.length || 0} Salaries` : "Release & Generate Payslip"}
               </button>
               <button onClick={() => setReleaseModal(null)}
                 style={{ padding: "12px 20px", borderRadius: 10, background: "var(--bg4)", color: "var(--text3)", border: "none", fontWeight: 600, fontSize: 13, cursor: "pointer" }}>
