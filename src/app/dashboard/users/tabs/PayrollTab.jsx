@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState, Fragment, useRef } from "react";
-import { collection, onSnapshot, doc, setDoc, addDoc, query, orderBy } from "firebase/firestore";
+import { collection, onSnapshot, doc, setDoc, addDoc, deleteDoc, query, orderBy } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useCurrentUser, getCurrentUser } from "@/lib/currentUser";
 import { INR, proRataSalary, makeFilterPrefix, staffStatusForMonth, staffLeavesInMonth } from "@/lib/calculations";
@@ -170,6 +170,22 @@ export default function PayrollTab() {
       setAdvMode(request.mode || "Cash");
       setAdvDate(new Date().toISOString().split("T")[0]);
     }
+  };
+
+  const deleteAdvance = (request) => {
+    confirm({
+      title: "Delete advance",
+      message: `Permanently delete <strong>${request.staff_name}</strong>'s ${request.status || "pending"} advance of <strong>₹${Number(request.amount).toLocaleString("en-IN")}</strong>? This cannot be undone.`,
+      confirmText: "Delete", cancelText: "Cancel", type: "danger",
+      onConfirm: async () => {
+        try {
+          await deleteDoc(doc(db, "staff_advances", request.id));
+          toast({ title: "Deleted", message: `${request.staff_name}'s advance removed.`, type: "success" });
+        } catch (e) {
+          confirm({ title: "Error", message: e.message, confirmText: "OK", cancelText: "Close", type: "danger", onConfirm: () => {} });
+        }
+      },
+    });
   };
 
   const processAdvance = async (request, newStatus, mode, paymentDate) => {
@@ -529,12 +545,18 @@ export default function PayrollTab() {
                                   <td style={{ padding: "8px 12px" }}><Pill label={a.status || "pending"} color={a.status === "approved" ? "green" : a.status === "rejected" ? "red" : "orange"} /></td>
                                   {isAdmin && (
                                     <td style={{ padding: "8px 12px", textAlign: "right" }}>
-                                      {a.status === "pending" ? (
-                                        <div style={{ display: "flex", gap: 4, justifyContent: "flex-end" }}>
-                                          <button onClick={() => openAdvanceApproval(a, 'approved')} style={{ background: "rgba(74,222,128,0.08)", color: "var(--green)", border: "none", padding: "4px 8px", borderRadius: 6, fontSize: 9, fontWeight: 700, cursor: "pointer" }}>Approve</button>
-                                          <button onClick={() => openAdvanceApproval(a, 'rejected')} style={{ background: "rgba(248,113,113,0.08)", color: "var(--red)", border: "none", padding: "4px 8px", borderRadius: 6, fontSize: 9, fontWeight: 700, cursor: "pointer" }}>Reject</button>
-                                        </div>
-                                      ) : <span style={{ fontSize: 10, color: "var(--text3)" }}>—</span>}
+                                      <div style={{ display: "flex", gap: 4, justifyContent: "flex-end", alignItems: "center" }}>
+                                        {a.status === "pending" && (
+                                          <>
+                                            <button onClick={() => openAdvanceApproval(a, 'approved')} style={{ background: "rgba(74,222,128,0.08)", color: "var(--green)", border: "none", padding: "4px 8px", borderRadius: 6, fontSize: 9, fontWeight: 700, cursor: "pointer" }}>Approve</button>
+                                            <button onClick={() => openAdvanceApproval(a, 'rejected')} style={{ background: "rgba(248,113,113,0.08)", color: "var(--red)", border: "none", padding: "4px 8px", borderRadius: 6, fontSize: 9, fontWeight: 700, cursor: "pointer" }}>Reject</button>
+                                          </>
+                                        )}
+                                        <button onClick={() => deleteAdvance(a)} title="Delete advance"
+                                          style={{ background: "rgba(248,113,113,0.08)", color: "var(--red)", border: "1px solid rgba(248,113,113,0.25)", padding: "4px 6px", borderRadius: 6, cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+                                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/></svg>
+                                        </button>
+                                      </div>
                                     </td>
                                   )}
                                 </tr>
@@ -593,12 +615,18 @@ export default function PayrollTab() {
                   <TD style={{ color: "var(--text3)", fontSize: 11 }}>{a.payment_date || (a.processed_at ? a.processed_at.split("T")[0] : "—")}</TD>
                   {isAdmin && (
                     <TD right>
-                      {a.status === "pending" ? (
-                        <div style={{ display: "flex", gap: 4, justifyContent: "flex-end" }}>
-                          <button onClick={() => openAdvanceApproval(a, 'approved')} style={{ background: "rgba(74,222,128,0.08)", color: "var(--green)", border: "none", padding: "5px 10px", borderRadius: 6, fontSize: 10, fontWeight: 700, cursor: "pointer" }}>Approve</button>
-                          <button onClick={() => openAdvanceApproval(a, 'rejected')} style={{ background: "rgba(248,113,113,0.08)", color: "var(--red)", border: "none", padding: "5px 10px", borderRadius: 6, fontSize: 10, fontWeight: 700, cursor: "pointer" }}>Reject</button>
-                        </div>
-                      ) : <span style={{ fontSize: 10, color: "var(--text3)" }}>—</span>}
+                      <div style={{ display: "flex", gap: 4, justifyContent: "flex-end", alignItems: "center" }}>
+                        {a.status === "pending" && (
+                          <>
+                            <button onClick={() => openAdvanceApproval(a, 'approved')} style={{ background: "rgba(74,222,128,0.08)", color: "var(--green)", border: "none", padding: "5px 10px", borderRadius: 6, fontSize: 10, fontWeight: 700, cursor: "pointer" }}>Approve</button>
+                            <button onClick={() => openAdvanceApproval(a, 'rejected')} style={{ background: "rgba(248,113,113,0.08)", color: "var(--red)", border: "none", padding: "5px 10px", borderRadius: 6, fontSize: 10, fontWeight: 700, cursor: "pointer" }}>Reject</button>
+                          </>
+                        )}
+                        <button onClick={() => deleteAdvance(a)} title="Delete advance"
+                          style={{ background: "rgba(248,113,113,0.08)", color: "var(--red)", border: "1px solid rgba(248,113,113,0.25)", padding: "5px 8px", borderRadius: 6, cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/></svg>
+                        </button>
+                      </div>
                     </TD>
                   )}
                 </tr>
