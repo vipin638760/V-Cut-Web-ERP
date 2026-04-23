@@ -187,10 +187,21 @@ export default function EntryPage() {
       if (typeof window !== "undefined" && !editId) {
         const params = new URLSearchParams(window.location.search);
         const editQuery = params.get("edit");
+        const dateQuery = params.get("date");
+        const branchQuery = params.get("branch");
         if (editQuery && sn.docs.length > 0) {
           const e = sn.docs.map(d => ({ ...d.data(), id: d.id })).find(x => x.id === editQuery);
           if (e) handleEdit(e);
-          // Clear current URL query
+          const newUrl = window.location.pathname;
+          window.history.replaceState({}, "", newUrl);
+        } else if (dateQuery || branchQuery) {
+          // Day bar in a branch chart → preselect branch + date; if an entry already exists for that combo, jump into edit.
+          if (branchQuery) setSelBranch(branchQuery);
+          if (dateQuery) {
+            setSelDate(dateQuery);
+            const existing = sn.docs.map(d => ({ ...d.data(), id: d.id })).find(x => x.branch_id === branchQuery && x.date === dateQuery);
+            if (existing) handleEdit(existing);
+          }
           const newUrl = window.location.pathname;
           window.history.replaceState({}, "", newUrl);
         }

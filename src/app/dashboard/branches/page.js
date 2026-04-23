@@ -13,7 +13,7 @@ const NOW = new Date();
 
 // Inline SVG chart — branch-scoped daily/monthly collection (cash + online + mat sale).
 // Uses the same bar-chart idiom as dashboard's DailyBusinessChart but branch-only + supports yearly mode.
-function BranchCollectionChart({ periodEntries, filterMode, filterYear, filterMonth, endMonth }) {
+function BranchCollectionChart({ periodEntries, filterMode, filterYear, filterMonth, endMonth, onDayClick }) {
   const [hover, setHover] = useState(null);
   const isMonth = filterMode === "month";
 
@@ -22,13 +22,14 @@ function BranchCollectionChart({ periodEntries, filterMode, filterYear, filterMo
     const daysInMonth = new Date(filterYear, filterMonth, 0).getDate();
     for (let d = 1; d <= daysInMonth; d++) {
       const key = `${filterYear}-${String(filterMonth).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
-      buckets.push({ label: String(d), key, value: 0 });
+      buckets.push({ label: String(d), key, value: 0, entryId: null });
     }
     periodEntries.forEach(e => {
       const idx = buckets.findIndex(x => x.key === e.date);
       if (idx < 0) return;
       const mat = (e.staff_billing || []).reduce((s, sb) => s + (sb.material || 0), 0);
       buckets[idx].value += (e.online || 0) + (e.cash || 0) + mat;
+      if (e.id) buckets[idx].entryId = e.id;
     });
   } else {
     for (let m = 1; m <= endMonth; m++) {
@@ -96,14 +97,16 @@ function BranchCollectionChart({ periodEntries, filterMode, filterYear, filterMo
               const h = b.value > 0 ? (b.value / max) * H : 2;
               const y = PAD_TOP + H - h;
               const isBest = i === bestIdx && b.value > 0;
+              const clickable = isMonth && b.value > 0 && onDayClick;
               return (
                 <g key={i}>
                   <rect x={x} y={y} width={BAR_W} height={h} rx={4}
                     fill={isBest ? "url(#bcol-green)" : "url(#bcol-blue)"}
                     onMouseEnter={() => setHover({ i, b })}
                     onMouseLeave={() => setHover(null)}
+                    onClick={clickable ? () => onDayClick(b.key, b.entryId) : undefined}
                     opacity={hover && hover.i !== i ? 0.45 : 1}
-                    style={{ cursor: b.value > 0 ? "pointer" : "default", transition: "opacity .15s" }}
+                    style={{ cursor: clickable ? "pointer" : (b.value > 0 ? "default" : "default"), transition: "opacity .15s" }}
                   />
                   <text x={x + BAR_W / 2} y={PAD_TOP + H + 14} fontSize={9} fill={isBest ? "var(--green)" : "var(--text3)"} textAnchor="middle" fontWeight={isBest ? 800 : 600}>{b.label}</text>
                 </g>
@@ -130,6 +133,9 @@ function BranchCollectionChart({ periodEntries, filterMode, filterYear, filterMo
             }}>
               <div style={{ fontSize: 9, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase" }}>{hover.b.key}</div>
               <div style={{ fontSize: 13, fontWeight: 800, color: "var(--green)", marginTop: 2 }}>{INR(hover.b.value)}</div>
+              {isMonth && hover.b.value > 0 && onDayClick && (
+                <div style={{ fontSize: 9, color: "var(--blue, #60a5fa)", marginTop: 3, fontWeight: 700 }}>Click → open Daily Entry</div>
+              )}
             </div>
           )}
         </div>
@@ -140,7 +146,7 @@ function BranchCollectionChart({ periodEntries, filterMode, filterYear, filterMo
 
 // Stacked bar chart — per-day (or per-month) sale split by staff member.
 // Value = sb.billing + sb.material (service sale + material sale), coloured by staff.
-function BranchStaffSalesChart({ periodEntries, branchStaff, filterMode, filterYear, filterMonth, endMonth }) {
+function BranchStaffSalesChart({ periodEntries, branchStaff, allStaff, filterMode, filterYear, filterMonth, endMonth, onDayClick }) {
   const [hover, setHover] = useState(null);
   const isMonth = filterMode === "month";
 
@@ -152,11 +158,12 @@ function BranchStaffSalesChart({ periodEntries, branchStaff, filterMode, filterY
     const daysInMonth = new Date(filterYear, filterMonth, 0).getDate();
     for (let d = 1; d <= daysInMonth; d++) {
       const key = `${filterYear}-${String(filterMonth).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
-      buckets.push({ label: String(d), key, stacks: {} });
+      buckets.push({ label: String(d), key, stacks: {}, entryId: null });
     }
     periodEntries.forEach(e => {
       const idx = buckets.findIndex(x => x.key === e.date);
       if (idx < 0) return;
+      if (e.id) buckets[idx].entryId = e.id;
       (e.staff_billing || []).forEach(sb => {
         if (!sb.staff_id) return;
         buckets[idx].stacks[sb.staff_id] = (buckets[idx].stacks[sb.staff_id] || 0) + (sb.billing || 0) + (sb.material || 0);
@@ -166,7 +173,7 @@ function BranchStaffSalesChart({ periodEntries, branchStaff, filterMode, filterY
     for (let m = 1; m <= endMonth; m++) {
       const prefix = `${filterYear}-${String(m).padStart(2, "0")}`;
       const label = new Date(filterYear, m - 1, 1).toLocaleString("default", { month: "short" });
-      const bucket = { label, key: prefix, stacks: {} };
+      const bucket = { label, key: prefix, stacks: {}, entryId: null };
       periodEntries.filter(e => e.date && e.date.startsWith(prefix)).forEach(e => {
         (e.staff_billing || []).forEach(sb => {
           if (!sb.staff_id) return;
@@ -180,7 +187,33 @@ function BranchStaffSalesChart({ periodEntries, branchStaff, filterMode, filterY
   const staffTotals = {};
   buckets.forEach(b => Object.entries(b.stacks).forEach(([id, v]) => { staffTotals[id] = (staffTotals[id] || 0) + v; }));
   const activeStaffIds = Object.keys(staffTotals).filter(id => staffTotals[id] > 0).sort((a, b) => staffTotals[b] - staffTotals[a]);
-  const staffById = Object.fromEntries(branchStaff.map(s => [s.id, s]));
+  // Loan resources carry a home branch_id that isn't this branch, so fall back to the full staff roster for name lookup.
+  const staffById = Object.fromEntries((allStaff && allStaff.length ? allStaff : branchStaff).map(s => [s.id, s]));
+
+  // Per-staff stats: highest / lowest / average, computed across days (or months) where that staff had any sale.
+  const staffStats = {};
+  activeStaffIds.forEach(sid => {
+    let highVal = -Infinity, highKey = null;
+    let lowVal = Infinity, lowKey = null;
+    let sum = 0, activeCount = 0;
+    buckets.forEach(b => {
+      const v = b.stacks[sid] || 0;
+      if (v <= 0) return;
+      sum += v;
+      activeCount += 1;
+      if (v > highVal) { highVal = v; highKey = b.key; }
+      if (v < lowVal) { lowVal = v; lowKey = b.key; }
+    });
+    staffStats[sid] = {
+      total: sum,
+      avg: activeCount ? Math.round(sum / activeCount) : 0,
+      activeCount,
+      high: highVal === -Infinity ? 0 : highVal,
+      highKey,
+      low: lowVal === Infinity ? 0 : lowVal,
+      lowKey,
+    };
+  });
 
   const max = Math.max(1, ...buckets.map(b => Object.values(b.stacks).reduce((s, v) => s + v, 0)));
   const total = buckets.reduce((s, b) => s + Object.values(b.stacks).reduce((ss, v) => ss + v, 0), 0);
@@ -225,6 +258,7 @@ function BranchStaffSalesChart({ periodEntries, branchStaff, filterMode, filterY
                 const x = LEFT + i * (BAR_W + GAP);
                 let accY = PAD_TOP + H;
                 const bucketTotal = Object.values(b.stacks).reduce((s, v) => s + v, 0);
+                const clickable = isMonth && bucketTotal > 0 && onDayClick;
                 return (
                   <g key={i}>
                     {activeStaffIds.map((sid, si) => {
@@ -237,8 +271,9 @@ function BranchStaffSalesChart({ periodEntries, branchStaff, filterMode, filterY
                           fill={colorAt(si)}
                           onMouseEnter={() => setHover({ i, bucket: b, sid, value: v, total: bucketTotal })}
                           onMouseLeave={() => setHover(null)}
+                          onClick={clickable ? () => onDayClick(b.key, b.entryId) : undefined}
                           opacity={hover && hover.i !== i ? 0.45 : 1}
-                          style={{ cursor: "pointer", transition: "opacity .15s" }}
+                          style={{ cursor: clickable ? "pointer" : "default", transition: "opacity .15s" }}
                         />
                       );
                     })}
@@ -260,17 +295,48 @@ function BranchStaffSalesChart({ periodEntries, branchStaff, filterMode, filterY
                 <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text2)", marginTop: 2 }}>{staffById[hover.sid]?.name || "Unknown"}</div>
                 <div style={{ fontSize: 13, fontWeight: 800, color: "var(--green)", marginTop: 2 }}>{INR(hover.value)}</div>
                 <div style={{ fontSize: 9, color: "var(--text3)", marginTop: 2 }}>{isMonth ? "Day" : "Month"} total: {INR(hover.total)}</div>
+                {isMonth && onDayClick && (
+                  <div style={{ fontSize: 9, color: "var(--accent)", marginTop: 3, fontWeight: 700 }}>Click → open Daily Entry</div>
+                )}
               </div>
             )}
           </div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 12, paddingTop: 10, borderTop: "1px solid var(--border)" }}>
-            {activeStaffIds.map((sid, i) => (
-              <div key={sid} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 10 }}>
-                <div style={{ width: 10, height: 10, borderRadius: 2, background: colorAt(i) }} />
-                <span style={{ color: "var(--text2)", fontWeight: 600 }}>{staffById[sid]?.name || "Unknown"}</span>
-                <span style={{ color: "var(--text3)" }}>{INR(staffTotals[sid])}</span>
-              </div>
-            ))}
+          {/* Per-staff stats grid — total · avg · highest (with date) · lowest. Computed over days the staff actually had sales. */}
+          <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid var(--border)" }}>
+            <div style={{ fontSize: 10, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 }}>Per-staff statistics</div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 8 }}>
+              {activeStaffIds.map((sid, i) => {
+                const st = staffStats[sid];
+                return (
+                  <div key={sid} style={{ background: "var(--bg3)", border: "1px solid var(--border)", borderRadius: 8, padding: "10px 12px", borderLeft: `3px solid ${colorAt(i)}` }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6, gap: 8 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+                        <div style={{ width: 10, height: 10, borderRadius: 2, background: colorAt(i), flexShrink: 0 }} />
+                        <span style={{ color: "var(--text2)", fontWeight: 700, fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{staffById[sid]?.name || "Unknown"}</span>
+                      </div>
+                      <span style={{ color: "var(--green)", fontWeight: 800, fontSize: 11 }}>{INR(st.total)}</span>
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 4, fontSize: 10 }}>
+                      <div>
+                        <div style={{ color: "var(--text3)", fontSize: 8, fontWeight: 700, textTransform: "uppercase" }}>Avg</div>
+                        <div style={{ color: "var(--blue, #60a5fa)", fontWeight: 700 }}>{INR(st.avg)}</div>
+                        <div style={{ color: "var(--text3)", fontSize: 8 }}>{st.activeCount} {isMonth ? "days" : "mo"}</div>
+                      </div>
+                      <div>
+                        <div style={{ color: "var(--text3)", fontSize: 8, fontWeight: 700, textTransform: "uppercase" }}>Highest</div>
+                        <div style={{ color: "var(--green)", fontWeight: 700 }}>{INR(st.high)}</div>
+                        <div style={{ color: "var(--text3)", fontSize: 8 }}>{st.highKey || "—"}</div>
+                      </div>
+                      <div>
+                        <div style={{ color: "var(--text3)", fontSize: 8, fontWeight: 700, textTransform: "uppercase" }}>Lowest</div>
+                        <div style={{ color: "var(--orange, #fb923c)", fontWeight: 700 }}>{INR(st.low)}</div>
+                        <div style={{ color: "var(--text3)", fontSize: 8 }}>{st.lowKey || "—"}</div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </>
       )}
@@ -1599,9 +1665,21 @@ export default function BranchesPage() {
           </button>
         </div>
 
-        {/* Collection trend + staff-wise sales split — visible on every branch tab. */}
-        <BranchCollectionChart periodEntries={periodEntries} filterMode={filterMode} filterYear={filterYear} filterMonth={filterMonth} endMonth={endMonth} />
-        <BranchStaffSalesChart periodEntries={periodEntries} branchStaff={branchStaff} filterMode={filterMode} filterYear={filterYear} filterMonth={filterMonth} endMonth={endMonth} />
+        {/* Collection trend + staff-wise sales split — visible on every branch tab.
+            Clicking a bar (month mode only) jumps to Daily Entry for that date.
+            If no entry yet exists, ?date=+?branch= preloads the form; existing entries open via ?edit=. */}
+        {(() => {
+          const openDay = (dateStr, entryId) => {
+            const params = new URLSearchParams();
+            if (entryId) params.set("edit", entryId);
+            else { params.set("date", dateStr); params.set("branch", b.id); }
+            router.push(`/dashboard/entry?${params.toString()}`);
+          };
+          return (<>
+            <BranchCollectionChart periodEntries={periodEntries} filterMode={filterMode} filterYear={filterYear} filterMonth={filterMonth} endMonth={endMonth} onDayClick={openDay} />
+            <BranchStaffSalesChart periodEntries={periodEntries} branchStaff={branchStaff} allStaff={staff} filterMode={filterMode} filterYear={filterYear} filterMonth={filterMonth} endMonth={endMonth} onDayClick={openDay} />
+          </>);
+        })()}
 
         {/* Section picker — click a card to reveal its detail table below.
             Multiple cards may be open at once so we can cross-reference numbers. */}
