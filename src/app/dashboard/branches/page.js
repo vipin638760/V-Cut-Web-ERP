@@ -2863,7 +2863,7 @@ function DraggableBranchGrid({ branchData, isAdmin, canSelect, selectedBranches,
                     style={{ cursor: "pointer", accentColor: "var(--accent)", pointerEvents: "none", margin: 0 }} />
                 </span>
               )}
-              <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{b.name}</span>
+              <span title={b.name} style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{b.name}</span>
               <button onClick={ev => { ev.stopPropagation(); onCalendarClick?.(b.id); }}
                 title="Attendance calendar"
                 style={{ background: "rgba(var(--accent-rgb),0.1)", border: "1px solid rgba(var(--accent-rgb),0.35)", color: "var(--accent)", borderRadius: 6, padding: "2px 8px", cursor: "pointer", fontSize: 13, lineHeight: 1 }}>📅</button>
