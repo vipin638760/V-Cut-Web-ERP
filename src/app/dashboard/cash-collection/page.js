@@ -1,21 +1,65 @@
 "use client";
-import { useEffect, useState } from "react";
-import { collection, onSnapshot, query, orderBy } from "firebase/firestore";
+import { useEffect, useMemo, useState } from "react";
+import { collection, onSnapshot, query, orderBy, addDoc, deleteDoc, doc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
 import { INR, makeFilterPrefix, periodLabel } from "@/lib/calculations";
-import { Card, PeriodWidget, TH, TD } from "@/components/ui";
+import { Card, PeriodWidget, TH, TD, Modal, BranchSelect, ToggleGroup, Icon, IconBtn, useConfirm, useToast } from "@/components/ui";
 import VLoader from "@/components/VLoader";
 
 const NOW = new Date();
+// Denominations in descending order — the order they're shown in the grid
+// and used to auto-suggest counts if user wants to reverse-fill.
+const DENOMS = [2000, 500, 200, 100, 50, 20, 10, 5, 2, 1];
+
+// FIFO allocator: given a branch's entries (each with a date and cih) and a
+// list of collections for that branch, consumes the oldest positive cih first.
+// Returns per-date rows { date, cih, collected, outstanding } plus a rollup.
+function fifoConsume(entries, collections) {
+  const queue = entries
+    .filter(e => (e.cih || 0) > 0)
+    .map(e => ({ date: e.date, cih: e.cih, collected: 0, pending: e.cih }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  const cols = [...collections].sort((a, b) => (a.collected_on || "").localeCompare(b.collected_on || ""));
+
+  let overcollected = 0;
+  for (const c of cols) {
+    let remaining = Number(c.amount) || 0;
+    for (const row of queue) {
+      if (remaining <= 0) break;
+      if (row.pending <= 0) continue;
+      const take = Math.min(row.pending, remaining);
+      row.pending -= take;
+      row.collected += take;
+      remaining -= take;
+    }
+    if (remaining > 0) overcollected += remaining;
+  }
+
+  const byDate = new Map(queue.map(r => [r.date, { cih: r.cih, collected: r.collected, outstanding: r.pending }]));
+  const totals = queue.reduce((acc, r) => ({
+    cih: acc.cih + r.cih,
+    collected: acc.collected + r.collected,
+    outstanding: acc.outstanding + r.pending,
+  }), { cih: 0, collected: 0, outstanding: 0 });
+
+  return { byDate, totals, overcollected };
+}
 
 export default function CashCollectionPage() {
+  const { confirm, ConfirmDialog } = useConfirm();
+  const { toast, ToastContainer } = useToast();
   const currentUser = useCurrentUser() || {};
   const canView = ["admin", "accountant"].includes(currentUser?.role);
+  const canRecord = currentUser?.role === "admin" || currentUser?.role === "accountant";
 
   const [branches, setBranches] = useState([]);
   const [entries, setEntries] = useState([]);
+  const [collections, setCollections] = useState([]);
   const [loading, setLoading] = useState(true);
+
+  const [tab, setTab] = useState("overview"); // 'overview' | 'record'
 
   const [filterMode, setFilterMode] = useState("month");
   const [filterYear, setFilterYear] = useState(NOW.getFullYear());
@@ -29,6 +73,17 @@ export default function CashCollectionPage() {
   const [selected, setSelected] = useState(new Set());
   const [expanded, setExpanded] = useState(null); // branch_id whose daily view is open
 
+  // Record-collection form state
+  const [showForm, setShowForm] = useState(false);
+  const blankDenoms = useMemo(() => Object.fromEntries(DENOMS.map(d => [d, ""])), []);
+  const [form, setForm] = useState({
+    branch_id: "",
+    collected_on: new Date().toISOString().slice(0, 10),
+    denoms: blankDenoms,
+    note: "",
+  });
+  const formAmount = DENOMS.reduce((s, d) => s + d * (Number(form.denoms[d]) || 0), 0);
+
   useEffect(() => {
     if (!db) return;
     const unsubs = [
@@ -37,6 +92,7 @@ export default function CashCollectionPage() {
         setEntries(sn.docs.map(d => ({ ...d.data(), id: d.id })));
         setLoading(false);
       }),
+      onSnapshot(collection(db, "cash_collections"), sn => setCollections(sn.docs.map(d => ({ ...d.data(), id: d.id })))),
     ];
     return () => unsubs.forEach(u => u());
   }, []);
@@ -56,7 +112,14 @@ export default function CashCollectionPage() {
     const cash = bEntries.reduce((s, e) => s + (e.cash || 0), 0);
     const online = bEntries.reduce((s, e) => s + (e.online || 0), 0);
     const cih = bEntries.reduce((s, e) => s + (e.cash_in_hand || 0), 0);
-    return { b, entries: bEntries, cash, online, cih };
+
+    // Collections for this branch scoped to the same period as the entries.
+    const bCollections = collections.filter(c => c.branch_id === b.id && inPeriod(c.collected_on));
+    const fifoEntries = bEntries.map(e => ({ date: e.date, cih: e.cash_in_hand || 0 }));
+    const fifo = fifoConsume(fifoEntries, bCollections);
+    const collectedInPeriod = bCollections.reduce((s, c) => s + (Number(c.amount) || 0), 0);
+
+    return { b, entries: bEntries, cash, online, cih, collections: bCollections, fifo, collectedInPeriod };
   });
   const branchRows = (selected.size === 0 ? allRows : allRows.filter(r => selected.has(r.b.id)))
     .slice()
@@ -66,7 +129,9 @@ export default function CashCollectionPage() {
     cash: acc.cash + r.cash,
     online: acc.online + r.online,
     cih: acc.cih + r.cih,
-  }), { cash: 0, online: 0, cih: 0 });
+    collected: acc.collected + r.collectedInPeriod,
+    outstanding: acc.outstanding + r.fifo.totals.outstanding,
+  }), { cash: 0, online: 0, cih: 0, collected: 0, outstanding: 0 });
 
   const toggle = (id) => setSelected(prev => {
     const next = new Set(prev);
@@ -197,6 +262,61 @@ export default function CashCollectionPage() {
     setTimeout(() => { try { w.focus(); w.print(); } catch { /* ignore */ } }, 350);
   };
 
+  // ── Record Collection helpers ──
+  const resetForm = () => setForm({
+    branch_id: "",
+    collected_on: new Date().toISOString().slice(0, 10),
+    denoms: blankDenoms,
+    note: "",
+  });
+
+  const saveCollection = async () => {
+    if (!form.branch_id) {
+      toast({ title: "Missing branch", message: "Pick a branch before saving.", type: "warning" });
+      return;
+    }
+    if (formAmount <= 0) {
+      toast({ title: "No amount", message: "Enter at least one denomination count.", type: "warning" });
+      return;
+    }
+    const branch = branches.find(b => b.id === form.branch_id);
+    try {
+      await addDoc(collection(db, "cash_collections"), {
+        branch_id: form.branch_id,
+        branch_name: branch?.name || "",
+        collected_on: form.collected_on,
+        amount: formAmount,
+        denoms: Object.fromEntries(DENOMS.map(d => [String(d), Number(form.denoms[d]) || 0])),
+        note: form.note?.trim() || "",
+        created_at: new Date().toISOString(),
+        created_by: currentUser?.name || "user",
+      });
+      toast({ title: "Collection saved", message: `${INR(formAmount)} recorded for ${branch?.name || "branch"}.`, type: "success" });
+      resetForm();
+      setShowForm(false);
+    } catch (err) {
+      toast({ title: "Error", message: err.message, type: "error" });
+    }
+  };
+
+  const deleteCollection = (c) => {
+    confirm({
+      title: "Delete collection",
+      message: `Delete <strong>${INR(c.amount)}</strong> collected on ${c.collected_on} from ${c.branch_name || "branch"}?`,
+      confirmText: "Delete", type: "danger",
+      onConfirm: async () => {
+        await deleteDoc(doc(db, "cash_collections", c.id));
+        toast({ title: "Deleted", message: "Collection removed.", type: "success" });
+      },
+    });
+  };
+
+  // Collections scoped to the period for the Record tab's list.
+  const periodCollections = collections
+    .filter(c => inPeriod(c.collected_on))
+    .filter(c => selected.size === 0 || selected.has(c.branch_id))
+    .sort((a, b) => (b.collected_on || "").localeCompare(a.collected_on || ""));
+
   // Daily/monthly cashflow rows for a single branch in current period
   const flowRowsFor = (bEntries) => {
     if (customRangeActive || filterMode === "month") {
@@ -230,9 +350,16 @@ export default function CashCollectionPage() {
 
   return (
     <div>
-      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
-        <div style={{ fontSize: 24, fontWeight: 800, color: "var(--gold)", letterSpacing: 1 }}>Cash Collection</div>
-        <span style={{ fontSize: 12, color: "var(--text3)" }}>Match bank deposits and track left-over branch cash for {plabel}</span>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          <div style={{ fontSize: 24, fontWeight: 800, color: "var(--gold)", letterSpacing: 1 }}>Cash Collection</div>
+          <span style={{ fontSize: 12, color: "var(--text3)" }}>Match bank deposits and track left-over branch cash for {plabel}</span>
+        </div>
+        <ToggleGroup
+          options={[["overview", "Overview"], ["record", "Record Collection"]]}
+          value={tab}
+          onChange={setTab}
+        />
       </div>
 
       <PeriodWidget filterMode={filterMode} setFilterMode={setFilterMode} filterYear={filterYear} setFilterYear={setFilterYear} filterMonth={filterMonth} setFilterMonth={setFilterMonth} />
@@ -320,11 +447,13 @@ export default function CashCollectionPage() {
       </Card>
 
       {/* KPIs */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 12, marginBottom: 16 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(200px,1fr))", gap: 12, marginBottom: 16 }}>
         {[
           ["Total Cash Sales", INR(totals.cash), "var(--green)", "Received across all selected branches"],
           ["Total Online / UPI", INR(totals.online), "var(--blue, #60a5fa)", "Directly credited to accounts"],
           ["Cash In Hand (Left Over)", INR(totals.cih), totals.cih >= 0 ? "var(--gold)" : "var(--red)", "Still sitting at branches · to collect"],
+          ["Collected", INR(totals.collected), "var(--accent)", `Recorded via ${periodCollections.length} collection${periodCollections.length === 1 ? "" : "s"} in this period`],
+          ["Outstanding", INR(totals.outstanding), totals.outstanding > 0 ? "var(--red)" : "var(--green)", totals.outstanding > 0 ? "Pending — oldest days first" : "All cleared"],
         ].map(([l, v, c, sub]) => (
           <Card key={l} style={{ padding: 16 }}>
             <div style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1 }}>{l}</div>
@@ -334,7 +463,8 @@ export default function CashCollectionPage() {
         ))}
       </div>
 
-      {/* Per-branch table with expandable daily view */}
+      {tab === "overview" && (
+      /* Per-branch table with expandable daily view */
       <Card style={{ overflow: "hidden" }}>
         <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--border)", fontWeight: 700, color: "var(--gold)", fontSize: 12, textTransform: "uppercase", letterSpacing: 1, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <span>Per-branch cash flow · {plabel}</span>
@@ -350,37 +480,47 @@ export default function CashCollectionPage() {
           </button>
         </div>
         <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12.5, minWidth: 560 }}>
+          <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12.5, minWidth: 720 }}>
             <thead>
               <tr>
                 <TH>Branch</TH>
                 <TH right>Cash Sales</TH>
                 <TH right>Online / UPI</TH>
                 <TH right>Cash In Hand</TH>
+                <TH right>Collected</TH>
+                <TH right>Outstanding</TH>
                 <TH style={{ width: 28 }}></TH>
               </tr>
             </thead>
             <tbody>
               {branchRows.length === 0 && (
-                <tr><td colSpan={5} style={{ padding: 24, textAlign: "center", color: "var(--text3)" }}>No branch data in {plabel}</td></tr>
+                <tr><td colSpan={7} style={{ padding: 24, textAlign: "center", color: "var(--text3)" }}>No branch data in {plabel}</td></tr>
               )}
               {branchRows.flatMap(r => {
                 const isOpen = expanded === r.b.id;
                 const flow = isOpen ? flowRowsFor(r.entries) : [];
+                const fullyCollected = r.fifo.totals.outstanding <= 0 && r.fifo.totals.cih > 0;
+                const partial = r.collectedInPeriod > 0 && r.fifo.totals.outstanding > 0;
                 const rows = [
                   <tr key={`row-${r.b.id}`} onClick={() => setExpanded(isOpen ? null : r.b.id)}
                     style={{ cursor: "pointer", borderBottom: "1px solid var(--border)" }}>
-                    <TD style={{ fontWeight: 700 }}>{r.b.name}</TD>
+                    <TD style={{ fontWeight: 700 }}>
+                      {r.b.name}
+                      {partial && <span style={{ marginLeft: 8, fontSize: 9, fontWeight: 800, color: "var(--red)", background: "rgba(248,113,113,0.12)", padding: "2px 6px", borderRadius: 4, textTransform: "uppercase", letterSpacing: 0.5 }}>Partial</span>}
+                      {fullyCollected && <span style={{ marginLeft: 8, fontSize: 9, fontWeight: 800, color: "var(--green)", background: "rgba(74,222,128,0.12)", padding: "2px 6px", borderRadius: 4, textTransform: "uppercase", letterSpacing: 0.5 }}>Cleared</span>}
+                    </TD>
                     <TD right style={{ color: "var(--green)" }}>{INR(r.cash)}</TD>
                     <TD right style={{ color: "var(--blue, #60a5fa)" }}>{INR(r.online)}</TD>
                     <TD right style={{ color: r.cih >= 0 ? "var(--gold)" : "var(--red)", fontWeight: 700 }}>{INR(r.cih)}</TD>
+                    <TD right style={{ color: "var(--accent)", fontWeight: 700 }}>{INR(r.collectedInPeriod)}</TD>
+                    <TD right style={{ color: r.fifo.totals.outstanding > 0 ? "var(--red)" : "var(--green)", fontWeight: 700 }}>{INR(r.fifo.totals.outstanding)}</TD>
                     <TD style={{ fontSize: 10, color: "var(--accent)", textAlign: "center" }}>{isOpen ? "▲" : "▼"}</TD>
                   </tr>
                 ];
                 if (isOpen) {
                   rows.push(
                     <tr key={`detail-${r.b.id}`}>
-                      <td colSpan={5} style={{ padding: 0, background: "var(--bg3)" }}>
+                      <td colSpan={7} style={{ padding: 0, background: "var(--bg3)" }}>
                         <div style={{ padding: "10px 16px", fontSize: 11, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                           <span>{(customRangeActive || filterMode === "month") ? "Daily breakdown" : "Monthly breakdown"}</span>
                           <span style={{ color: "var(--text3)", textTransform: "none", letterSpacing: 0, fontSize: 10, fontWeight: 500 }}>{flow.length} row{flow.length === 1 ? "" : "s"}</span>
@@ -395,24 +535,35 @@ export default function CashCollectionPage() {
                                 <TH right>Cash Sales</TH>
                                 <TH right>Online / UPI</TH>
                                 <TH right>Cash In Hand</TH>
+                                <TH right>Collected</TH>
+                                <TH right>Outstanding</TH>
                                 <TH style={{ width: 28 }}></TH>
                               </tr>
                             </thead>
                             <tbody>
-                              {flow.map((row, i) => (
-                                <tr key={i} style={{ borderBottom: "1px solid var(--border)" }}>
-                                  <TD style={{ fontWeight: 600 }}>{row.label}</TD>
-                                  <TD right style={{ color: "var(--green)" }}>{INR(row.cash)}</TD>
-                                  <TD right style={{ color: "var(--blue, #60a5fa)" }}>{INR(row.online)}</TD>
-                                  <TD right style={{ color: row.cih >= 0 ? "var(--gold)" : "var(--red)", fontWeight: 700 }}>{INR(row.cih)}</TD>
-                                  <TD></TD>
-                                </tr>
-                              ))}
+                              {flow.map((row, i) => {
+                                const fromFifo = r.fifo.byDate.get(row.label);
+                                const collected = fromFifo?.collected || 0;
+                                const outstanding = fromFifo?.outstanding ?? (row.cih > 0 ? row.cih : 0);
+                                return (
+                                  <tr key={i} style={{ borderBottom: "1px solid var(--border)" }}>
+                                    <TD style={{ fontWeight: 600 }}>{row.label}</TD>
+                                    <TD right style={{ color: "var(--green)" }}>{INR(row.cash)}</TD>
+                                    <TD right style={{ color: "var(--blue, #60a5fa)" }}>{INR(row.online)}</TD>
+                                    <TD right style={{ color: row.cih >= 0 ? "var(--gold)" : "var(--red)", fontWeight: 700 }}>{INR(row.cih)}</TD>
+                                    <TD right style={{ color: collected > 0 ? "var(--accent)" : "var(--text3)" }}>{collected > 0 ? INR(collected) : "—"}</TD>
+                                    <TD right style={{ color: outstanding > 0 ? "var(--red)" : "var(--green)", fontWeight: outstanding > 0 ? 700 : 500 }}>{outstanding > 0 ? INR(outstanding) : "✓"}</TD>
+                                    <TD></TD>
+                                  </tr>
+                                );
+                              })}
                               <tr style={{ background: "var(--bg4)" }}>
                                 <TD style={{ fontWeight: 800, color: "var(--gold)" }}>TOTAL</TD>
                                 <TD right style={{ fontWeight: 800, color: "var(--green)" }}>{INR(r.cash)}</TD>
                                 <TD right style={{ fontWeight: 800, color: "var(--blue, #60a5fa)" }}>{INR(r.online)}</TD>
                                 <TD right style={{ fontWeight: 800, color: "var(--gold)" }}>{INR(r.cih)}</TD>
+                                <TD right style={{ fontWeight: 800, color: "var(--accent)" }}>{INR(r.collectedInPeriod)}</TD>
+                                <TD right style={{ fontWeight: 800, color: r.fifo.totals.outstanding > 0 ? "var(--red)" : "var(--green)" }}>{INR(r.fifo.totals.outstanding)}</TD>
                                 <TD></TD>
                               </tr>
                             </tbody>
@@ -430,6 +581,8 @@ export default function CashCollectionPage() {
                   <TD right style={{ fontWeight: 800, color: "var(--green)" }}>{INR(totals.cash)}</TD>
                   <TD right style={{ fontWeight: 800, color: "var(--blue, #60a5fa)" }}>{INR(totals.online)}</TD>
                   <TD right style={{ fontWeight: 800, color: "var(--gold)" }}>{INR(totals.cih)}</TD>
+                  <TD right style={{ fontWeight: 800, color: "var(--accent)" }}>{INR(totals.collected)}</TD>
+                  <TD right style={{ fontWeight: 800, color: totals.outstanding > 0 ? "var(--red)" : "var(--green)" }}>{INR(totals.outstanding)}</TD>
                   <TD></TD>
                 </tr>
               )}
@@ -437,6 +590,149 @@ export default function CashCollectionPage() {
           </table>
         </div>
       </Card>
+      )}
+
+      {tab === "record" && (
+        <Card style={{ overflow: "hidden" }}>
+          <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <span style={{ fontWeight: 700, color: "var(--gold)", fontSize: 12, textTransform: "uppercase", letterSpacing: 1 }}>
+              Recorded collections · {plabel} · {periodCollections.length} entr{periodCollections.length === 1 ? "y" : "ies"}
+            </span>
+            {canRecord && (
+              <button onClick={() => { resetForm(); setShowForm(true); }}
+                style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 8, fontSize: 11, fontWeight: 800, letterSpacing: 0.5, background: "linear-gradient(135deg, var(--accent), var(--gold2))", color: "#000", border: "none", cursor: "pointer", textTransform: "uppercase" }}>
+                <Icon name="plus" size={13} /> Add Collection
+              </button>
+            )}
+          </div>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12.5, minWidth: 720 }}>
+              <thead>
+                <tr>
+                  <TH>Date</TH>
+                  <TH>Branch</TH>
+                  <TH right>Amount</TH>
+                  <TH>Denominations</TH>
+                  <TH>Note</TH>
+                  <TH>By</TH>
+                  {canRecord && <TH style={{ width: 60, textAlign: "center" }}>Actions</TH>}
+                </tr>
+              </thead>
+              <tbody>
+                {periodCollections.length === 0 && (
+                  <tr><td colSpan={canRecord ? 7 : 6} style={{ padding: 24, textAlign: "center", color: "var(--text3)" }}>No collections recorded for {plabel}.</td></tr>
+                )}
+                {periodCollections.map(c => {
+                  const denomParts = DENOMS
+                    .map(d => ({ d, n: Number(c.denoms?.[d] || c.denoms?.[String(d)] || 0) }))
+                    .filter(x => x.n > 0)
+                    .map(x => `${x.n}×₹${x.d}`);
+                  return (
+                    <tr key={c.id} style={{ borderBottom: "1px solid var(--border)" }}>
+                      <TD style={{ fontWeight: 600 }}>{c.collected_on}</TD>
+                      <TD>{(c.branch_name || branches.find(b => b.id === c.branch_id)?.name || "—").replace("V-CUT ", "")}</TD>
+                      <TD right style={{ color: "var(--accent)", fontWeight: 800 }}>{INR(c.amount)}</TD>
+                      <TD style={{ color: "var(--text3)", fontSize: 11 }}>{denomParts.join(" · ") || "—"}</TD>
+                      <TD style={{ color: "var(--text3)", fontSize: 11 }}>{c.note || "—"}</TD>
+                      <TD style={{ color: "var(--text3)", fontSize: 11 }}>{c.created_by || "—"}</TD>
+                      {canRecord && (
+                        <TD style={{ textAlign: "center" }}>
+                          <IconBtn name="del" variant="danger" onClick={() => deleteCollection(c)} title="Delete" />
+                        </TD>
+                      )}
+                    </tr>
+                  );
+                })}
+                {periodCollections.length > 0 && (
+                  <tr style={{ background: "var(--bg3)", borderTop: "2px solid var(--border2)" }}>
+                    <TD style={{ fontWeight: 800, color: "var(--gold)" }}>TOTAL</TD>
+                    <TD></TD>
+                    <TD right style={{ fontWeight: 800, color: "var(--accent)" }}>{INR(periodCollections.reduce((s, c) => s + (Number(c.amount) || 0), 0))}</TD>
+                    <TD></TD><TD></TD><TD></TD>
+                    {canRecord && <TD></TD>}
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
+
+      {/* Record Collection Modal — denomination grid + note */}
+      <Modal isOpen={showForm} onClose={() => setShowForm(false)} title="Record Cash Collection" width={620}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <div>
+              <label style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Branch *</label>
+              <div style={{ marginTop: 4 }}>
+                <BranchSelect
+                  value={form.branch_id}
+                  onChange={(v) => setForm(f => ({ ...f, branch_id: v }))}
+                  branches={branches}
+                  placeholder="Select branch…"
+                  allowEmpty={false}
+                  minWidth={0}
+                />
+              </div>
+            </div>
+            <div>
+              <label style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Collected On *</label>
+              <input type="date" value={form.collected_on} onChange={e => setForm(f => ({ ...f, collected_on: e.target.value }))}
+                style={{ width: "100%", padding: "10px 12px", borderRadius: 8, background: "var(--bg4)", border: "1px solid var(--border2)", color: "var(--text)", fontSize: 13, marginTop: 4 }} />
+            </div>
+          </div>
+
+          <div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
+              <label style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Denominations</label>
+              <span style={{ fontSize: 11, color: "var(--text3)" }}>Total = <span style={{ color: "var(--accent)", fontWeight: 800 }}>{INR(formAmount)}</span></span>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))", gap: 8 }}>
+              {DENOMS.map(d => {
+                const count = Number(form.denoms[d]) || 0;
+                const sub = d * count;
+                return (
+                  <div key={d} style={{ background: "var(--bg4)", border: "1px solid var(--border2)", borderRadius: 8, padding: "8px 10px" }}>
+                    <div style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, display: "flex", justifyContent: "space-between" }}>
+                      <span>₹{d}</span>
+                      {sub > 0 && <span style={{ color: "var(--accent)" }}>{INR(sub)}</span>}
+                    </div>
+                    <input
+                      type="number" min="0" placeholder="0"
+                      value={form.denoms[d]}
+                      onChange={e => setForm(f => ({ ...f, denoms: { ...f.denoms, [d]: e.target.value } }))}
+                      style={{ width: "100%", marginTop: 4, padding: "6px 8px", borderRadius: 6, background: "var(--bg3)", border: "1px solid var(--border)", color: "var(--text)", fontSize: 14, fontWeight: 700, outline: "none", textAlign: "right" }}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div>
+            <label style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Note</label>
+            <input type="text" placeholder="Optional note (collector, handover reference, etc.)" value={form.note} onChange={e => setForm(f => ({ ...f, note: e.target.value }))}
+              style={{ width: "100%", padding: "10px 12px", borderRadius: 8, background: "var(--bg4)", border: "1px solid var(--border2)", color: "var(--text)", fontSize: 13, marginTop: 4 }} />
+          </div>
+
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginTop: 6 }}>
+            <div style={{ fontSize: 12, color: "var(--text3)" }}>
+              Collection is applied FIFO — oldest outstanding day first.
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={() => setShowForm(false)}
+                style={{ padding: "10px 18px", borderRadius: 10, background: "var(--bg4)", color: "var(--text3)", border: "1px solid var(--border2)", fontWeight: 600, fontSize: 12, cursor: "pointer" }}>Cancel</button>
+              <button onClick={saveCollection} disabled={!form.branch_id || formAmount <= 0}
+                style={{ padding: "10px 22px", borderRadius: 10, background: (!form.branch_id || formAmount <= 0) ? "var(--bg4)" : "linear-gradient(135deg,var(--accent),var(--gold2))", color: (!form.branch_id || formAmount <= 0) ? "var(--text3)" : "#000", border: "none", fontWeight: 800, fontSize: 12, cursor: (!form.branch_id || formAmount <= 0) ? "not-allowed" : "pointer", textTransform: "uppercase", letterSpacing: 0.5 }}>
+                Save Collection
+              </button>
+            </div>
+          </div>
+        </div>
+      </Modal>
+
+      {ConfirmDialog}
+      {ToastContainer}
     </div>
   );
 }
