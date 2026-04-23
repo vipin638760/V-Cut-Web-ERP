@@ -1257,15 +1257,16 @@ function DailyBusinessChart({ entries, filterYear, filterMonth }) {
   const bestIdx = byDay.indexOf(Math.max(...byDay));
   const monthLabel = new Date(filterYear, filterMonth - 1, 1).toLocaleString("en-US", { month: "long", year: "numeric" });
 
-  // Chart dims
-  const H = 220;               // plot height
-  const BAR_W = 26;
-  const GAP = 6;
-  const LEFT = 48;             // y-axis label gutter
-  const PAD_TOP = 16;
-  const PAD_BOTTOM = 32;       // space for x-axis labels
-  const W = LEFT + daysInMonth * (BAR_W + GAP);
+  // Chart dims — a touch more air between bars + softer baseline.
+  const H = 230;               // plot height
+  const BAR_W = 22;
+  const GAP = 10;
+  const LEFT = 52;             // y-axis label gutter
+  const PAD_TOP = 22;          // reserves headroom for "best day" value chip
+  const PAD_BOTTOM = 38;       // space for day + weekday labels
+  const W = LEFT + daysInMonth * (BAR_W + GAP) + 8;
   const yTicks = 4;
+  const BAR_R = 6;             // top-corner radius of each bar
 
   const dayOfWeek = (d) => {
     const dt = new Date(filterYear, filterMonth - 1, d);
@@ -1312,98 +1313,185 @@ function DailyBusinessChart({ entries, filterYear, filterMonth }) {
       ) : (
         <div style={{ position: "relative", overflowX: "auto" }}>
           <svg width={W} height={H + PAD_TOP + PAD_BOTTOM} style={{ display: "block" }}>
+            <defs>
+              {/* Palette — softer gradients with more restrained contrast. */}
+              <linearGradient id="bar-blue" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#38d9f2" />
+                <stop offset="100%" stopColor="#0891a8" stopOpacity="0.75" />
+              </linearGradient>
+              <linearGradient id="bar-accent" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#5de8ff" />
+                <stop offset="100%" stopColor="#12a5bf" stopOpacity="0.85" />
+              </linearGradient>
+              <linearGradient id="bar-green" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#7df094" />
+                <stop offset="100%" stopColor="#22a354" stopOpacity="0.85" />
+              </linearGradient>
+              <linearGradient id="bar-orange" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#ffb877" />
+                <stop offset="100%" stopColor="#d97a2c" stopOpacity="0.8" />
+              </linearGradient>
+              <linearGradient id="bar-purple" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#d7a6ff" stopOpacity="0.95" />
+                <stop offset="100%" stopColor="#8b5cf6" stopOpacity="0.8" />
+              </linearGradient>
+              {/* Subtle highlight sheen overlayed at the top of each bar for a "lit" look. */}
+              <linearGradient id="bar-sheen" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="rgba(255,255,255,0.22)" />
+                <stop offset="60%" stopColor="rgba(255,255,255,0)" />
+              </linearGradient>
+              <filter id="best-glow" x="-40%" y="-40%" width="180%" height="180%">
+                <feGaussianBlur stdDeviation="4" />
+              </filter>
+            </defs>
+
             {/* Y-axis gridlines + labels */}
             {Array.from({ length: yTicks + 1 }, (_, i) => {
               const frac = i / yTicks;
               const y = PAD_TOP + (1 - frac) * H;
               const v = Math.round(max * frac);
+              const isBaseline = i === 0;
               return (
                 <g key={i}>
-                  <line x1={LEFT} y1={y} x2={W} y2={y} stroke="rgba(255,255,255,0.05)" strokeWidth={1} />
-                  <text x={LEFT - 6} y={y + 3} fontSize={9} fill="var(--text3)" textAnchor="end">{v >= 1000 ? `${Math.round(v / 1000)}k` : v}</text>
+                  <line x1={LEFT} y1={y} x2={W - 4} y2={y}
+                    stroke={isBaseline ? "rgba(255,255,255,0.14)" : "rgba(255,255,255,0.04)"}
+                    strokeDasharray={isBaseline ? undefined : "2 4"}
+                    strokeWidth={isBaseline ? 1 : 1} />
+                  {!isBaseline && (
+                    <text x={LEFT - 8} y={y + 3} fontSize={9} fill="var(--text3)" textAnchor="end" fontWeight={600}>
+                      {v >= 1000 ? `${Math.round(v / 1000)}k` : v}
+                    </text>
+                  )}
                 </g>
               );
             })}
-            {/* Stacked bars — cash on bottom (purple demarcation), online+material on top
-                using the existing priority palette (best > weekend > today > default). */}
+
+            {/* Bars — one <g> per day. Unified rounded-top shape via clipPath so
+                cash + non-cash read as a single pill with a clean internal seam. */}
             {byDay.map((v, i) => {
               const x = LEFT + i * (BAR_W + GAP);
-              const totalH = v > 0 ? (v / max) * H : 2;
-              const cashH = v > 0 ? (byDayCash[i] / max) * H : 0;
+              const hasValue = v > 0;
+              const totalH = hasValue ? Math.max(2, (v / max) * H) : 2;
+              const cashH = hasValue ? (byDayCash[i] / max) * H : 0;
               const topH = Math.max(0, totalH - cashH);
               const yTop = PAD_TOP + H - totalH;
               const yCash = PAD_TOP + H - cashH;
+              const baselineY = PAD_TOP + H;
               const dateStr = `${prefix}-${String(i + 1).padStart(2, "0")}`;
               const isToday = dateStr === todayStr;
-              const isBest = i === bestIdx && v > 0;
+              const isBest = i === bestIdx && hasValue;
               const dow = dayOfWeek(i + 1);
               const isWeekend = dow === "Sat" || dow === "Sun";
+              const isHovered = hover && hover.i === i;
               const topFill = isBest
                 ? "url(#bar-green)"
-                : isWeekend
-                  ? "url(#bar-orange)"
-                  : isToday
-                    ? "url(#bar-accent)"
+                : isToday
+                  ? "url(#bar-accent)"
+                  : isWeekend
+                    ? "url(#bar-orange)"
                     : "url(#bar-blue)";
-              const dim = hover && hover.i !== i ? 0.45 : 1;
+              const dim = hover && hover.i !== i ? 0.35 : 1;
+              const dayLabelColor = isBest ? "var(--green)" : isToday ? "var(--accent)" : isWeekend ? "var(--orange)" : "var(--text3)";
+              const dayWeight = (isBest || isToday || isWeekend) ? 800 : 600;
+              const clipId = `bar-clip-${filterYear}-${filterMonth}-${i}`;
               return (
                 <g key={i}
-                  onMouseEnter={() => setHover({ i, v, cash: byDayCash[i], nonCash: byDayNonCash[i], dateStr })}
+                  onMouseEnter={() => hasValue && setHover({ i, v, cash: byDayCash[i], nonCash: byDayNonCash[i], dateStr })}
                   onMouseLeave={() => setHover(null)}
-                  style={{ cursor: v > 0 ? "pointer" : "default" }}>
-                  {/* Non-cash (online + material) — colour-coded top segment */}
-                  {topH > 0 && (
-                    <rect x={x} y={yTop} width={BAR_W} height={topH} rx={4} ry={4} fill={topFill} opacity={dim} style={{ transition: "opacity .15s" }} />
+                  style={{ cursor: hasValue ? "pointer" : "default", transition: "opacity .15s" }}
+                  opacity={dim}>
+                  {/* Subtle weekend column tint to telegraph the rhythm of the month. */}
+                  {isWeekend && hasValue && (
+                    <rect x={x - 2} y={PAD_TOP} width={BAR_W + 4} height={H}
+                      fill="rgba(251,146,60,0.04)" />
                   )}
-                  {/* Cash — purple bottom segment, clearly demarcated */}
-                  {cashH > 0 && (
-                    <rect x={x} y={yCash} width={BAR_W} height={cashH} rx={4} ry={4} fill="url(#bar-purple)" opacity={dim} style={{ transition: "opacity .15s" }} />
+
+                  {/* Clip — rounded top corners for the entire bar column. */}
+                  <defs>
+                    <clipPath id={clipId}>
+                      <path d={`M${x},${yTop + BAR_R}
+                                Q${x},${yTop} ${x + BAR_R},${yTop}
+                                H${x + BAR_W - BAR_R}
+                                Q${x + BAR_W},${yTop} ${x + BAR_W},${yTop + BAR_R}
+                                V${baselineY}
+                                H${x}
+                                Z`} />
+                    </clipPath>
+                  </defs>
+
+                  {hasValue ? (
+                    <g clipPath={`url(#${clipId})`}>
+                      {isBest && (
+                        <rect x={x - 4} y={yTop - 4} width={BAR_W + 8} height={totalH + 8}
+                          fill="rgba(74,222,128,0.35)" filter="url(#best-glow)" />
+                      )}
+                      {topH > 0 && (
+                        <rect x={x} y={yTop} width={BAR_W} height={topH} fill={topFill} />
+                      )}
+                      {cashH > 0 && (
+                        <rect x={x} y={yCash} width={BAR_W} height={cashH} fill="url(#bar-purple)" />
+                      )}
+                      {/* Thin seam between cash and non-cash for visual separation. */}
+                      {cashH > 0 && topH > 0 && (
+                        <rect x={x} y={yCash - 0.5} width={BAR_W} height={1} fill="rgba(255,255,255,0.18)" />
+                      )}
+                      {/* Sheen along the top ~25% of the bar. */}
+                      <rect x={x} y={yTop} width={BAR_W} height={Math.min(totalH * 0.35, 20)} fill="url(#bar-sheen)" />
+                    </g>
+                  ) : (
+                    <rect x={x} y={baselineY - 2} width={BAR_W} height={2} rx={1} fill="rgba(255,255,255,0.06)" />
                   )}
-                  {v === 0 && (
-                    <rect x={x} y={PAD_TOP + H - 2} width={BAR_W} height={2} rx={1} fill="rgba(255,255,255,0.06)" />
+
+                  {/* Today ring — drawn above the bar, not clipped. */}
+                  {isToday && hasValue && (
+                    <rect x={x - 1.5} y={yTop - 1.5} width={BAR_W + 3} height={totalH + 3} rx={BAR_R + 1.5} ry={BAR_R + 1.5}
+                      fill="none" stroke="var(--accent)" strokeWidth={1.5} strokeDasharray="3 3" opacity={0.75} />
                   )}
-                  <text x={x + BAR_W / 2} y={PAD_TOP + H + 14} fontSize={9} fill={isBest ? "var(--green)" : isWeekend ? "var(--orange)" : isToday ? "var(--accent)" : "var(--text3)"} textAnchor="middle" fontWeight={isToday || isBest || isWeekend ? 800 : 600}>
-                    {i + 1}
-                  </text>
-                  <text x={x + BAR_W / 2} y={PAD_TOP + H + 25} fontSize={7} fill={isWeekend ? "var(--orange)" : "var(--text3)"} textAnchor="middle" opacity={isWeekend ? 0.9 : 0.75} fontWeight={isWeekend ? 700 : 400}>
-                    {dow.slice(0, 2)}
+
+                  {/* Value chip on best day (and on hovered bar). */}
+                  {(isBest || isHovered) && hasValue && (
+                    (() => {
+                      const label = v >= 100000 ? `₹${(v / 100000).toFixed(1)}L` : v >= 1000 ? `₹${Math.round(v / 1000)}k` : `₹${v}`;
+                      const chipW = label.length * 6 + 10;
+                      const chipX = x + BAR_W / 2 - chipW / 2;
+                      const chipY = Math.max(2, yTop - 16);
+                      const chipColor = isHovered && !isBest ? "var(--accent)" : "var(--green)";
+                      return (
+                        <g>
+                          <rect x={chipX} y={chipY} width={chipW} height={14} rx={7}
+                            fill="var(--bg4)" stroke={chipColor} strokeWidth={1} opacity={0.95} />
+                          <text x={x + BAR_W / 2} y={chipY + 10} fontSize={9} fontWeight={800}
+                            fill={chipColor} textAnchor="middle">{label}</text>
+                        </g>
+                      );
+                    })()
+                  )}
+
+                  {/* Day-of-month number. */}
+                  <text x={x + BAR_W / 2} y={baselineY + 14} fontSize={9.5} fill={dayLabelColor}
+                    textAnchor="middle" fontWeight={dayWeight}>{i + 1}</text>
+                  {/* Weekday letter — single-letter, muted. */}
+                  <text x={x + BAR_W / 2} y={baselineY + 26} fontSize={8}
+                    fill={isWeekend ? "var(--orange)" : "var(--text3)"}
+                    textAnchor="middle" opacity={isWeekend ? 0.85 : 0.5}
+                    fontWeight={isWeekend ? 700 : 500}>
+                    {dow.slice(0, 1)}
                   </text>
                 </g>
               );
             })}
+
             {/* Optional average reference line — only drawn when the checkbox is ticked. */}
             {showAvg && avg > 0 && (() => {
               const yAvg = PAD_TOP + H - (avg / max) * H;
               return (
                 <g>
-                  <line x1={LEFT} y1={yAvg} x2={W} y2={yAvg} stroke="var(--blue, #60a5fa)" strokeWidth={1.4} strokeDasharray="5 4" />
-                  <rect x={LEFT + 4} y={yAvg - 9} width={72} height={14} rx={3} fill="rgba(96,165,250,0.18)" stroke="rgba(96,165,250,0.45)" />
+                  <line x1={LEFT} y1={yAvg} x2={W - 4} y2={yAvg} stroke="var(--blue, #60a5fa)" strokeWidth={1.4} strokeDasharray="5 4" opacity={0.9} />
+                  <rect x={LEFT + 4} y={yAvg - 9} width={76} height={14} rx={3} fill="rgba(96,165,250,0.18)" stroke="rgba(96,165,250,0.45)" />
                   <text x={LEFT + 8} y={yAvg + 1} fontSize={9} fill="var(--blue, #60a5fa)" fontWeight={800}>AVG {INR(avg)}</text>
                 </g>
               );
             })()}
-            <defs>
-              <linearGradient id="bar-blue" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="rgba(34,211,238,0.85)" />
-                <stop offset="100%" stopColor="rgba(34,211,238,0.35)" />
-              </linearGradient>
-              <linearGradient id="bar-accent" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="rgba(34,211,238,0.95)" />
-                <stop offset="100%" stopColor="rgba(34,211,238,0.45)" />
-              </linearGradient>
-              <linearGradient id="bar-green" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="rgba(74,222,128,0.95)" />
-                <stop offset="100%" stopColor="rgba(74,222,128,0.4)" />
-              </linearGradient>
-              <linearGradient id="bar-orange" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="rgba(251,146,60,0.9)" />
-                <stop offset="100%" stopColor="rgba(251,146,60,0.35)" />
-              </linearGradient>
-              <linearGradient id="bar-purple" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="rgba(192,132,252,0.95)" />
-                <stop offset="100%" stopColor="rgba(168,85,247,0.55)" />
-              </linearGradient>
-            </defs>
           </svg>
 
           {hover && (
