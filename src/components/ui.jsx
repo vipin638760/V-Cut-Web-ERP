@@ -186,7 +186,9 @@ export function Pill({ label, color = "gold" }) {
   );
 }
 
-// Card — uses surface hierarchy, no hard borders
+// Card — uses surface hierarchy, no hard borders.
+// When content overflows horizontally, shows a top banner + floating side buttons — all clickable
+// so users on laptops without touch can still scroll wide tables.
 export function Card({ children, style }) {
   const ref = useRef(null);
   const [overflow, setOverflow] = useState(false);
@@ -210,6 +212,28 @@ export function Card({ children, style }) {
     return () => { ro.disconnect(); el.removeEventListener("scroll", check); };
   }, [children]);
 
+  const scrollBy = (dir) => {
+    const el = ref.current;
+    if (!el) return;
+    el.scrollBy({ left: dir * Math.max(el.clientWidth * 0.8, 240), behavior: "smooth" });
+  };
+
+  const sideBtnStyle = (disabled) => ({
+    position: "absolute", top: "50%", transform: "translateY(-50%)",
+    width: 34, height: 34, borderRadius: "50%",
+    background: "rgba(var(--accent-rgb),0.9)",
+    border: "1px solid rgba(var(--accent-rgb),0.6)",
+    color: "#001418",
+    display: "flex", alignItems: "center", justifyContent: "center",
+    cursor: disabled ? "default" : "pointer",
+    opacity: disabled ? 0 : 1,
+    pointerEvents: disabled ? "none" : "auto",
+    boxShadow: "0 4px 12px rgba(0,0,0,0.4)",
+    fontSize: 16, fontWeight: 800,
+    transition: "opacity .15s, transform .15s",
+    zIndex: 2,
+  });
+
   return (
     <div style={{ position: "relative" }}>
       {overflow && (
@@ -222,25 +246,33 @@ export function Card({ children, style }) {
           fontSize: 10, fontWeight: 700, color: "var(--accent)",
           textTransform: "uppercase", letterSpacing: 1,
         }}>
-          <span style={{
-            display: "inline-flex", alignItems: "center", gap: 5,
-            opacity: scrollPos.atStart ? 0.35 : 1,
-            transition: "opacity .15s",
-          }}>
+          <button type="button" onClick={() => scrollBy(-1)} disabled={scrollPos.atStart}
+            style={{
+              display: "inline-flex", alignItems: "center", gap: 5,
+              opacity: scrollPos.atStart ? 0.35 : 1,
+              transition: "opacity .15s",
+              background: "none", border: "none", color: "inherit",
+              font: "inherit", letterSpacing: "inherit", textTransform: "inherit",
+              cursor: scrollPos.atStart ? "default" : "pointer", padding: 0,
+            }}>
             <span style={{ fontSize: 13, lineHeight: 1 }}>←</span>
             <span>Scroll</span>
-          </span>
+          </button>
           <span style={{ color: "var(--text3)", fontWeight: 600, letterSpacing: 0.5 }}>
-            More data hidden — swipe to see
+            More data hidden — swipe or click
           </span>
-          <span style={{
-            display: "inline-flex", alignItems: "center", gap: 5,
-            opacity: scrollPos.atEnd ? 0.35 : 1,
-            transition: "opacity .15s",
-          }}>
+          <button type="button" onClick={() => scrollBy(1)} disabled={scrollPos.atEnd}
+            style={{
+              display: "inline-flex", alignItems: "center", gap: 5,
+              opacity: scrollPos.atEnd ? 0.35 : 1,
+              transition: "opacity .15s",
+              background: "none", border: "none", color: "inherit",
+              font: "inherit", letterSpacing: "inherit", textTransform: "inherit",
+              cursor: scrollPos.atEnd ? "default" : "pointer", padding: 0,
+            }}>
             <span>Scroll</span>
             <span style={{ fontSize: 13, lineHeight: 1 }}>→</span>
-          </span>
+          </button>
         </div>
       )}
       <div style={{ position: "relative" }}>
@@ -252,6 +284,14 @@ export function Card({ children, style }) {
         )}
         {overflow && !scrollPos.atStart && (
           <div style={{ position: "absolute", top: 0, bottom: 0, left: 0, width: 32, pointerEvents: "none", background: "linear-gradient(90deg, var(--bg3) 0%, transparent 100%)", borderTopLeftRadius: 16, borderBottomLeftRadius: 16 }} />
+        )}
+        {overflow && (
+          <button type="button" aria-label="Scroll left" onClick={() => scrollBy(-1)}
+            disabled={scrollPos.atStart} style={{ ...sideBtnStyle(scrollPos.atStart), left: 8 }}>‹</button>
+        )}
+        {overflow && (
+          <button type="button" aria-label="Scroll right" onClick={() => scrollBy(1)}
+            disabled={scrollPos.atEnd} style={{ ...sideBtnStyle(scrollPos.atEnd), right: 8 }}>›</button>
         )}
       </div>
     </div>
