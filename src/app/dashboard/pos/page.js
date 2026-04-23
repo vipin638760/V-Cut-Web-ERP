@@ -4,7 +4,7 @@ import { collection, onSnapshot, query, orderBy, where, addDoc, deleteDoc, doc, 
 import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
 import { INR } from "@/lib/calculations";
-import { Icon, IconBtn, Card, PeriodWidget, TH, TD, Modal, useConfirm, useToast } from "@/components/ui";
+import { Icon, IconBtn, Card, PeriodWidget, TH, TD, Modal, BranchSelect, useConfirm, useToast } from "@/components/ui";
 import { staffStatusForMonth, effectiveBranchOnDate } from "@/lib/calculations";
 import VLoader from "@/components/VLoader";
 import { MEMBERSHIP_TIERS, tierByKey, isActiveMember, daysUntilExpiry, computeMemberToDate, resolveDiscountRate, DEFAULT_MEMBER_DISCOUNT_PCT, MAX_EXTRA_DISCOUNT_PCT } from "@/lib/membership";
@@ -2263,17 +2263,17 @@ export default function POSPage() {
                </div>
              )}
           </div>
-          <select
+          <BranchSelect
             value={selBranch}
-            onChange={e => { setSelBranch(e.target.value); setStaffRows({}); setOnlineInc(""); setCart([]); }}
-            style={{
-              background: "var(--bg4)", border: "none", color: selBranch ? "var(--gold)" : "var(--text3)", fontWeight: 800,
-              fontSize: 13, outline: "none", cursor: "pointer", textTransform: "uppercase",
-              padding: "10px 12px", borderRadius: 10
-            }}>
-            <option value="">SELECT BRANCH…</option>
-            {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-          </select>
+            onChange={(v) => { setSelBranch(v); setStaffRows({}); setOnlineInc(""); setCart([]); }}
+            branches={branches}
+            placeholder="SELECT BRANCH…"
+            buttonStyle={{
+              background: "var(--bg4)", border: "none",
+              color: selBranch ? "var(--gold)" : "var(--text3)", fontWeight: 800,
+              textTransform: "uppercase", padding: "10px 12px", borderRadius: 10,
+            }}
+          />
           <input
             type="date"
             value={selDate}
@@ -2518,12 +2518,14 @@ export default function POSPage() {
             <div style={{ display: "flex", flexDirection: "column", gap: 8, paddingBottom: 12, borderBottom: "1px solid var(--border2)" }}>
               <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                 <label style={{ fontSize: 9, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1 }}>Branch</label>
-                <select value={selBranch}
-                  onChange={e => { setSelBranch(e.target.value); setStaffRows({}); setOnlineInc(""); setCart([]); setDefaultStaffId(""); }}
-                  style={{ padding: "8px 10px", borderRadius: 8, background: "var(--bg4)", border: "1px solid var(--border2)", color: selBranch ? "var(--gold)" : "var(--text3)", fontSize: 12, fontWeight: 700, outline: "none", cursor: "pointer" }}>
-                  <option value="">Select branch…</option>
-                  {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-                </select>
+                <BranchSelect
+                  value={selBranch}
+                  onChange={(v) => { setSelBranch(v); setStaffRows({}); setOnlineInc(""); setCart([]); setDefaultStaffId(""); }}
+                  branches={branches}
+                  placeholder="Select branch…"
+                  minWidth={0}
+                  buttonStyle={{ padding: "8px 10px", borderRadius: 8, background: "var(--bg4)", color: selBranch ? "var(--gold)" : "var(--text3)", fontSize: 12, fontWeight: 700 }}
+                />
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                 <label style={{ fontSize: 9, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1 }}>Default Stylist (auto-assign)</label>

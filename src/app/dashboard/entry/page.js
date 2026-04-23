@@ -4,7 +4,7 @@ import { collection, onSnapshot, query, orderBy, where, addDoc, deleteDoc, doc, 
 import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
 import { INR } from "@/lib/calculations";
-import { Icon, IconBtn, Card, PeriodWidget, TH, TD, Modal, useConfirm, useToast } from "@/components/ui";
+import { Icon, IconBtn, Card, PeriodWidget, TH, TD, Modal, BranchSelect, useConfirm, useToast } from "@/components/ui";
 import { staffStatusForMonth, effectiveBranchOnDate } from "@/lib/calculations";
 import VLoader from "@/components/VLoader";
 
@@ -1319,10 +1319,13 @@ export default function EntryPage() {
           {/* Branch + Date */}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(200px,1fr))", gap: 12, marginBottom: 16 }}>
             <FG label="Branch">
-              <select value={selBranch} onChange={e => { setSelBranch(e.target.value); setStaffRows({}); setLoanStaffIds(new Set()); setSharedServices([]); setOnlineInc(""); setMatExp(""); setOtherExp(""); setEditId(null); if(!editId) setGstPct(globalGst); }}>
-                <option value="">Select branch...</option>
-                {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-              </select>
+              <BranchSelect
+                value={selBranch}
+                onChange={(v) => { setSelBranch(v); setStaffRows({}); setLoanStaffIds(new Set()); setSharedServices([]); setOnlineInc(""); setMatExp(""); setOtherExp(""); setEditId(null); if(!editId) setGstPct(globalGst); }}
+                branches={branches}
+                placeholder="Select branch..."
+                minWidth={0}
+              />
             </FG>
             <FG label="Date">
               <input type="date" value={selDate} onChange={e => { setSelDate(e.target.value); setEditId(null); if(!editId) setGstPct(globalGst); }} />

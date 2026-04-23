@@ -4,7 +4,7 @@ import { collection, onSnapshot, query, orderBy, addDoc, deleteDoc, doc, setDoc,
 import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
 import { INR, proRataSalary } from "@/lib/calculations";
-import { Icon, IconBtn, Pill, Card, PeriodWidget, TH, TD, Modal, useConfirm, useToast } from "@/components/ui";
+import { Icon, IconBtn, Pill, Card, PeriodWidget, TH, TD, Modal, BranchSelect, useConfirm, useToast } from "@/components/ui";
 import VLoader from "@/components/VLoader";
 
 // ExcelJS is ~200KB — load only when Template/Upload/Export is actually used.
@@ -1238,9 +1238,14 @@ export default function ExpensesPage() {
                <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
                   <div>
                      <label style={{ fontSize: 10, color: "var(--text3)", textTransform: "uppercase", fontWeight: 700, display: "block", marginBottom: 6 }}>Branch</label>
-                     <select value={form.branch_id} onChange={e => setForm({...form, branch_id: e.target.value})} style={IS}>
-                        {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-                     </select>
+                     <BranchSelect
+                        value={form.branch_id}
+                        onChange={(v) => setForm({...form, branch_id: v})}
+                        branches={branches}
+                        allowEmpty={false}
+                        placeholder="Select branch…"
+                        minWidth={0}
+                     />
                   </div>
 
                   <div>

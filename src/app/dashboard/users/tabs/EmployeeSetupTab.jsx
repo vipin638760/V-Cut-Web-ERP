@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { collection, onSnapshot, doc, setDoc, deleteDoc, addDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { INR, staffOverallStatus } from "@/lib/calculations";
-import { Card, Pill, TH, TD, IconBtn, StatCard, Icon, Modal, ToggleGroup, useConfirm, useToast } from "@/components/ui";
+import { Card, Pill, TH, TD, IconBtn, StatCard, Icon, Modal, ToggleGroup, BranchSelect, useConfirm, useToast } from "@/components/ui";
 import VLoader from "@/components/VLoader";
 
 
@@ -288,9 +288,14 @@ export default function EmployeeSetupTab() {
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
             <div>
               <label style={{ fontSize: 11, fontWeight: 900, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.5, display: "block", marginBottom: 10 }}>Primary Node Asset</label>
-              <select value={editForm.branch_id} onChange={e => setEditForm({...editForm, branch_id: e.target.value})} style={{ ...inputStyle, appearance: "none" }}>
-                {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-              </select>
+              <BranchSelect
+                value={editForm.branch_id}
+                onChange={(v) => setEditForm({...editForm, branch_id: v})}
+                branches={branches}
+                allowEmpty={false}
+                placeholder="Select branch…"
+                minWidth={0}
+              />
             </div>
             <div>
               <label style={{ fontSize: 11, fontWeight: 900, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.5, display: "block", marginBottom: 10 }}>Designated Permission</label>

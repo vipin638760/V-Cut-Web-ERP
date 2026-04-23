@@ -4,7 +4,7 @@ import { collection, onSnapshot, query, where, orderBy, addDoc, writeBatch, doc,
 import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
 import { INR } from "@/lib/calculations";
-import { Icon, Card, TH, TD, useConfirm, useToast } from "@/components/ui";
+import { Icon, Card, TH, TD, BranchSelect, useConfirm, useToast } from "@/components/ui";
 import VLoader from "@/components/VLoader";
 
 export default function IncentiveCalculatorPage() {
@@ -399,11 +399,7 @@ export default function IncentiveCalculatorPage() {
               </button>
             ))}
           </div>
-          <select value={branchFilter} onChange={e => setBranchFilter(e.target.value)}
-            style={{ padding: "8px 12px", border: "1px solid var(--border2)", borderRadius: 10, fontSize: 13, background: "var(--bg3)", color: "var(--text)", minWidth: 160 }}>
-            <option value="">All Branches</option>
-            {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-          </select>
+          <BranchSelect value={branchFilter} onChange={setBranchFilter} branches={branches} placeholder="All Branches" />
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <span style={{ fontSize: 11, color: "var(--text3)", fontWeight: 600 }}>From:</span>
             <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}

@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { collection, onSnapshot, doc, deleteDoc, addDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { INR } from "@/lib/calculations";
-import { Card, Pill, TH, TD, IconBtn, PeriodWidget, StatCard, Icon, useConfirm, useToast } from "@/components/ui";
+import { Card, Pill, TH, TD, IconBtn, PeriodWidget, StatCard, Icon, BranchSelect, useConfirm, useToast } from "@/components/ui";
 import VLoader from "@/components/VLoader";
 
 
@@ -114,10 +114,15 @@ export default function TxnSetupTab() {
         <form onSubmit={handleSave} style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 28 }}>
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             <label style={{ fontSize: 11, fontWeight: 900, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.5 }}>Asset Target</label>
-            <select value={form.branch_id} onChange={e => setForm({ ...form, branch_id: e.target.value })} style={{ ...inputStyle, appearance: "none" }}>
-              <option value="all">Global Network (Shared)</option>
-              {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-            </select>
+            <BranchSelect
+              value={form.branch_id}
+              onChange={(v) => setForm({ ...form, branch_id: v })}
+              branches={branches}
+              allowEmpty={false}
+              extraOptions={[{ value: "all", label: "Global Network (Shared)" }]}
+              placeholder="Select branch…"
+              minWidth={0}
+            />
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             <label style={{ fontSize: 11, fontWeight: 900, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.5 }}>Flow Direction</label>

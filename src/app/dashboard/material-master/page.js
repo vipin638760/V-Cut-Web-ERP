@@ -4,7 +4,7 @@ import { collection, onSnapshot, query, orderBy, doc, writeBatch, addDoc, getDoc
 import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
 import { INR } from "@/lib/calculations";
-import { Icon, IconBtn, Card, Pill, TH, TD, Modal, useConfirm, useToast } from "@/components/ui";
+import { Icon, IconBtn, Card, Pill, TH, TD, Modal, BranchSelect, useConfirm, useToast } from "@/components/ui";
 import VLoader from "@/components/VLoader";
 
 // ExcelJS is ~200KB — load only when Template/Upload/Export is actually used.
@@ -1521,11 +1521,14 @@ export default function MaterialMasterPage() {
             <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 12, marginBottom: 12 }}>
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 <label style={{ fontSize: 11, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Destination Branch *</label>
-                <select value={newList.branch_id} onChange={e => setNewList(n => ({ ...n, branch_id: e.target.value }))}
-                  style={{ padding: "10px 14px", borderRadius: 10, background: "var(--bg3)", border: "1px solid var(--border2)", color: "var(--text)", fontSize: 13, outline: "none" }}>
-                  <option value="">Select branch…</option>
-                  {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-                </select>
+                <BranchSelect
+                  value={newList.branch_id}
+                  onChange={(v) => setNewList(n => ({ ...n, branch_id: v }))}
+                  branches={branches}
+                  placeholder="Select branch…"
+                  allowEmpty={false}
+                  minWidth={0}
+                />
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 <label style={{ fontSize: 11, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Transfer Date *</label>

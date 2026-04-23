@@ -4,7 +4,7 @@ import { collection, onSnapshot, doc, setDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
 import { INR } from "@/lib/calculations";
-import { Card, Pill, TH, TD, StatCard, Icon, useConfirm } from "@/components/ui";
+import { Card, Pill, TH, TD, StatCard, Icon, BranchSelect, useConfirm } from "@/components/ui";
 import VLoader from "@/components/VLoader";
 
 
@@ -85,17 +85,6 @@ export default function SalaryTab() {
     transition: "all 0.2s"
   };
 
-  const selectStyle = { 
-    padding: "10px 14px", 
-    border: "1px solid var(--border2)", 
-    borderRadius: 10, 
-    background: "rgba(255,255,255,0.02)", 
-    color: "var(--text)", 
-    maxWidth: 180,
-    outline: "none",
-    fontSize: 13,
-    fontWeight: 600
-  };
 
   return (
     <div style={{ animation: "fadeIn 0.5s ease-out", display: "flex", flexDirection: "column", gap: 32 }}>
@@ -196,9 +185,14 @@ export default function SalaryTab() {
                           <input type="number" value={localStaff[sid]?.target || 0} onChange={e => handleChange(sid, 'target', e.target.value)} style={inputStyle} />
                         </TD>
                         <TD>
-                          <select value={localStaff[sid]?.branch_id || ""} onChange={e => handleChange(sid, 'branch_id', e.target.value)} style={{ ...selectStyle, appearance: "none" }}>
-                            {branches.map(br => <option key={br.id} value={br.id}>{br.name}</option>)}
-                          </select>
+                          <BranchSelect
+                            value={localStaff[sid]?.branch_id || ""}
+                            onChange={(v) => handleChange(sid, 'branch_id', v)}
+                            branches={branches}
+                            allowEmpty={false}
+                            placeholder="Select branch…"
+                            minWidth={0}
+                          />
                         </TD>
                       </tr>
                     );

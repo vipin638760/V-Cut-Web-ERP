@@ -10,7 +10,7 @@ import {
   getStaffSalaryForMonth
 } from "@/lib/calculations";
 import { MONTHS } from "@/lib/constants";
-import { Icon, IconBtn, Pill, Card, PeriodWidget, TH, TD, StatCard, ProgressBar, Modal, useConfirm, useToast } from "@/components/ui";
+import { Icon, IconBtn, Pill, Card, PeriodWidget, TH, TD, StatCard, ProgressBar, Modal, BranchSelect, useConfirm, useToast } from "@/components/ui";
 
 
 const NOW = new Date();
@@ -375,11 +375,7 @@ export default function StaffPage() {
             style={{ padding: "8px 12px 8px 32px", border: "1px solid var(--border2)", borderRadius: 10, fontSize: 13, background: "var(--bg3)", color: "var(--text)", width: "100%", outline: "none" }} />
           <span style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "var(--text3)", fontSize: 14, pointerEvents: "none" }}>🔍</span>
         </div>
-        <select value={branchFilter} onChange={e => setBranchFilter(e.target.value)}
-          style={{ padding: "8px 12px", border: "1px solid var(--border2)", borderRadius: 10, fontSize: 13, background: "var(--bg3)", color: "var(--text)", minWidth: 160 }}>
-          <option value="">All Branches</option>
-          {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-        </select>
+        <BranchSelect value={branchFilter} onChange={setBranchFilter} branches={branches} placeholder="All Branches" />
 
         <div style={{ display: "inline-flex", background: "var(--bg3)", border: "1.5px solid var(--border2)", borderRadius: 12, padding: 3, gap: 2 }}>
           {[["all", "All"], ["active", "Active"], ["inactive", "Inactive"]].map(([val, label]) => (
@@ -415,12 +411,10 @@ export default function StaffPage() {
         <form onSubmit={handleSave} style={{ display: "flex", flexDirection: "column", gap: 20 }}>
           <FormField label="Full Name"><input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="Enter name" /></FormField>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-            <FormField label="Branch">
-              <select value={form.branch_id} onChange={e => setForm({ ...form, branch_id: e.target.value })}>
-                <option value="">Select...</option>
-                {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-              </select>
-            </FormField>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, justifyContent: "flex-end" }}>
+              <label style={{ fontSize: 12, color: "var(--text2)", fontWeight: 700, textTransform: "capitalize", letterSpacing: 1 }}>Branch</label>
+              <BranchSelect value={form.branch_id} onChange={(v) => setForm({ ...form, branch_id: v })} branches={branches} placeholder="Select..." allowEmpty={false} minWidth={0} />
+            </div>
             <FormField label="Role">
               <select value={form.role} onChange={e => setForm({ ...form, role: e.target.value })}>
                 <option value="">Select...</option>
@@ -703,11 +697,13 @@ export default function StaffPage() {
                     {dayDraft.present && (
                       <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                         <label style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Worked at</label>
-                        <select value={dayDraft.branch_id || ""} onChange={e => setDayDraft(d => ({ ...d, branch_id: e.target.value }))}
-                          style={{ padding: "8px 10px", borderRadius: 8, background: "var(--bg4)", border: "1px solid var(--border2)", color: "var(--text)", fontSize: 12 }}>
-                          <option value="">—</option>
-                          {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-                        </select>
+                        <BranchSelect
+                          value={dayDraft.branch_id || ""}
+                          onChange={(v) => setDayDraft(d => ({ ...d, branch_id: v }))}
+                          branches={branches}
+                          placeholder="—"
+                          minWidth={0}
+                        />
                       </div>
                     )}
                     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -747,12 +743,17 @@ export default function StaffPage() {
               <strong>{branches.find(b => b.id === transferModal.branch_id)?.name || "—"}</strong>.
               This does not change their home branch.
             </div>
-            <FormField label="Transfer To Branch">
-              <select value={transferForm.to_branch_id} onChange={e => setTransferForm({ ...transferForm, to_branch_id: e.target.value })}>
-                <option value="">Select...</option>
-                {branches.filter(b => b.id !== transferModal.branch_id).map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-              </select>
-            </FormField>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, justifyContent: "flex-end" }}>
+              <label style={{ fontSize: 12, color: "var(--text2)", fontWeight: 700, textTransform: "capitalize", letterSpacing: 1 }}>Transfer To Branch</label>
+              <BranchSelect
+                value={transferForm.to_branch_id}
+                onChange={(v) => setTransferForm({ ...transferForm, to_branch_id: v })}
+                branches={branches.filter(b => b.id !== transferModal.branch_id)}
+                placeholder="Select..."
+                allowEmpty={false}
+                minWidth={0}
+              />
+            </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
               <FormField label="Start Date *">
                 <input type="date" required value={transferForm.start_date} onChange={e => setTransferForm({ ...transferForm, start_date: e.target.value })} />

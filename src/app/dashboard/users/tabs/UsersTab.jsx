@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { collection, onSnapshot, doc, setDoc, deleteDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { DEFAULTS_USERS } from "@/lib/constants";
-import { Card, Pill, TH, TD, IconBtn, Icon, useConfirm, useToast } from "@/components/ui";
+import { Card, Pill, TH, TD, IconBtn, Icon, BranchSelect, useConfirm, useToast } from "@/components/ui";
 import VLoader from "@/components/VLoader";
 
 
@@ -130,10 +130,15 @@ export default function UsersTab() {
           </div>
           <div>
             <label style={{ fontSize: 11, fontWeight: 900, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.5, display: "block", marginBottom: 10 }}>Node Access (Branch)</label>
-            <select value={form.branch_id || "all"} onChange={e => setForm({ ...form, branch_id: e.target.value })} style={{ ...inputStyle, appearance: "none" }}>
-              <option value="all">Global Network Access</option>
-              {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-            </select>
+            <BranchSelect
+              value={form.branch_id || "all"}
+              onChange={(v) => setForm({ ...form, branch_id: v })}
+              branches={branches}
+              allowEmpty={false}
+              extraOptions={[{ value: "all", label: "Global Network Access" }]}
+              placeholder="Select branch…"
+              minWidth={0}
+            />
           </div>
           <div>
             <label style={{ fontSize: 11, fontWeight: 900, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.5, display: "block", marginBottom: 10 }}>Linked Staff Asset</label>

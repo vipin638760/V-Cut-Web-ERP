@@ -4,7 +4,7 @@ import { collection, onSnapshot, query, orderBy, addDoc, doc, writeBatch, delete
 import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
 import { INR } from "@/lib/calculations";
-import { Icon, IconBtn, Pill, Card, TH, TD, Modal, useConfirm, useToast } from "@/components/ui";
+import { Icon, IconBtn, Pill, Card, TH, TD, Modal, BranchSelect, useConfirm, useToast } from "@/components/ui";
 import VLoader from "@/components/VLoader";
 
 // ExcelJS is ~200KB — load only when Export/Template/Upload is actually used.
@@ -1767,16 +1767,18 @@ export default function MaterialsPage() {
                   style={{ padding: "6px 14px", borderRadius: 8, background: "var(--red-bg)", color: "var(--red)", border: "1px solid rgba(248,113,113,0.3)", cursor: "pointer", fontWeight: 800, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5 }}>
                   Remove Selected
                 </button>
-                <select onChange={e => {
-                  const bid = e.target.value;
-                  if (!bid) return;
-                  setCatalogRows(prev => prev.map(r => selectedUidSet.has(r._uid) ? { ...r, branch_id: bid } : r));
-                  e.target.value = "";
-                }}
-                  style={{ padding: "6px 10px", borderRadius: 8, background: "var(--bg4)", border: "1px solid var(--border2)", color: "var(--text)", fontSize: 12, outline: "none" }}>
-                  <option value="">Set branch for selected…</option>
-                  {branches.map(b => <option key={b.id} value={b.id}>{b.name.replace("V-CUT ", "")}</option>)}
-                </select>
+                <BranchSelect
+                  value=""
+                  onChange={(bid) => {
+                    if (!bid) return;
+                    setCatalogRows(prev => prev.map(r => selectedUidSet.has(r._uid) ? { ...r, branch_id: bid } : r));
+                  }}
+                  branches={branches}
+                  stripPrefix="V-CUT "
+                  placeholder="Set branch for selected…"
+                  minWidth={180}
+                  buttonStyle={{ padding: "6px 10px", borderRadius: 8, background: "var(--bg4)", fontSize: 12 }}
+                />
                 <button onClick={() => setSelectedUids([])}
                   style={{ padding: "4px 10px", borderRadius: 8, background: "transparent", color: "var(--text3)", border: "1px solid var(--border2)", cursor: "pointer", fontSize: 11, fontWeight: 700 }}>
                   Clear
@@ -1844,11 +1846,15 @@ export default function MaterialsPage() {
                             placeholder="0" style={{ ...inp, textAlign: "right", fontWeight: 700 }} />
                         </TD>
                         <TD>
-                          <select value={r.branch_id} onChange={e => updateCatalogRow(r._uid, { branch_id: e.target.value })}
-                            style={{ ...inp, color: r.branch_id ? "var(--text)" : "var(--text3)" }}>
-                            <option value="">Select branch…</option>
-                            {branches.map(b => <option key={b.id} value={b.id}>{b.name.replace("V-CUT ", "")}</option>)}
-                          </select>
+                          <BranchSelect
+                            value={r.branch_id}
+                            onChange={(v) => updateCatalogRow(r._uid, { branch_id: v })}
+                            branches={branches}
+                            stripPrefix="V-CUT "
+                            placeholder="Select branch…"
+                            allowEmpty={false}
+                            minWidth={0}
+                          />
                         </TD>
                         <TD right style={{ fontWeight: 800, color: lineTotal > 0 ? "var(--green)" : "var(--text3)" }}>{lineTotal > 0 ? INR(lineTotal) : "—"}</TD>
                         <TD>
@@ -2106,11 +2112,14 @@ export default function MaterialsPage() {
             <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 12, marginBottom: 14 }}>
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 <label style={{ fontSize: 11, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Destination Branch</label>
-                <select value={transferModal.branch_id} onChange={e => setTransferModal(t => ({ ...t, branch_id: e.target.value }))}
-                  style={{ padding: "10px 14px", borderRadius: 10, background: "var(--bg3)", border: "1px solid var(--border2)", color: "var(--text)", fontSize: 13, outline: "none" }}>
-                  <option value="">Select branch...</option>
-                  {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-                </select>
+                <BranchSelect
+                  value={transferModal.branch_id}
+                  onChange={(v) => setTransferModal(t => ({ ...t, branch_id: v }))}
+                  branches={branches}
+                  placeholder="Select branch..."
+                  allowEmpty={false}
+                  minWidth={0}
+                />
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 <label style={{ fontSize: 11, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Transfer Date</label>
