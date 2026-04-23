@@ -221,7 +221,7 @@ export default function DashboardLayout({ children }) {
   return (
     <div style={{ display: "flex", minHeight: "100vh", background: "var(--bg1)" }}>
 
-      <SearchPalette isOpen={showSearch} onClose={setShowSearch} context={context} />
+      <SearchPalette isOpen={showSearch} onClose={setShowSearch} context={context} userRole={user?.role} />
 
 
       {/* ── Sidebar ── */}
