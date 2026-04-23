@@ -4,7 +4,7 @@ import { collection, onSnapshot, query, orderBy, addDoc, doc, writeBatch, delete
 import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
 import { INR } from "@/lib/calculations";
-import { Icon, IconBtn, Pill, Card, TH, TD, Modal, BranchSelect, SearchSelect, useConfirm, useToast } from "@/components/ui";
+import { Icon, IconBtn, Pill, Card, TH, TD, Modal, BranchSelect, SearchSelect, useConfirm, useToast, useSort } from "@/components/ui";
 import VLoader from "@/components/VLoader";
 
 // ExcelJS is ~200KB — load only when Export/Template/Upload is actually used.
@@ -411,6 +411,7 @@ export default function MaterialsPage() {
   const selectedIdSet  = useMemo(() => new Set(selectedIds),  [selectedIds]);
   const selectedUidSet = useMemo(() => new Set(selectedUids), [selectedUids]);
 
+  const sort = useSort("name");
   const filteredMaterials = useMemo(() => {
     const q = search.trim().toLowerCase();
     const pMin = priceMin === "" ? null : Number(priceMin);
@@ -1515,19 +1516,28 @@ export default function MaterialsPage() {
                   <input type="checkbox" checked={filteredMaterials.length > 0 && filteredMaterials.every(m => selectedIdSet.has(m.id))}
                     onChange={e => { if (e.target.checked) setSelectedIds(filteredMaterials.map(m => m.id)); else setSelectedIds([]); }} />
                 </TH>
-                <TH>Material</TH>
-                <TH>Group</TH>
-                <TH right title="Purchased (tracked) − Transferred till date">Available</TH>
-                <TH>Unit</TH>
-                <TH right>GST %</TH>
-                <TH right>Base Price</TH>
-                <TH right>Price (incl. GST)</TH>
-                <TH>Last Updated</TH>
+                <TH sort={sort} sortKey="name">Material</TH>
+                <TH sort={sort} sortKey="group">Group</TH>
+                <TH right title="Purchased (tracked) − Transferred till date" sort={sort} sortKey="avail">Available</TH>
+                <TH sort={sort} sortKey="unit">Unit</TH>
+                <TH right sort={sort} sortKey="gst">GST %</TH>
+                <TH right sort={sort} sortKey="base">Base Price</TH>
+                <TH right sort={sort} sortKey="price">Price (incl. GST)</TH>
+                <TH sort={sort} sortKey="updated">Last Updated</TH>
                 <TH right>Actions</TH>
               </tr>
             </thead>
             <tbody>
-              {filteredMaterials.map(m => {
+              {sort.sortRows(filteredMaterials, {
+                name:    m => (m.name || "").toLowerCase(),
+                group:   m => (m.group || "").toLowerCase(),
+                avail:   m => purchasedFor(m.id) - (transferredQtyByMaterial[m.id] || 0),
+                unit:    m => (m.unit || "").toLowerCase(),
+                gst:     m => Number(m.gst_pct) || 0,
+                base:    m => Number(m.base_price) || 0,
+                price:   m => Number(m.current_price) || 0,
+                updated: m => m.last_updated || "",
+              }).map(m => {
                 const hist = priceHistory.filter(h => h.material_id === m.id);
                 const latest = hist[0];
                 const priceChanged = latest && latest.old_price > 0 && latest.new_price !== latest.old_price;

@@ -4,7 +4,7 @@ import { collection, onSnapshot, query, orderBy, deleteDoc, doc, updateDoc, writ
 import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
 import { INR } from "@/lib/calculations";
-import { Icon, IconBtn, Pill, Card, PeriodWidget, TH, TD, Modal, SearchSelect, useConfirm, useToast } from "@/components/ui";
+import { Icon, IconBtn, Pill, Card, PeriodWidget, TH, TD, Modal, SearchSelect, useConfirm, useToast, useSort } from "@/components/ui";
 import VLoader from "@/components/VLoader";
 
 
@@ -39,6 +39,7 @@ export default function LeavesPage() {
   const currentUser = useCurrentUser() || {};
   const isAdmin = currentUser?.role === "admin";
   const canAction = ["admin", "accountant"].includes(currentUser?.role);
+  const sort = useSort("date", "desc");
 
   useEffect(() => {
     if (!db) return;
@@ -604,12 +605,24 @@ export default function LeavesPage() {
         <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12.5 }}>
           <thead>
             <tr>
-              <TH>Staff</TH><TH>Date</TH><TH right>Days</TH><TH>Type</TH><TH>Reason</TH><TH>Status</TH>
+              <TH sort={sort} sortKey="staff">Staff</TH>
+              <TH sort={sort} sortKey="date">Date</TH>
+              <TH right sort={sort} sortKey="days">Days</TH>
+              <TH sort={sort} sortKey="type">Type</TH>
+              <TH sort={sort} sortKey="reason">Reason</TH>
+              <TH sort={sort} sortKey="status">Status</TH>
               {canAction && <TH sticky>Actions</TH>}
             </tr>
           </thead>
           <tbody>
-            {displayLeaves.map(l => {
+            {sort.sortRows(displayLeaves, {
+              staff:  l => (staff.find(x => x.id === l.staff_id)?.name || "").toLowerCase(),
+              date:   l => l.date || "",
+              days:   l => Number(l.days) || 1,
+              type:   l => (l.type || "").toLowerCase(),
+              reason: l => (l.reason || "").toLowerCase(),
+              status: l => l.status || "pending",
+            }).map(l => {
               const s = staff.find(x => x.id === l.staff_id);
               return (
                 <tr key={l.id}>

@@ -4,7 +4,7 @@ import { collection, onSnapshot, query, orderBy, where, addDoc, deleteDoc, doc, 
 import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
 import { INR } from "@/lib/calculations";
-import { Icon, IconBtn, Card, PeriodWidget, TH, TD, Modal, BranchSelect, SearchSelect, useConfirm, useToast } from "@/components/ui";
+import { Icon, IconBtn, Card, PeriodWidget, TH, TD, Modal, BranchSelect, SearchSelect, useConfirm, useToast, useSort } from "@/components/ui";
 import { staffStatusForMonth, effectiveBranchOnDate } from "@/lib/calculations";
 import VLoader from "@/components/VLoader";
 
@@ -720,6 +720,7 @@ export default function EntryPage() {
     setSaving(false);
   };
 
+  const sort = useSort("date", "desc");
   const filteredEntries = useMemo(
     () => entries.filter(e => e.date && (filterMode === "month" ? e.date.startsWith(filterPrefix) : e.date.startsWith(String(filterYear)))),
     [entries, filterMode, filterPrefix, filterYear]
@@ -1903,22 +1904,47 @@ export default function EntryPage() {
         <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12.5 }}>
           <thead>
             <tr>
-              <TH>Date</TH><TH>Branch</TH>
-              <TH right>Online</TH><TH right>Cash</TH>
-              <TH right>GST</TH>
-              <TH right>Mat Sale</TH><TH right>Total Billing</TH><TH right>Incentive</TH>
-              <TH right>Tips</TH>
-              <TH right>Staff T.Inc</TH><TH right>Staff T.Sale</TH>
-              <TH right>Other Out</TH>
-              <TH right>Cash in Hand</TH>
-              <TH right>Def / Exc</TH>
+              <TH sort={sort} sortKey="date">Date</TH>
+              <TH sort={sort} sortKey="branch">Branch</TH>
+              <TH right sort={sort} sortKey="online">Online</TH>
+              <TH right sort={sort} sortKey="cash">Cash</TH>
+              <TH right sort={sort} sortKey="gst">GST</TH>
+              <TH right sort={sort} sortKey="matSale">Mat Sale</TH>
+              <TH right sort={sort} sortKey="billing">Total Billing</TH>
+              <TH right sort={sort} sortKey="incentive">Incentive</TH>
+              <TH right sort={sort} sortKey="tips">Tips</TH>
+              <TH right sort={sort} sortKey="staffTInc">Staff T.Inc</TH>
+              <TH right sort={sort} sortKey="staffTSale">Staff T.Sale</TH>
+              <TH right sort={sort} sortKey="otherOut">Other Out</TH>
+              <TH right sort={sort} sortKey="cih">Cash in Hand</TH>
+              <TH right sort={sort} sortKey="diff">Def / Exc</TH>
               <TH right sticky style={{ minWidth: 130 }}>Actions</TH>
             </tr>
           </thead>
           <tbody>
-            {visibleEntries.slice(0, 30).map(e => {
-              const b = branchesById.get(e.branch_id);
-              const agg = sumStaffBilling(e.staff_billing);
+            {sort.sortRows(
+              visibleEntries.slice(0, 30).map(e => {
+                const b = branchesById.get(e.branch_id);
+                const agg = sumStaffBilling(e.staff_billing);
+                return { e, b, agg };
+              }),
+              {
+                date:       r => r.e.date || "",
+                branch:     r => (r.b?.name || "").toLowerCase(),
+                online:     r => Number(r.e.online) || 0,
+                cash:       r => Number(r.e.cash) || 0,
+                gst:        r => Number(r.e.total_gst) || 0,
+                matSale:    r => r.agg.material,
+                billing:    r => r.agg.billing,
+                incentive:  r => r.agg.incentive,
+                tips:       r => r.agg.tips,
+                staffTInc:  r => r.agg.staffTotalInc,
+                staffTSale: r => r.agg.billing + r.agg.material + r.agg.tips,
+                otherOut:   r => (Number(r.e.others) || 0) + (Number(r.e.petrol) || 0),
+                cih:        r => r.e.cash_in_hand !== undefined ? r.e.cash_in_hand : (Number(r.e.cash) || 0) - r.agg.incentive - r.agg.tips,
+                diff:       r => r.e.cash_diff == null ? Number.NEGATIVE_INFINITY : r.e.cash_diff,
+              }
+            ).map(({ e, b, agg }) => {
               const totalBillingE = agg.billing;
               const totalMatE = agg.material;
               const totalIncE = agg.incentive;

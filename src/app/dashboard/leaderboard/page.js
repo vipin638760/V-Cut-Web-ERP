@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { collection, onSnapshot, query, orderBy } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { staffBillingInPeriod, makeFilterPrefix, INR } from "@/lib/calculations";
-import { Card, PeriodWidget, TH, TD } from "@/components/ui";
+import { Card, PeriodWidget, TH, TD, useSort } from "@/components/ui";
 import VLoader from "@/components/VLoader";
 
 
@@ -33,7 +33,9 @@ export default function LeaderboardPage() {
 
   const filterPrefix = makeFilterPrefix(filterYear, filterMonth);
 
-  // Calculate stats
+  const sort = useSort("sale", "desc");
+  // Rank is pinned to performance order so medals always mark the top 3
+  // performers, even when the user sorts the view by name/branch/target.
   const staffData = staff
     .map(s => {
       const sale = staffBillingInPeriod(s.id, entries, filterPrefix, "month", filterYear);
@@ -41,7 +43,8 @@ export default function LeaderboardPage() {
       const b = branches.find(x => x.id === s.branch_id);
       return { s, b, sale, tgt, pct: Math.min(Math.round(sale / tgt * 100), 100) };
     })
-    .sort((a, b) => b.sale - a.sale);
+    .sort((a, b) => b.sale - a.sale)
+    .map((row, i) => ({ ...row, rank: i + 1 }));
 
   if (loading) return <VLoader fullscreen label="Loading Leaderboard" />;
 
@@ -65,15 +68,19 @@ export default function LeaderboardPage() {
           <thead>
             <tr>
               <TH>Rank</TH>
-              <TH>Staff Name</TH>
-              <TH>Branch</TH>
-              <TH right>Performance</TH>
-              <TH right>Target</TH>
+              <TH sort={sort} sortKey="name">Staff Name</TH>
+              <TH sort={sort} sortKey="branch">Branch</TH>
+              <TH right sort={sort} sortKey="sale">Performance</TH>
+              <TH right sort={sort} sortKey="pct">Target</TH>
             </tr>
           </thead>
           <tbody>
-            {staffData.map(({ s, b, sale, tgt, pct }, index) => {
-              const rank = index + 1;
+            {sort.sortRows(staffData, {
+              name:   r => (r.s.name || "").toLowerCase(),
+              branch: r => (r.b?.name || "").toLowerCase(),
+              sale:   r => r.sale,
+              pct:    r => r.pct,
+            }).map(({ s, b, sale, pct, rank }) => {
               const isTop3 = rank <= 3;
               const medals = ["🥇", "🥈", "🥉"];
               const rankDisplay = isTop3 ? <span style={{ fontSize: 20, filter: "drop-shadow(0 0 4px rgba(255,215,0,0.5))" }}>{medals[rank-1]}</span> : <span style={{ fontSize: 14, fontWeight: 900, color: "var(--text3)" }}>#{rank}</span>;

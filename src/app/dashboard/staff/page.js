@@ -10,7 +10,7 @@ import {
   getStaffSalaryForMonth
 } from "@/lib/calculations";
 import { MONTHS } from "@/lib/constants";
-import { Icon, IconBtn, Pill, Card, PeriodWidget, TH, TD, StatCard, ProgressBar, Modal, BranchSelect, SearchSelect, useConfirm, useToast } from "@/components/ui";
+import { Icon, IconBtn, Pill, Card, PeriodWidget, TH, TD, StatCard, ProgressBar, Modal, BranchSelect, SearchSelect, useConfirm, useToast, useSort } from "@/components/ui";
 
 
 const NOW = new Date();
@@ -123,6 +123,8 @@ export default function StaffPage() {
     const q = staffSearch.trim().toLowerCase();
     filtered = filtered.filter(s => (s.name || "").toLowerCase().includes(q) || (s.mobile || "").includes(q));
   }
+
+  const sort = useSort("name");
 
   const totalActive = staff.filter(s => staffOverallStatus(s, statusRefMon) === "active").length;
   const totalInactive = staff.filter(s => staffOverallStatus(s, statusRefMon) !== "active").length;
@@ -828,16 +830,25 @@ export default function StaffPage() {
           <thead>
             <tr style={{ background: "linear-gradient(135deg, var(--bg4) 0%, rgba(0,188,212,0.08) 50%, var(--bg4) 100%)" }}>
               {(() => { const hs = { fontWeight: 900, fontSize: 12, letterSpacing: 1.5, color: "var(--text2)" }; return (<>
-              <TH style={hs}>Staff Identity</TH>
-              <TH style={hs}>Role & Status</TH>
-              <TH style={hs}>Goal Progress</TH>
-              {!isAccountant && <TH right style={hs}>{filterMode === 'year' ? 'Yearly Salary' : 'Monthly Salary'}</TH>}
+              <TH style={hs} sort={sort} sortKey="name">Staff Identity</TH>
+              <TH style={hs} sort={sort} sortKey="role">Role & Status</TH>
+              <TH style={hs} sort={sort} sortKey="goal">Goal Progress</TH>
+              {!isAccountant && <TH right style={hs} sort={sort} sortKey="salary">{filterMode === 'year' ? 'Yearly Salary' : 'Monthly Salary'}</TH>}
               {canEdit && <TH sticky style={{ ...hs, textAlign: "center" }}>Actions</TH>}
               </>); })()}
             </tr>
           </thead>
           <tbody>
-            {filtered.map((s, i) => {
+            {sort.sortRows(filtered, {
+              name:   s => (s.name || "").toLowerCase(),
+              role:   s => (s.role || "").toLowerCase(),
+              goal:   s => {
+                const monthsInView = filterMode === 'year' ? (filterYear === NOW.getFullYear() ? NOW.getMonth() + 1 : 12) : 1;
+                const tgt = (s.target || 50000) * monthsInView || 1;
+                return staffBillingInPeriod(s.id, entries, filterPrefix, filterMode, filterYear) / tgt;
+              },
+              salary: s => yearlyStaffSalary(s),
+            }).map((s, i) => {
               const b = branches.find(x => x.id === s.branch_id);
               const ach = staffBillingInPeriod(s.id, entries, filterPrefix, filterMode, filterYear);
               const monthsInView = filterMode === 'year' ? (filterYear === NOW.getFullYear() ? NOW.getMonth() + 1 : 12) : 1;

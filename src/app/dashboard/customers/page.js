@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { collection, onSnapshot, query, orderBy, where, addDoc, updateDoc, deleteDoc, doc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
-import { Icon, IconBtn, Card, TH, TD, Modal, useConfirm, useToast } from "@/components/ui";
+import { Icon, IconBtn, Card, TH, TD, Modal, useConfirm, useToast, useSort } from "@/components/ui";
 import { INR } from "@/lib/calculations";
 import BillPrintModal from "@/components/BillPrintModal";
 import VLoader from "@/components/VLoader";
@@ -23,6 +23,7 @@ export default function CustomersPage() {
   const { toast, ToastContainer } = useToast();
   const currentUser = useCurrentUser() || {};
   const canEdit = ["admin", "accountant"].includes(currentUser?.role);
+  const sort = useSort("name");
 
   useEffect(() => {
     if (!db) return;
@@ -189,17 +190,24 @@ export default function CustomersPage() {
         <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 13 }}>
           <thead>
             <tr>
-              <TH>Name</TH>
-              <TH>Phone</TH>
-              <TH>Email</TH>
-              <TH>Birth / Marriage</TH>
-              <TH right>Visits</TH>
-              <TH right>Last Visit</TH>
+              <TH sort={sort} sortKey="name">Name</TH>
+              <TH sort={sort} sortKey="phone">Phone</TH>
+              <TH sort={sort} sortKey="email">Email</TH>
+              <TH sort={sort} sortKey="birthdate">Birth / Marriage</TH>
+              <TH right sort={sort} sortKey="visits">Visits</TH>
+              <TH right sort={sort} sortKey="last">Last Visit</TH>
               {canEdit && <TH right sticky>Actions</TH>}
             </tr>
           </thead>
           <tbody>
-            {filtered.map(c => {
+            {sort.sortRows(filtered, {
+              name:      c => (c.name || "").toLowerCase(),
+              phone:     c => c.phone || "",
+              email:     c => (c.email || "").toLowerCase(),
+              birthdate: c => c.birthdate || "",
+              visits:    c => visitsByCustomer.get(c.id)?.visits || 0,
+              last:      c => visitsByCustomer.get(c.id)?.last || "",
+            }).map(c => {
               const v = visitsByCustomer.get(c.id);
               return (
                 <tr key={c.id} style={{ cursor: "pointer" }} onClick={() => setDetailOf(c)}>

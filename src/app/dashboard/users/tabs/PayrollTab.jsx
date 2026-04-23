@@ -4,7 +4,7 @@ import { collection, onSnapshot, doc, setDoc, addDoc, deleteDoc, query, orderBy 
 import { db } from "@/lib/firebase";
 import { useCurrentUser, getCurrentUser } from "@/lib/currentUser";
 import { INR, proRataSalary, makeFilterPrefix, staffStatusForMonth, staffLeavesInMonth } from "@/lib/calculations";
-import { Card, Pill, TH, TD, PeriodWidget, Modal, Icon, useConfirm, useToast } from "@/components/ui";
+import { Card, Pill, TH, TD, PeriodWidget, Modal, Icon, useConfirm, useToast, useSort } from "@/components/ui";
 import VLoader from "@/components/VLoader";
 
 
@@ -103,6 +103,7 @@ export default function PayrollTab() {
   const [loading, setLoading] = useState(true);
   const [expandedStaff, setExpandedStaff] = useState(null);
   const [viewTab, setViewTab] = useState("salary");
+  const sort = useSort("name");
   const [releaseModal, setReleaseModal] = useState(null); // { staffId, name, net, earned, ... }
   const [releaseMode, setReleaseMode] = useState("Bank Transfer");
   const [releaseDate, setReleaseDate] = useState(new Date().toISOString().split("T")[0]);
@@ -420,32 +421,47 @@ export default function PayrollTab() {
                     title={allEligibleSelected ? "Unselect all" : "Select all releasable"} />
                 ) : <span style={{ opacity: 0 }}>·</span>}
               </TH>
-              <TH>Employee</TH>
-              <TH>Branch</TH>
-              {!isAccountant && <TH right>Base Salary</TH>}
-              <TH right>Earned</TH>
-              <TH right>Adv Taken</TH>
-              <TH right>Adv Pending</TH>
-              <TH right>Net Pay</TH>
+              <TH sort={sort} sortKey="name">Employee</TH>
+              <TH sort={sort} sortKey="branch">Branch</TH>
+              {!isAccountant && <TH right sort={sort} sortKey="base">Base Salary</TH>}
+              <TH right sort={sort} sortKey="earned">Earned</TH>
+              <TH right sort={sort} sortKey="advApproved">Adv Taken</TH>
+              <TH right sort={sort} sortKey="advPending">Adv Pending</TH>
+              <TH right sort={sort} sortKey="net">Net Pay</TH>
               <TH right>Advance Log</TH>
               <TH right>Release</TH>
             </tr>
           </thead>
           <tbody>
-            {visibleStaff.map(s => {
-              const b = branches.find(x => x.id === s.branch_id);
-              let earned = 0;
-              if (filterMode === 'year') {
-                const limit = (filterYear === new Date().getFullYear()) ? new Date().getMonth() + 1 : 12;
-                for (let m = 1; m <= limit; m++) earned += proRataSalary(s, `${filterYear}-${String(m).padStart(2,'0')}`, branches, salHistory, staff);
-              } else {
-                earned = proRataSalary(s, filterPrefix, branches, salHistory, staff);
+            {sort.sortRows(
+              visibleStaff.map(s => {
+                let earned = 0;
+                if (filterMode === 'year') {
+                  const limit = (filterYear === new Date().getFullYear()) ? new Date().getMonth() + 1 : 12;
+                  for (let m = 1; m <= limit; m++) earned += proRataSalary(s, `${filterYear}-${String(m).padStart(2,'0')}`, branches, salHistory, staff);
+                } else {
+                  earned = proRataSalary(s, filterPrefix, branches, salHistory, staff);
+                }
+                const periodAdvancesPre = getStaffAdvances(s.id);
+                const advApprovedPre = periodAdvancesPre.filter(a => a.status === 'approved').reduce((sum, a) => sum + Number(a.amount), 0);
+                const advPendingPre = periodAdvancesPre.filter(a => a.status === 'pending').reduce((sum, a) => sum + Number(a.amount), 0);
+                return { s, _earned: earned, _advApproved: advApprovedPre, _advPending: advPendingPre, _net: earned - advApprovedPre, _branch: branches.find(x => x.id === s.branch_id) };
+              }),
+              {
+                name:        r => (r.s.name || "").toLowerCase(),
+                branch:      r => (r._branch?.name || "").toLowerCase(),
+                base:        r => Number(r.s.salary) || 0,
+                earned:      r => r._earned,
+                advApproved: r => r._advApproved,
+                advPending:  r => r._advPending,
+                net:         r => r._net,
               }
-
+            ).map(({ s, _earned, _advApproved, _advPending, _net, _branch: b }) => {
+              const earned = _earned;
               const periodAdvances = getStaffAdvances(s.id);
-              const advApproved = periodAdvances.filter(a => a.status === 'approved').reduce((sum, a) => sum + Number(a.amount), 0);
-              const advPending = periodAdvances.filter(a => a.status === 'pending').reduce((sum, a) => sum + Number(a.amount), 0);
-              const net = earned - advApproved;
+              const advApproved = _advApproved;
+              const advPending = _advPending;
+              const net = _net;
               const isExpanded = expandedStaff === s.id;
               const hasAdvances = periodAdvances.length > 0;
               const monthStatus = staffStatusForMonth(s, filterPrefix);

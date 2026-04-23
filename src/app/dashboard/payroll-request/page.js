@@ -4,7 +4,7 @@ import { collection, addDoc, query, where, onSnapshot } from "firebase/firestore
 import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
 import { INR, makeFilterPrefix } from "@/lib/calculations";
-import { Card, TH, TD, Pill, PeriodWidget, Icon, useConfirm } from "@/components/ui";
+import { Card, TH, TD, Pill, PeriodWidget, Icon, useConfirm, useSort } from "@/components/ui";
 import VLoader from "@/components/VLoader";
 
 
@@ -21,6 +21,7 @@ export default function PayrollRequestPage() {
   const filterPrefix = makeFilterPrefix(filterYear, filterMonth);
 
   const currentUser = useCurrentUser() || {};
+  const sort = useSort("date", "desc");
 
   useEffect(() => {
     if (!db || !currentUser.id) return;
@@ -113,9 +114,21 @@ export default function PayrollRequestPage() {
         <h3 style={{ fontSize: 14, fontWeight: 700, color: "var(--text)", marginBottom: 12, fontFamily: "var(--font-headline, var(--font-outfit))" }}>Request History</h3>
         <Card style={{ padding: 0, overflow: "hidden" }}>
           <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0 }}>
-            <thead><tr><TH>Date</TH><TH>Period</TH><TH right>Amount</TH><TH>Reason</TH><TH>Status</TH></tr></thead>
+            <thead><tr>
+              <TH sort={sort} sortKey="date">Date</TH>
+              <TH sort={sort} sortKey="period">Period</TH>
+              <TH right sort={sort} sortKey="amount">Amount</TH>
+              <TH sort={sort} sortKey="reason">Reason</TH>
+              <TH sort={sort} sortKey="status">Status</TH>
+            </tr></thead>
             <tbody>
-              {advances.slice(0, 20).map(a => (
+              {sort.sortRows(advances.slice(0, 20), {
+                date:   a => a.date || "",
+                period: a => a.month_str || "",
+                amount: a => Number(a.amount) || 0,
+                reason: a => (a.reason || "").toLowerCase(),
+                status: a => a.status || "",
+              }).map(a => (
                 <tr key={a.id} style={{ transition: "background 0.15s" }}
                   onMouseEnter={e => e.currentTarget.style.background = "var(--bg4)"}
                   onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
