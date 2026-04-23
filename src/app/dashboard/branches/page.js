@@ -1482,12 +1482,41 @@ export default function BranchesPage() {
 
       // Active staff + month salary are constant for the month — hoist out of the loop.
       const activeStaffInMonth = staff.filter(s => s.branch_id === b.id && staffStatusForMonth(s, filterPrefix).status !== 'inactive');
-      const mActualSalary = activeStaffInMonth.reduce((s, st) => s + proRataSalary(st, filterPrefix, branches, salHistory, staff, globalSettings), 0);
+
+      // Per-day salary share = Σ (base / daysInMonth) for each staff that was actually present or on
+      // paid leave on that specific day. Mirrors the breakdown modal so clicking Salary gives numbers
+      // that sum back to this column. The month's quota is consumed chronologically — the first N
+      // approved leave days are paid, the rest are LOP (excluded from the share for that day).
+      const computeDayShareFor = (dayPrefix) => {
+        let share = 0;
+        for (const st of activeStaffInMonth) {
+          if (st.join && dayPrefix < st.join) continue;
+          if (st.exit_date && dayPrefix > st.exit_date) continue;
+          const base = Number(st.salary) || 0;
+          const stBranch = branches.find(x => x.id === st.branch_id);
+          let q = stBranch?.type === 'unisex' ? 3 : 2;
+          if (stBranch?.type === 'mens' && globalSettings?.mens_leaves !== undefined) q = globalSettings.mens_leaves;
+          if (stBranch?.type === 'unisex' && globalSettings?.unisex_leaves !== undefined) q = globalSettings.unisex_leaves;
+          const staffLeaves = leaves.filter(l => l.staff_id === st.id && l.status === 'approved' && l.date?.startsWith(filterPrefix))
+            .sort((x, y) => (x.date || '').localeCompare(y.date || ''));
+          let paidUsed = 0;
+          let onLeave = false, leavePaid = false;
+          for (const l of staffLeaves) {
+            const days = Number(l.days) || 1;
+            const paidHere = Math.min(days, Math.max(0, q - paidUsed));
+            if (l.date === dayPrefix) { onLeave = true; leavePaid = paidHere > 0; break; }
+            paidUsed += paidHere;
+          }
+          if (!onLeave || leavePaid) share += base / daysCount;
+        }
+        return share;
+      };
 
       // Iterate every day in the month. Any day without an entry (past *or* future) renders
-      // as a projection row with its pro-rated fixed-cost + salary share, so the daily total
-      // always reconciles with the top Full Net P&L regardless of which days are entered yet.
-      // Leaves-only days (no entry but approved leaves on file) still show as actual rows.
+      // as a projection row with its pro-rated fixed-cost + (for past-only) salary share, so the
+      // daily total reconciles with the top Full Net P&L. Future days show projected salary in
+      // the Future Salary column for visibility, but it doesn't flow into PL (the top KPI caps
+      // salary at yesterday so only past-day shares are owed).
       for (let d = 1; d <= daysCount; d++) {
         const dayPrefix = `${filterYear}-${String(filterMonth).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
         const dEntries = entries.filter(e => e.branch_id === b.id && e.date === dayPrefix);
@@ -1499,13 +1528,13 @@ export default function BranchesPage() {
         const dElec = ((b.shop_elec || 0) + (b.room_elec || 0)) * dayFactor;
         const dWifi = (b.wifi || 0) * dayFactor;
         const dFixedFees = dShopRent + dRoomRent + dElec + dWifi;
-        const dSalaryShare = mActualSalary * dayFactor;
+        const dSalaryShare = computeDayShareFor(dayPrefix);
         const label = `${d} ${new Date(filterYear, filterMonth - 1).toLocaleString('default', { month: 'short' })}`;
 
         if (isProjected) {
-          // Projected row — fixed cost accrues regardless of activity, salary sits in the "Future Salary"
-          // column so actual Salary totals stay comparable, and Est. Expense captures the whole day's projection.
-          const estExpense = dFixedFees + dSalaryShare;
+          // Future/empty day — fixed cost accrues, Future Salary is informational only (not in PL)
+          // so the grand total still matches Full Net P&L which uses capped-at-yesterday salary.
+          const estExpense = dFixedFees;
           breakdownStats.push({
             label, date: dayPrefix,
             income: 0, incentives: 0, material: 0, lumpsumMat: 0, others: 0,
