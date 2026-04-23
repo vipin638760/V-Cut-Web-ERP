@@ -20,7 +20,7 @@ const NOW = new Date();
 // added via the "+ Add Column" button, and appears alongside CORE_COLS.
 const CORE_COLS = [
   "Shop Rent", "Room Rent", "Electricity Shop", "Electricity Room",
-  "Water Bill", "WiFi Bill",
+  "Water Bill", "WiFi Bill", "Shop Maintenance", "Room Maintenance",
 ];
 
 export default function ExpensesPage() {
@@ -112,6 +112,8 @@ export default function ExpensesPage() {
           else if (t === "Electricity Room") def = Number(b.room_elec)||0;
           else if (t === "Water Bill") def = Number(b.water)||0;
           else if (t === "WiFi Bill") def = Number(b.wifi)||0;
+          else if (t === "Shop Maintenance") def = Number(b.shop_maint)||0;
+          else if (t === "Room Maintenance") def = Number(b.room_maint)||0;
           else if (t === "Maid / Cleaning") def = Number(b.maid)||0;
           else if (t === "Garbage / Waste") def = Number(b.garbage)||0;
           else if (t === "Dust Collector Bag") def = Number(b.dust)||0;
@@ -298,6 +300,8 @@ export default function ExpensesPage() {
           "Electricity Room": Number(b.room_elec) || 0,
           "Water Bill": Number(b.water) || 0,
           "WiFi Bill": Number(b.wifi) || 0,
+          "Shop Maintenance": Number(b.shop_maint) || 0,
+          "Room Maintenance": Number(b.room_maint) || 0,
           "Maid / Cleaning": Number(b.maid) || 0,
           "Garbage / Waste": Number(b.garbage) || 0,
           "Dust Collector Bag": Number(b.dust) || 0,
@@ -502,6 +506,8 @@ export default function ExpensesPage() {
             else if (t === "Electricity Room") def = Number(b.room_elec) || 0;
             else if (t === "Water Bill") def = Number(b.water) || 0;
             else if (t === "WiFi Bill") def = Number(b.wifi) || 0;
+            else if (t === "Shop Maintenance") def = Number(b.shop_maint) || 0;
+            else if (t === "Room Maintenance") def = Number(b.room_maint) || 0;
             else if (t === "Maid / Cleaning") def = Number(b.maid) || 0;
             else if (t === "Garbage / Waste") def = Number(b.garbage) || 0;
             else if (t === "Dust Collector Bag") def = Number(b.dust) || 0;
