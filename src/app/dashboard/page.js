@@ -97,6 +97,8 @@ export default function DashboardPage() {
   const [brSortCol, setBrSortCol]       = useState("name");
   const [brSortDir, setBrSortDir]       = useState("asc");
   const [brView, setBrView]             = useState("card");
+  const [staffView, setStaffView]       = useState("chart"); // 'chart' | 'table'
+  const [staffChartLimit, setStaffChartLimit] = useState(10);
   const [exporting, setExporting] = useState(false);
   const { toast, ToastContainer } = useToast();
   // Drag-and-drop order for branch cards
@@ -1092,35 +1094,15 @@ export default function DashboardPage() {
 
         {/* Staff Section */}
         {(dashView === "all" || dashView === "staff") && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-               <h3 style={{ fontSize: 16, fontWeight: 700, margin: 0, fontFamily: "var(--font-headline, var(--font-outfit))" }}>
-                 Top Performers
-                 {brTypeFilter !== "all" && (
-                   <span style={{ marginLeft: 10, fontSize: 11, fontWeight: 700, color: brTypeFilter === "mens" ? "var(--accent)" : "#c084fc", textTransform: "uppercase", letterSpacing: 1 }}>· {brTypeFilter}</span>
-                 )}
-               </h3>
-               <div style={{ fontSize: 11, color: "var(--text3)", fontWeight: 600 }}>{staffData.length} stylist{staffData.length === 1 ? "" : "s"}</div>
-             </div>
-             <Card style={{ padding: 0, overflow: "hidden" }}>
-                <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0 }}>
-                  <thead>
-                    <tr><TH>#</TH><TH>Name</TH><TH right>Billing</TH></tr>
-                  </thead>
-                  <tbody>
-                    {staffData.map((s, i) => (
-                      <tr key={s.s.id} style={{ transition: "background 0.15s" }}
-                        onMouseEnter={e => e.currentTarget.style.background = "var(--bg4)"}
-                        onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-                        <TD style={{ color: "var(--text3)", fontWeight: 600, fontSize: 12 }}>{i+1}</TD>
-                        <TD style={{ fontWeight: 600 }}>{s.s.name}</TD>
-                        <TD right style={{ fontWeight: 700, color: "var(--accent)", fontFamily: "var(--font-headline, var(--font-outfit))" }}>{INR(s.sale)}</TD>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-             </Card>
-          </div>
+          <TopPerformersSection
+            staffData={staffData}
+            branchesById={branchesById}
+            brTypeFilter={brTypeFilter}
+            staffView={staffView}
+            setStaffView={setStaffView}
+            staffChartLimit={staffChartLimit}
+            setStaffChartLimit={setStaffChartLimit}
+          />
         )}
       </div>
       {ToastContainer}
@@ -1284,6 +1266,151 @@ function CompactStat({ label, val, col, bold }) {
 }
 
 // ─── Daily business bar chart — x: day-of-month, y: total business ────────
+
+// ─── Top Performers: chart + table + KPI strip ────────────────────────────────
+function TopPerformersSection({ staffData, branchesById, brTypeFilter, staffView, setStaffView, staffChartLimit, setStaffChartLimit }) {
+  const totalBilling = staffData.reduce((s, r) => s + (r.sale || 0), 0);
+  const nonZero = staffData.filter(r => (r.sale || 0) > 0);
+  const avg = nonZero.length ? Math.round(totalBilling / nonZero.length) : 0;
+  const top = staffData[0];
+  const topN = Math.min(staffChartLimit, staffData.length);
+  const topNShare = totalBilling > 0 ? staffData.slice(0, topN).reduce((s, r) => s + r.sale, 0) / totalBilling : 0;
+  const chartRows = staffData.slice(0, topN);
+  const chartMax = Math.max(1, ...chartRows.map(r => r.sale || 0));
+
+  // Rank badge color: gold / silver / bronze for 1/2/3, neutral after.
+  const rankColor = (i) => i === 0 ? "var(--gold)" : i === 1 ? "#d4d4d8" : i === 2 ? "#c9884a" : "var(--text3)";
+  const rankGlow = (i) => i === 0 ? "0 0 14px rgba(255,215,0,0.35)" : "none";
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <h3 style={{ fontSize: 16, fontWeight: 700, margin: 0, fontFamily: "var(--font-headline, var(--font-outfit))" }}>
+          Top Performers
+          {brTypeFilter !== "all" && (
+            <span style={{ marginLeft: 10, fontSize: 11, fontWeight: 700, color: brTypeFilter === "mens" ? "var(--accent)" : "#c084fc", textTransform: "uppercase", letterSpacing: 1 }}>· {brTypeFilter}</span>
+          )}
+          <span style={{ marginLeft: 10, fontSize: 11, color: "var(--text3)", fontWeight: 600 }}>{staffData.length} stylist{staffData.length === 1 ? "" : "s"}</span>
+        </h3>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          {staffView === "chart" && (
+            <div style={{ display: "inline-flex", gap: 2, background: "var(--bg4)", padding: 3, borderRadius: 8, border: "1px solid var(--border)" }}>
+              {[5, 10, 20, 30].map(n => (
+                <button key={n} onClick={() => setStaffChartLimit(n)}
+                  style={{ padding: "4px 12px", borderRadius: 6, fontSize: 10, fontWeight: 800, letterSpacing: 0.5, background: staffChartLimit === n ? "var(--accent)" : "transparent", color: staffChartLimit === n ? "#000" : "var(--text3)", border: "none", cursor: "pointer" }}>
+                  Top {n}
+                </button>
+              ))}
+            </div>
+          )}
+          <ToggleGroup options={[["chart", "Chart"], ["table", "Table"]]} value={staffView} onChange={setStaffView} />
+        </div>
+      </div>
+
+      {/* KPI strip */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 10 }}>
+        <MiniKPI label="Total Billing" value={INR(totalBilling)} color="var(--green)" sub={`${nonZero.length} active · ${staffData.length - nonZero.length} idle`} />
+        <MiniKPI label="Top Performer" value={top ? top.s.name : "—"} color="var(--gold)" sub={top ? INR(top.sale) : ""} />
+        <MiniKPI label="Avg per Active Stylist" value={INR(avg)} color="var(--accent)" sub="Excludes zero-billing" />
+        <MiniKPI label={`Top ${topN} Share`} value={`${Math.round(topNShare * 100)}%`} color="var(--blue, #60a5fa)" sub={`${INR(chartRows.reduce((s, r) => s + r.sale, 0))} of ${INR(totalBilling)}`} />
+      </div>
+
+      {staffView === "chart" ? (
+        <Card style={{ padding: 16 }}>
+          {chartRows.length === 0 ? (
+            <div style={{ padding: 40, textAlign: "center", color: "var(--text3)", fontSize: 13, fontStyle: "italic" }}>No billing recorded for the selected period.</div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {chartRows.map((row, i) => {
+                const pct = chartMax > 0 ? (row.sale / chartMax) * 100 : 0;
+                const shareOfTotal = totalBilling > 0 ? (row.sale / totalBilling) * 100 : 0;
+                const b = branchesById.get(row.s.branch_id);
+                const branchName = b ? b.name.replace("V-CUT ", "") : "";
+                return (
+                  <div key={row.s.id} style={{ display: "grid", gridTemplateColumns: "28px minmax(130px, 200px) 1fr auto", alignItems: "center", gap: 10 }}>
+                    <div style={{
+                      width: 26, height: 26, borderRadius: 8,
+                      background: i < 3 ? `linear-gradient(135deg, rgba(255,215,0,0.15), rgba(255,215,0,0.02))` : "var(--bg4)",
+                      border: `1px solid ${i < 3 ? "rgba(255,215,0,0.35)" : "var(--border)"}`,
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      fontSize: 11, fontWeight: 900, color: rankColor(i),
+                      boxShadow: rankGlow(i),
+                    }}>
+                      {i + 1}
+                    </div>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.s.name}</div>
+                      {branchName && <div style={{ fontSize: 9.5, color: "var(--text3)", fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{branchName}</div>}
+                    </div>
+                    <div style={{ position: "relative", height: 22, background: "rgba(255,255,255,0.025)", borderRadius: 6, overflow: "hidden" }}>
+                      <div style={{
+                        width: `${pct}%`, height: "100%",
+                        background: i === 0
+                          ? "linear-gradient(90deg, rgba(255,215,0,0.8), rgba(255,215,0,0.35))"
+                          : i < 3
+                            ? "linear-gradient(90deg, rgba(34,211,238,0.75), rgba(34,211,238,0.3))"
+                            : "linear-gradient(90deg, rgba(34,211,238,0.5), rgba(34,211,238,0.18))",
+                        borderRadius: 6,
+                        transition: "width 0.4s ease",
+                      }} />
+                      <div style={{ position: "absolute", top: 0, bottom: 0, left: 8, display: "flex", alignItems: "center", fontSize: 10, color: "var(--text3)", fontWeight: 600, pointerEvents: "none" }}>
+                        {shareOfTotal >= 1 ? `${shareOfTotal.toFixed(1)}%` : ""}
+                      </div>
+                    </div>
+                    <div style={{ fontSize: 13, fontWeight: 800, color: i === 0 ? "var(--gold)" : "var(--accent)", fontFamily: "var(--font-headline, var(--font-outfit))", minWidth: 90, textAlign: "right" }}>
+                      {INR(row.sale)}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          {staffData.length > topN && (
+            <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid var(--border)", fontSize: 11, color: "var(--text3)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span>+{staffData.length - topN} more stylists below the cut-off</span>
+              <button onClick={() => setStaffView("table")} style={{ background: "transparent", border: "1px solid var(--border2)", color: "var(--accent)", padding: "5px 12px", borderRadius: 6, fontSize: 10, fontWeight: 800, letterSpacing: 0.5, cursor: "pointer", textTransform: "uppercase" }}>View full list →</button>
+            </div>
+          )}
+        </Card>
+      ) : (
+        <Card style={{ padding: 0, overflow: "hidden" }}>
+          <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0 }}>
+            <thead>
+              <tr><TH>#</TH><TH>Name</TH><TH>Branch</TH><TH right>Billing</TH><TH right>Share</TH></tr>
+            </thead>
+            <tbody>
+              {staffData.map((row, i) => {
+                const b = branchesById.get(row.s.branch_id);
+                const shareOfTotal = totalBilling > 0 ? (row.sale / totalBilling) * 100 : 0;
+                return (
+                  <tr key={row.s.id} style={{ transition: "background 0.15s" }}
+                    onMouseEnter={e => e.currentTarget.style.background = "var(--bg4)"}
+                    onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                    <TD style={{ color: rankColor(i), fontWeight: 800, fontSize: 12 }}>{i + 1}</TD>
+                    <TD style={{ fontWeight: 600 }}>{row.s.name}</TD>
+                    <TD style={{ color: "var(--text3)", fontSize: 11 }}>{b ? b.name.replace("V-CUT ", "") : "—"}</TD>
+                    <TD right style={{ fontWeight: 700, color: "var(--accent)", fontFamily: "var(--font-headline, var(--font-outfit))" }}>{INR(row.sale)}</TD>
+                    <TD right style={{ color: "var(--text3)", fontSize: 11, fontWeight: 600 }}>{shareOfTotal > 0 ? `${shareOfTotal.toFixed(1)}%` : "—"}</TD>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+function MiniKPI({ label, value, sub, color }) {
+  return (
+    <div style={{ padding: "12px 14px", borderRadius: 10, background: "var(--bg3)", border: "1px solid var(--border)" }}>
+      <div style={{ fontSize: 9, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.2 }}>{label}</div>
+      <div style={{ fontSize: 16, fontWeight: 800, color: color || "var(--text)", marginTop: 4, fontFamily: "var(--font-headline, var(--font-outfit))", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{value}</div>
+      {sub && <div style={{ fontSize: 10, color: "var(--text3)", marginTop: 2 }}>{sub}</div>}
+    </div>
+  );
+}
 
 function DailyBusinessChart({ entries, filterYear, filterMonth }) {
   const [hover, setHover] = useState(null);
