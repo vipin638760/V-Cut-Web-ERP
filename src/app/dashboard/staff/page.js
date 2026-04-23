@@ -10,7 +10,7 @@ import {
   getStaffSalaryForMonth
 } from "@/lib/calculations";
 import { MONTHS } from "@/lib/constants";
-import { Icon, IconBtn, Pill, Card, PeriodWidget, TH, TD, StatCard, ProgressBar, Modal, BranchSelect, useConfirm, useToast } from "@/components/ui";
+import { Icon, IconBtn, Pill, Card, PeriodWidget, TH, TD, StatCard, ProgressBar, Modal, BranchSelect, SearchSelect, useConfirm, useToast } from "@/components/ui";
 
 
 const NOW = new Date();
@@ -416,10 +416,13 @@ export default function StaffPage() {
               <BranchSelect value={form.branch_id} onChange={(v) => setForm({ ...form, branch_id: v })} branches={branches} placeholder="Select..." allowEmpty={false} minWidth={0} />
             </div>
             <FormField label="Role">
-              <select value={form.role} onChange={e => setForm({ ...form, role: e.target.value })}>
-                <option value="">Select...</option>
-                {ROLES.map(r => <option key={r}>{r}</option>)}
-              </select>
+              <SearchSelect
+                value={form.role}
+                onChange={(v) => setForm({ ...form, role: v })}
+                options={ROLES.map(r => ({ value: r, label: r }))}
+                placeholder="Select..."
+                minWidth={0}
+              />
             </FormField>
           </div>
           <FormField label="Mobile Number"><input value={form.mobile} onChange={e => setForm({ ...form, mobile: e.target.value })} placeholder="9999999999" /></FormField>

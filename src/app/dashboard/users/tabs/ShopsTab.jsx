@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { collection, onSnapshot, doc, setDoc, deleteDoc, addDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { INR } from "@/lib/calculations";
-import { Card, Pill, TH, TD, IconBtn, StatCard, Icon, useConfirm, useToast } from "@/components/ui";
+import { Card, Pill, TH, TD, IconBtn, StatCard, Icon, SearchSelect, useConfirm, useToast } from "@/components/ui";
 import VLoader from "@/components/VLoader";
 
 
@@ -127,10 +127,17 @@ export default function ShopsTab() {
           </div>
           <div>
             <label style={{ fontSize: 11, fontWeight: 900, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.5, display: "block", marginBottom: 8 }}>Operational Category</label>
-            <select value={form.type} onChange={e => setForm({ ...form, type: e.target.value })} style={{ ...inputStyle, appearance: "none" }}>
-              <option value="mens">Men's Specialist</option>
-              <option value="unisex">Unisex / Premium</option>
-            </select>
+            <SearchSelect
+              value={form.type}
+              onChange={(v) => setForm({ ...form, type: v })}
+              options={[
+                { value: "mens", label: "Men's Specialist" },
+                { value: "unisex", label: "Unisex / Premium" },
+              ]}
+              allowEmpty={false}
+              placeholder="Select category…"
+              minWidth={0}
+            />
           </div>
           <div>
             <label style={{ fontSize: 11, fontWeight: 900, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.5, display: "block", marginBottom: 8 }}>Geographic Location</label>

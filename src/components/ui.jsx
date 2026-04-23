@@ -1,4 +1,29 @@
 import { useState, useEffect, useCallback, useRef, memo } from "react";
+import { createPortal } from "react-dom";
+
+// Shared hook for SearchSelect / BranchSelect: captures an anchor element's
+// bounding box so their dropdowns can be portaled to document.body and escape
+// parent overflow:hidden / overflow:auto clipping (e.g. Card wrappers).
+function useAnchorRect(anchorRef, open) {
+  const [rect, setRect] = useState(null);
+  useEffect(() => {
+    if (!open || !anchorRef.current) { setRect(null); return; }
+    const update = () => {
+      const el = anchorRef.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      setRect({ top: r.bottom, left: r.left, width: r.width, above: window.innerHeight - r.bottom < 260 && r.top > 260, buttonHeight: r.height, buttonTop: r.top });
+    };
+    update();
+    window.addEventListener("scroll", update, true);
+    window.addEventListener("resize", update);
+    return () => {
+      window.removeEventListener("scroll", update, true);
+      window.removeEventListener("resize", update);
+    };
+  }, [open, anchorRef]);
+  return rect;
+}
 
 // ── Toast Notification Hook ──
 export function useToast() {
@@ -592,6 +617,172 @@ export function TD({ children, right, sticky, style, ...props }) {
   );
 }
 
+// Generic searchable select — drop-in upgrade for a plain <select>.
+// `options`: [{ value, label, disabled? }]. `allowEmpty` adds a first row that
+// resolves to value = "". `searchThreshold` hides the search box for small lists
+// (default 6 — below that, typeahead is pointless and just wastes space).
+export function SearchSelect({
+  value,
+  onChange,
+  options = [],
+  placeholder = "Select…",
+  allowEmpty = true,
+  disabled = false,
+  minWidth = 140,
+  style,
+  buttonStyle = null,
+  searchThreshold = 6,
+  ariaLabel = "Select",
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [focusIdx, setFocusIdx] = useState(0);
+  const wrapRef = useRef(null);
+  const btnRef = useRef(null);
+  const panelRef = useRef(null);
+  const inputRef = useRef(null);
+  const rect = useAnchorRect(btnRef, open);
+
+  const q = query.trim().toLowerCase();
+  const filtered = options.filter(o => !q || (o.label || "").toLowerCase().includes(q));
+  const rows = allowEmpty ? [{ value: "", label: placeholder, _placeholder: true }, ...filtered] : filtered;
+
+  const selected = options.find(o => o.value === value) || null;
+  const label = selected ? selected.label : (allowEmpty ? placeholder : (options[0]?.label || "Select…"));
+
+  const showSearch = options.length >= searchThreshold;
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e) => {
+      const inBtn = wrapRef.current && wrapRef.current.contains(e.target);
+      const inPanel = panelRef.current && panelRef.current.contains(e.target);
+      if (!inBtn && !inPanel) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+
+  useEffect(() => {
+    if (open && showSearch) {
+      setQuery("");
+      setFocusIdx(0);
+      setTimeout(() => inputRef.current?.focus(), 0);
+    }
+  }, [open, showSearch]);
+
+  const pick = (o) => {
+    if (o.disabled) return;
+    onChange(o._placeholder ? "" : o.value);
+    setOpen(false);
+  };
+
+  const onKey = (e) => {
+    if (e.key === "ArrowDown") { e.preventDefault(); setFocusIdx(i => Math.min(i + 1, rows.length - 1)); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); setFocusIdx(i => Math.max(i - 1, 0)); }
+    else if (e.key === "Enter") { e.preventDefault(); if (rows[focusIdx]) pick(rows[focusIdx]); }
+    else if (e.key === "Escape") { e.preventDefault(); setOpen(false); }
+  };
+
+  const panel = open && rect && typeof document !== "undefined" ? createPortal(
+    <div
+      ref={panelRef}
+      style={{
+        position: "fixed",
+        top: rect.above ? Math.max(8, rect.buttonTop - 4) : rect.top + 4,
+        left: rect.left, width: rect.width, zIndex: 2000,
+        transform: rect.above ? "translateY(-100%)" : "none",
+        background: "var(--bg2)", border: "1px solid var(--border2)", borderRadius: 10,
+        boxShadow: "0 16px 40px rgba(0,0,0,0.4)", overflow: "hidden",
+        maxHeight: 320, display: "flex", flexDirection: "column",
+      }}
+    >
+      {showSearch && (
+        <div style={{ padding: 8, borderBottom: "1px solid var(--border)" }}>
+          <input
+            ref={inputRef}
+            value={query}
+            onChange={e => { setQuery(e.target.value); setFocusIdx(0); }}
+            onKeyDown={onKey}
+            placeholder="Search…"
+            style={{
+              width: "100%", padding: "8px 10px", borderRadius: 8,
+              border: "1px solid var(--border2)", background: "var(--bg4)",
+              color: "var(--text)", fontSize: 12, outline: "none",
+            }}
+          />
+        </div>
+      )}
+      <div role="listbox" style={{ overflowY: "auto", flex: 1 }}>
+        {rows.length === 0 && (
+          <div style={{ padding: "14px 12px", fontSize: 12, color: "var(--text3)", textAlign: "center" }}>
+            No matches
+          </div>
+        )}
+        {rows.map((o, i) => {
+          const isSel = (o._placeholder && !value) || (!o._placeholder && o.value === value);
+          const isFoc = i === focusIdx;
+          return (
+            <div
+              key={o._placeholder ? "__empty" : `${o.value}__${i}`}
+              role="option"
+              aria-selected={isSel}
+              aria-disabled={o.disabled || false}
+              onMouseEnter={() => !o.disabled && setFocusIdx(i)}
+              onClick={() => pick(o)}
+              style={{
+                padding: "9px 12px", fontSize: 13,
+                cursor: o.disabled ? "not-allowed" : "pointer",
+                color: o.disabled ? "var(--text3)" : (o._placeholder ? "var(--text3)" : "var(--text)"),
+                background: isFoc ? "var(--bg4)" : "transparent",
+                fontWeight: isSel ? 700 : 500,
+                fontStyle: o._placeholder ? "italic" : "normal",
+                opacity: o.disabled ? 0.55 : 1,
+                display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8,
+              }}
+            >
+              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{o.label}</span>
+              {isSel && !o._placeholder && (
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="3"><polyline points="20 6 9 17 4 12" /></svg>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>,
+    document.body
+  ) : null;
+
+  return (
+    <div ref={wrapRef} style={{ position: "relative", minWidth, ...style }}>
+      <button
+        ref={btnRef}
+        type="button"
+        disabled={disabled}
+        aria-label={ariaLabel}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={() => !disabled && setOpen(o => !o)}
+        style={{
+          width: "100%", padding: "8px 12px", borderRadius: 10,
+          border: "1px solid var(--border2)", background: "var(--bg3)",
+          color: selected ? "var(--text)" : "var(--text3)",
+          fontSize: 13, fontWeight: 600, textAlign: "left", cursor: disabled ? "not-allowed" : "pointer",
+          opacity: disabled ? 0.6 : 1,
+          display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8,
+          ...(buttonStyle || {}),
+        }}
+      >
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ flexShrink: 0, opacity: 0.6, transform: open ? "rotate(180deg)" : "none", transition: "transform 0.15s" }}>
+          <polyline points="6 9 12 15 18 9" />
+        </svg>
+      </button>
+      {panel}
+    </div>
+  );
+}
+
 // Searchable branch picker — drop-in replacement for a plain <select> of branches.
 // Extras over native <select>: typeahead filter, sentinel "extra" rows, prefix strip.
 // `branches` items: { id, name, ... }. `allowEmpty` adds a first "placeholder" row
@@ -616,7 +807,10 @@ export function BranchSelect({
   const [query, setQuery] = useState("");
   const [focusIdx, setFocusIdx] = useState(0);
   const wrapRef = useRef(null);
+  const btnRef = useRef(null);
+  const panelRef = useRef(null);
   const inputRef = useRef(null);
+  const rect = useAnchorRect(btnRef, open);
 
   const displayName = (name) => {
     if (!name) return "";
@@ -640,7 +834,9 @@ export function BranchSelect({
   useEffect(() => {
     if (!open) return;
     const onDoc = (e) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false);
+      const inBtn = wrapRef.current && wrapRef.current.contains(e.target);
+      const inPanel = panelRef.current && panelRef.current.contains(e.target);
+      if (!inBtn && !inPanel) setOpen(false);
     };
     document.addEventListener("mousedown", onDoc);
     return () => document.removeEventListener("mousedown", onDoc);
@@ -668,9 +864,74 @@ export function BranchSelect({
     else if (e.key === "Escape") { e.preventDefault(); setOpen(false); }
   };
 
+  const panel = open && rect && typeof document !== "undefined" ? createPortal(
+    <div
+      ref={panelRef}
+      style={{
+        position: "fixed",
+        top: rect.above ? Math.max(8, rect.buttonTop - 4) : rect.top + 4,
+        left: rect.left, width: rect.width, zIndex: 2000,
+        transform: rect.above ? "translateY(-100%)" : "none",
+        background: "var(--bg2)", border: "1px solid var(--border2)", borderRadius: 10,
+        boxShadow: "0 16px 40px rgba(0,0,0,0.4)", overflow: "hidden",
+        maxHeight: 320, display: "flex", flexDirection: "column",
+      }}
+    >
+      <div style={{ padding: 8, borderBottom: "1px solid var(--border)" }}>
+        <input
+          ref={inputRef}
+          value={query}
+          onChange={e => { setQuery(e.target.value); setFocusIdx(0); }}
+          onKeyDown={onKey}
+          placeholder="Search branch…"
+          style={{
+            width: "100%", padding: "8px 10px", borderRadius: 8,
+            border: "1px solid var(--border2)", background: "var(--bg4)",
+            color: "var(--text)", fontSize: 12, outline: "none",
+          }}
+        />
+      </div>
+      <div role="listbox" style={{ overflowY: "auto", flex: 1 }}>
+        {rows.length === 0 && (
+          <div style={{ padding: "14px 12px", fontSize: 12, color: "var(--text3)", textAlign: "center" }}>
+            No matches
+          </div>
+        )}
+        {rows.map((b, i) => {
+          const isSel = (b._placeholder && !value) || (!b._placeholder && b.id === value);
+          const isFoc = i === focusIdx;
+          return (
+            <div
+              key={b._placeholder ? "__empty" : b.id}
+              role="option"
+              aria-selected={isSel}
+              onMouseEnter={() => setFocusIdx(i)}
+              onClick={() => pick(b)}
+              style={{
+                padding: "9px 12px", fontSize: 13, cursor: "pointer",
+                color: b._placeholder ? "var(--text3)" : "var(--text)",
+                background: isFoc ? "var(--bg4)" : "transparent",
+                fontWeight: isSel ? 700 : 500,
+                fontStyle: b._placeholder ? "italic" : "normal",
+                display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8,
+              }}
+            >
+              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{rowLabel(b)}</span>
+              {isSel && !b._placeholder && (
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="3"><polyline points="20 6 9 17 4 12" /></svg>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>,
+    document.body
+  ) : null;
+
   return (
     <div ref={wrapRef} style={{ position: "relative", minWidth, ...style }}>
       <button
+        ref={btnRef}
         type="button"
         disabled={disabled}
         aria-label={ariaLabel}
@@ -692,63 +953,7 @@ export function BranchSelect({
           <polyline points="6 9 12 15 18 9" />
         </svg>
       </button>
-
-      {open && (
-        <div style={{
-          position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 100,
-          background: "var(--bg2)", border: "1px solid var(--border2)", borderRadius: 10,
-          boxShadow: "0 16px 40px rgba(0,0,0,0.4)", overflow: "hidden",
-          maxHeight: 320, display: "flex", flexDirection: "column",
-        }}>
-          <div style={{ padding: 8, borderBottom: "1px solid var(--border)" }}>
-            <input
-              ref={inputRef}
-              value={query}
-              onChange={e => { setQuery(e.target.value); setFocusIdx(0); }}
-              onKeyDown={onKey}
-              placeholder="Search branch…"
-              style={{
-                width: "100%", padding: "8px 10px", borderRadius: 8,
-                border: "1px solid var(--border2)", background: "var(--bg4)",
-                color: "var(--text)", fontSize: 12, outline: "none",
-              }}
-            />
-          </div>
-          <div role="listbox" style={{ overflowY: "auto", flex: 1 }}>
-            {rows.length === 0 && (
-              <div style={{ padding: "14px 12px", fontSize: 12, color: "var(--text3)", textAlign: "center" }}>
-                No matches
-              </div>
-            )}
-            {rows.map((b, i) => {
-              const isSel = (b._placeholder && !value) || (!b._placeholder && b.id === value);
-              const isFoc = i === focusIdx;
-              return (
-                <div
-                  key={b._placeholder ? "__empty" : b.id}
-                  role="option"
-                  aria-selected={isSel}
-                  onMouseEnter={() => setFocusIdx(i)}
-                  onClick={() => pick(b)}
-                  style={{
-                    padding: "9px 12px", fontSize: 13, cursor: "pointer",
-                    color: b._placeholder ? "var(--text3)" : "var(--text)",
-                    background: isFoc ? "var(--bg4)" : "transparent",
-                    fontWeight: isSel ? 700 : 500,
-                    fontStyle: b._placeholder ? "italic" : "normal",
-                    display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8,
-                  }}
-                >
-                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{rowLabel(b)}</span>
-                  {isSel && !b._placeholder && (
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="3"><polyline points="20 6 9 17 4 12" /></svg>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
+      {panel}
     </div>
   );
 }

@@ -4,7 +4,7 @@ import { collection, onSnapshot, query, orderBy, doc, writeBatch, addDoc, getDoc
 import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
 import { INR } from "@/lib/calculations";
-import { Icon, IconBtn, Card, Pill, TH, TD, Modal, BranchSelect, useConfirm, useToast } from "@/components/ui";
+import { Icon, IconBtn, Card, Pill, TH, TD, Modal, BranchSelect, SearchSelect, useConfirm, useToast } from "@/components/ui";
 import VLoader from "@/components/VLoader";
 
 // ExcelJS is ~200KB — load only when Template/Upload/Export is actually used.
@@ -1232,11 +1232,13 @@ export default function MaterialMasterPage() {
               <div style={{ padding: 12, borderBottom: "1px solid var(--border)", display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
                 <input placeholder="Search name or group…" value={listSearch} onChange={e => setListSearch(e.target.value)}
                   style={{ padding: "8px 12px", borderRadius: 8, background: "var(--bg4)", border: "1px solid var(--border2)", color: "var(--text)", fontSize: 13, flex: "1 1 240px", minWidth: "min(240px, 100%)", outline: "none" }} />
-                <select value={groupFilter} onChange={e => setGroupFilter(e.target.value)}
-                  style={{ padding: "8px 12px", borderRadius: 8, background: "var(--bg4)", border: "1px solid var(--border2)", color: "var(--text)", fontSize: 13, outline: "none" }}>
-                  <option value="">All Groups</option>
-                  {MATERIAL_GROUPS.map(g => <option key={g} value={g}>{g} ({groupCounts[g] || 0})</option>)}
-                </select>
+                <SearchSelect
+                  value={groupFilter}
+                  onChange={v => setGroupFilter(v)}
+                  options={MATERIAL_GROUPS.map(g => ({ value: g, label: `${g} (${groupCounts[g] || 0})` }))}
+                  placeholder="All Groups"
+                  buttonStyle={{ padding: "8px 12px", borderRadius: 8, background: "var(--bg4)", border: "1px solid var(--border2)", color: "var(--text)", fontSize: 13 }}
+                />
                 <div style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 8px", borderRadius: 8, background: "rgba(34,211,238,0.05)", border: "1px dashed rgba(34,211,238,0.2)" }}>
                   <span style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5 }}>Price</span>
                   <input type="number" placeholder="min" value={priceMin} onChange={e => setPriceMin(e.target.value)} style={filterInputStyle} />
@@ -1395,10 +1397,14 @@ export default function MaterialMasterPage() {
                     <input value={r.unit} onChange={e => updateRow(i, { unit: e.target.value })} placeholder="pcs" style={inp} />
                   </TD>
                   <TD>
-                    <select value={r.group} onChange={e => updateRow(i, { group: e.target.value })} style={inp}>
-                      <option value="">—</option>
-                      {MATERIAL_GROUPS.map(g => <option key={g}>{g}</option>)}
-                    </select>
+                    <SearchSelect
+                      value={r.group}
+                      onChange={v => updateRow(i, { group: v })}
+                      options={MATERIAL_GROUPS.map(g => ({ value: g, label: g }))}
+                      placeholder="—"
+                      minWidth={0}
+                      buttonStyle={inp}
+                    />
                   </TD>
                   <TD right>
                     <input type="number" min="0" step="0.01" value={r.gst_pct} onChange={e => updateRow(i, { gst_pct: Number(e.target.value) })} style={{ ...inp, textAlign: "right" }} />
@@ -1700,10 +1706,14 @@ export default function MaterialMasterPage() {
                           <TD><input type="checkbox" checked={it.include} onChange={e => updateRow(idx, { include: e.target.checked })} /></TD>
                           <TD><input value={it.name} onChange={e => updateRow(idx, { name: e.target.value })} style={{ ...inp, fontWeight: 700 }} /></TD>
                           <TD>
-                            <select value={it.group || ""} onChange={e => updateRow(idx, { group: e.target.value })} style={inp}>
-                              <option value="">—</option>
-                              {MATERIAL_GROUPS.map(g => <option key={g}>{g}</option>)}
-                            </select>
+                            <SearchSelect
+                              value={it.group || ""}
+                              onChange={v => updateRow(idx, { group: v })}
+                              options={MATERIAL_GROUPS.map(g => ({ value: g, label: g }))}
+                              placeholder="—"
+                              minWidth={0}
+                              buttonStyle={inp}
+                            />
                           </TD>
                           <TD><input value={it.unit} onChange={e => updateRow(idx, { unit: e.target.value })} style={{ ...inp, maxWidth: 70 }} /></TD>
                           <TD right><input type="number" min="0" step="0.01" value={it.gst_pct} onChange={e => updateRow(idx, { gst_pct: Number(e.target.value) })} style={{ ...inp, maxWidth: 70, textAlign: "right" }} /></TD>

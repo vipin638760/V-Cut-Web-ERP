@@ -2,7 +2,7 @@
 import { useState, useEffect } from "react";
 import { doc, onSnapshot, setDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { Icon, Card, useConfirm } from "@/components/ui";
+import { Icon, Card, SearchSelect, useConfirm } from "@/components/ui";
 import VLoader from "@/components/VLoader";
 
 
@@ -104,25 +104,28 @@ export default function SettingsTab() {
             <p style={{ fontSize: 13, color: "var(--text3)", marginBottom: 20, lineHeight: 1.6 }}>Define the global tax percentage applied to all service transactions. This value is used for back-calculating net revenue across all nodes.</p>
             
             <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
-              <select
+              <SearchSelect
                 value={isCustom ? "custom" : gstPct}
-                onChange={(e) => {
-                  if (e.target.value === "custom") {
+                onChange={(v) => {
+                  if (v === "custom") {
                     setIsCustom(true);
                     setGstPct("");
                   } else {
                     setIsCustom(false);
-                    setGstPct(e.target.value);
+                    setGstPct(v);
                   }
                 }}
-                style={{ ...inputStyle, width: 200, appearance: "none", borderColor: isCustom ? "var(--border2)" : "var(--gold)" }}
-              >
-                <option value="5">5% (Default Tier)</option>
-                <option value="12">12% Tier</option>
-                <option value="18">18% Tier</option>
-                <option value="28">28% Tier</option>
-                <option value="custom">Define Custom Node...</option>
-              </select>
+                options={[
+                  { value: "5", label: "5% (Default Tier)" },
+                  { value: "12", label: "12% Tier" },
+                  { value: "18", label: "18% Tier" },
+                  { value: "28", label: "28% Tier" },
+                  { value: "custom", label: "Define Custom Node..." },
+                ]}
+                allowEmpty={false}
+                placeholder="Select tier…"
+                minWidth={200}
+              />
               
               {isCustom && (
                 <div style={{ position: "relative", flex: 1 }}>

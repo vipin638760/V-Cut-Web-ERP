@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { collection, onSnapshot, doc, setDoc, deleteDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { DEFAULTS_USERS } from "@/lib/constants";
-import { Card, Pill, TH, TD, IconBtn, Icon, BranchSelect, useConfirm, useToast } from "@/components/ui";
+import { Card, Pill, TH, TD, IconBtn, Icon, BranchSelect, SearchSelect, useConfirm, useToast } from "@/components/ui";
 import VLoader from "@/components/VLoader";
 
 
@@ -118,11 +118,18 @@ export default function UsersTab() {
           </div>
           <div>
             <label style={{ fontSize: 11, fontWeight: 900, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.5, display: "block", marginBottom: 10 }}>Permission Tier</label>
-            <select value={form.role} onChange={e => setForm({ ...form, role: e.target.value })} style={{ ...inputStyle, appearance: "none" }}>
-              <option value="admin">Level 5: Administrator</option>
-              <option value="accountant">Level 3: Financial Ops</option>
-              <option value="employee">Level 1: Field Personnel</option>
-            </select>
+            <SearchSelect
+              value={form.role}
+              onChange={(v) => setForm({ ...form, role: v })}
+              options={[
+                { value: "admin", label: "Level 5: Administrator" },
+                { value: "accountant", label: "Level 3: Financial Ops" },
+                { value: "employee", label: "Level 1: Field Personnel" },
+              ]}
+              allowEmpty={false}
+              placeholder="Select tier…"
+              minWidth={0}
+            />
           </div>
           <div>
             <label style={{ fontSize: 11, fontWeight: 900, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.5, display: "block", marginBottom: 10 }}>Authentication Key</label>
@@ -142,10 +149,13 @@ export default function UsersTab() {
           </div>
           <div>
             <label style={{ fontSize: 11, fontWeight: 900, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.5, display: "block", marginBottom: 10 }}>Linked Staff Asset</label>
-            <select value={form.staff_id || ""} onChange={e => setForm({ ...form, staff_id: e.target.value })} style={{ ...inputStyle, appearance: "none" }}>
-              <option value="">No Profile Association</option>
-              {staff.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </select>
+            <SearchSelect
+              value={form.staff_id || ""}
+              onChange={(v) => setForm({ ...form, staff_id: v })}
+              options={staff.map(s => ({ value: s.id, label: s.name }))}
+              placeholder="No Profile Association"
+              minWidth={0}
+            />
           </div>
           
           <div style={{ gridColumn: "1 / -1", display: "flex", gap: 16, marginTop: 12 }}>

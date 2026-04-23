@@ -4,7 +4,7 @@ import { collection, onSnapshot, query, orderBy, addDoc, doc, writeBatch, delete
 import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
 import { INR } from "@/lib/calculations";
-import { Icon, IconBtn, Pill, Card, TH, TD, Modal, BranchSelect, useConfirm, useToast } from "@/components/ui";
+import { Icon, IconBtn, Pill, Card, TH, TD, Modal, BranchSelect, SearchSelect, useConfirm, useToast } from "@/components/ui";
 import VLoader from "@/components/VLoader";
 
 // ExcelJS is ~200KB — load only when Export/Template/Upload is actually used.
@@ -1682,10 +1682,14 @@ export default function MaterialsPage() {
                         </TD>
                         <TD><input value={r.unit} onChange={e => updateAddRow(i, { unit: e.target.value })} style={addInp} /></TD>
                         <TD>
-                          <select value={r.group} onChange={e => updateAddRow(i, { group: e.target.value })} style={addInp}>
-                            <option value="">—</option>
-                            {["SHAMPOO","HAIR SPA","HAIR COLOUR","WAX","HAIR ITEAM","FACIAL","USE AND THROW","TOOLS","SHAVING ITEAM","OTHERS","MACHIN","M&P"].map(g => <option key={g}>{g}</option>)}
-                          </select>
+                          <SearchSelect
+                            value={r.group}
+                            onChange={v => updateAddRow(i, { group: v })}
+                            options={["SHAMPOO","HAIR SPA","HAIR COLOUR","WAX","HAIR ITEAM","FACIAL","USE AND THROW","TOOLS","SHAVING ITEAM","OTHERS","MACHIN","M&P"].map(g => ({ value: g, label: g }))}
+                            placeholder="—"
+                            minWidth={0}
+                            buttonStyle={addInp}
+                          />
                         </TD>
                         <TD right><input type="number" min="0" step="0.01" value={r.gst_pct} onChange={e => updateAddRow(i, { gst_pct: Number(e.target.value) })} style={{ ...addInp, textAlign: "right" }} /></TD>
                         <TD right><input type="number" min="0" step="0.01" value={r.price_inc_gst} onChange={e => updateAddRow(i, { price_inc_gst: e.target.value })} placeholder="0" style={{ ...addInp, textAlign: "right", fontWeight: 700, color: "var(--accent)" }} /></TD>
@@ -1745,11 +1749,13 @@ export default function MaterialsPage() {
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
               <input placeholder="Search material name…" value={catalogSearch} onChange={e => setCatalogSearch(e.target.value)}
                 style={{ padding: "8px 12px", borderRadius: 8, background: "var(--bg4)", border: "1px solid var(--border2)", color: "var(--text)", fontSize: 12, flex: "1 1 240px", minWidth: "min(240px, 100%)", outline: "none" }} />
-              <select value={catalogGroup} onChange={e => setCatalogGroup(e.target.value)}
-                style={{ padding: "8px 12px", borderRadius: 8, background: "var(--bg4)", border: "1px solid var(--border2)", color: "var(--text)", fontSize: 12, outline: "none" }}>
-                <option value="">All Groups</option>
-                {["SHAMPOO","HAIR SPA","HAIR COLOUR","WAX","HAIR ITEAM","FACIAL","USE AND THROW","TOOLS","SHAVING ITEAM","OTHERS","MACHIN","M&P"].map(g => <option key={g}>{g}</option>)}
-              </select>
+              <SearchSelect
+                value={catalogGroup}
+                onChange={v => setCatalogGroup(v)}
+                options={["SHAMPOO","HAIR SPA","HAIR COLOUR","WAX","HAIR ITEAM","FACIAL","USE AND THROW","TOOLS","SHAVING ITEAM","OTHERS","MACHIN","M&P"].map(g => ({ value: g, label: g }))}
+                placeholder="All Groups"
+                buttonStyle={{ padding: "8px 12px", borderRadius: 8, background: "var(--bg4)", border: "1px solid var(--border2)", color: "var(--text)", fontSize: 12 }}
+              />
               <div style={{ fontSize: 11, color: "var(--text3)" }}>
                 Showing <strong style={{ color: "var(--text)" }}>{visibleRows.length}</strong> of {catalogRows.length} rows · <strong style={{ color: "var(--accent)" }}>{filledCatalog.length}</strong> filled · Grand total <strong style={{ color: "var(--green)" }}>{INR(catalogTotal)}</strong>
               </div>
@@ -2329,10 +2335,13 @@ export default function MaterialsPage() {
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                   <label style={lbl}>Group</label>
-                  <select value={f.group} onChange={e => setF({ group: e.target.value })} style={ip}>
-                    <option value="">Select group...</option>
-                    {MATERIAL_GROUPS.map(g => <option key={g}>{g}</option>)}
-                  </select>
+                  <SearchSelect
+                    value={f.group}
+                    onChange={v => setF({ group: v })}
+                    options={MATERIAL_GROUPS.map(g => ({ value: g, label: g }))}
+                    placeholder="Select group..."
+                    buttonStyle={ip}
+                  />
                 </div>
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>

@@ -4,7 +4,7 @@ import { collection, onSnapshot, query, orderBy, where, addDoc, deleteDoc, doc, 
 import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
 import { INR } from "@/lib/calculations";
-import { Icon, IconBtn, Card, PeriodWidget, TH, TD, Modal, BranchSelect, useConfirm, useToast } from "@/components/ui";
+import { Icon, IconBtn, Card, PeriodWidget, TH, TD, Modal, BranchSelect, SearchSelect, useConfirm, useToast } from "@/components/ui";
 import { staffStatusForMonth, effectiveBranchOnDate } from "@/lib/calculations";
 import VLoader from "@/components/VLoader";
 import { MEMBERSHIP_TIERS, tierByKey, isActiveMember, daysUntilExpiry, computeMemberToDate, resolveDiscountRate, DEFAULT_MEMBER_DISCOUNT_PCT, MAX_EXTRA_DISCOUNT_PCT } from "@/lib/membership";
@@ -2529,13 +2529,15 @@ export default function POSPage() {
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                 <label style={{ fontSize: 9, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1 }}>Default Stylist (auto-assign)</label>
-                <select value={defaultStaffId}
-                  onChange={e => setDefaultStaffId(e.target.value)}
+                <SearchSelect
+                  value={defaultStaffId}
+                  onChange={(v) => setDefaultStaffId(v)}
+                  options={branchStaff.map(s => ({ value: s.id, label: `${s.name}${s.role ? ` • ${s.role}` : ""}` }))}
+                  placeholder="Auto (first active)"
                   disabled={!selBranch || branchStaff.length === 0}
-                  style={{ padding: "8px 10px", borderRadius: 8, background: "var(--bg4)", border: "1px solid var(--border2)", color: defaultStaffId ? "var(--accent)" : "var(--text3)", fontSize: 12, fontWeight: 700, outline: "none", cursor: branchStaff.length ? "pointer" : "not-allowed", opacity: branchStaff.length ? 1 : 0.5 }}>
-                  <option value="">Auto (first active)</option>
-                  {branchStaff.map(s => <option key={s.id} value={s.id}>{s.name}{s.role ? ` • ${s.role}` : ""}</option>)}
-                </select>
+                  minWidth={0}
+                  buttonStyle={{ padding: "8px 10px", borderRadius: 8, background: "var(--bg4)", color: defaultStaffId ? "var(--accent)" : "var(--text3)", fontSize: 12, fontWeight: 700, cursor: branchStaff.length ? "pointer" : "not-allowed", opacity: branchStaff.length ? 1 : 0.5 }}
+                />
               </div>
             </div>
 
@@ -2981,13 +2983,19 @@ export default function POSPage() {
 
                  {/* Filter bar — sort, date, customer, status */}
                  <div style={{ padding: "10px 16px", borderBottom: "1px solid var(--border)", display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
-                   <select value={branchSortBy} onChange={e => setBranchSortBy(e.target.value)}
-                     style={{ padding: "8px 10px", borderRadius: 8, background: "var(--bg3)", border: "1px solid var(--border2)", color: "var(--text)", fontSize: 11, fontWeight: 700, outline: "none" }}>
-                     <option value="date_desc">Newest first</option>
-                     <option value="date_asc">Oldest first</option>
-                     <option value="amount_desc">Amount: high → low</option>
-                     <option value="amount_asc">Amount: low → high</option>
-                   </select>
+                   <SearchSelect
+                     value={branchSortBy}
+                     onChange={(v) => setBranchSortBy(v)}
+                     options={[
+                       { value: "date_desc", label: "Newest first" },
+                       { value: "date_asc", label: "Oldest first" },
+                       { value: "amount_desc", label: "Amount: high → low" },
+                       { value: "amount_asc", label: "Amount: low → high" },
+                     ]}
+                     allowEmpty={false}
+                     minWidth={0}
+                     buttonStyle={{ padding: "8px 10px", borderRadius: 8, background: "var(--bg3)", color: "var(--text)", fontSize: 11, fontWeight: 700 }}
+                   />
                    <input type="date" value={branchDateFilter} onChange={e => setBranchDateFilter(e.target.value)}
                      placeholder="Any date"
                      style={{ padding: "8px 10px", borderRadius: 8, background: "var(--bg3)", border: "1px solid var(--border2)", color: "var(--text)", fontSize: 11, fontWeight: 700, outline: "none", colorScheme: "dark" }} />

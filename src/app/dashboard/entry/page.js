@@ -4,7 +4,7 @@ import { collection, onSnapshot, query, orderBy, where, addDoc, deleteDoc, doc, 
 import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
 import { INR } from "@/lib/calculations";
-import { Icon, IconBtn, Card, PeriodWidget, TH, TD, Modal, BranchSelect, useConfirm, useToast } from "@/components/ui";
+import { Icon, IconBtn, Card, PeriodWidget, TH, TD, Modal, BranchSelect, SearchSelect, useConfirm, useToast } from "@/components/ui";
 import { staffStatusForMonth, effectiveBranchOnDate } from "@/lib/calculations";
 import VLoader from "@/components/VLoader";
 
@@ -1622,20 +1622,23 @@ export default function EntryPage() {
                         </div>
                         <div>
                           <label style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Sale Tagged To (billing credit)</label>
-                          <select value={sharedForm.sale_staff_id} onChange={e => {
-                            const sid = e.target.value;
-                            setSharedForm(f => ({
-                              ...f,
-                              sale_staff_id: sid,
-                              incentive_staff_ids: sid && !(f.incentive_staff_ids || []).includes(sid)
-                                ? [...(f.incentive_staff_ids || []), sid]
-                                : (f.incentive_staff_ids || []),
-                            }));
-                          }}
-                            style={{ width: "100%", padding: "10px 14px", borderRadius: 8, background: "var(--bg4)", border: "2px solid var(--green)", color: "var(--text)", fontSize: 13, fontWeight: 600, outline: "none", marginTop: 4 }}>
-                            <option value="">Select staff…</option>
-                            {tableStaff.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                          </select>
+                          <SearchSelect
+                            value={sharedForm.sale_staff_id}
+                            onChange={(sid) => {
+                              setSharedForm(f => ({
+                                ...f,
+                                sale_staff_id: sid,
+                                incentive_staff_ids: sid && !(f.incentive_staff_ids || []).includes(sid)
+                                  ? [...(f.incentive_staff_ids || []), sid]
+                                  : (f.incentive_staff_ids || []),
+                              }));
+                            }}
+                            options={tableStaff.map(s => ({ value: s.id, label: s.name }))}
+                            placeholder="Select staff…"
+                            minWidth={0}
+                            style={{ marginTop: 4 }}
+                            buttonStyle={{ padding: "10px 14px", borderRadius: 8, background: "var(--bg4)", border: "2px solid var(--green)", color: "var(--text)", fontSize: 13, fontWeight: 600 }}
+                          />
                         </div>
                       </div>
                       <div style={{ marginBottom: 12 }}>
@@ -2129,13 +2132,19 @@ export default function EntryPage() {
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               <label style={{ fontSize: 12, color: "var(--text2)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Leave Type</label>
-              <select value={leavePrompt.type} onChange={e => setLeavePrompt({ ...leavePrompt, type: e.target.value })}
-                style={{ padding: "12px 16px", border: "2px solid var(--input-border)", borderRadius: 10, fontSize: 14, background: "var(--bg2)", color: "var(--text)" }}>
-                <option value="Paid">Paid Leave</option>
-                <option value="Unpaid">Unpaid Leave</option>
-                <option value="Sick Leave">Sick Leave</option>
-                <option value="Casual">Casual Leave</option>
-              </select>
+              <SearchSelect
+                value={leavePrompt.type}
+                onChange={(v) => setLeavePrompt({ ...leavePrompt, type: v })}
+                options={[
+                  { value: "Paid", label: "Paid Leave" },
+                  { value: "Unpaid", label: "Unpaid Leave" },
+                  { value: "Sick Leave", label: "Sick Leave" },
+                  { value: "Casual", label: "Casual Leave" },
+                ]}
+                allowEmpty={false}
+                minWidth={0}
+                buttonStyle={{ padding: "12px 16px", border: "2px solid var(--input-border)", borderRadius: 10, fontSize: 14, background: "var(--bg2)", color: "var(--text)" }}
+              />
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               <label style={{ fontSize: 12, color: "var(--text2)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Reason (optional)</label>

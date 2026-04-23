@@ -4,7 +4,7 @@ import { collection, onSnapshot, query, orderBy, deleteDoc, doc, updateDoc, writ
 import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
 import { INR } from "@/lib/calculations";
-import { Icon, IconBtn, Pill, Card, PeriodWidget, TH, TD, Modal, useConfirm, useToast } from "@/components/ui";
+import { Icon, IconBtn, Pill, Card, PeriodWidget, TH, TD, Modal, SearchSelect, useConfirm, useToast } from "@/components/ui";
 import VLoader from "@/components/VLoader";
 
 
@@ -547,10 +547,14 @@ export default function LeavesPage() {
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 <label style={{ fontSize: 12, color: "var(--text2)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Leave Type</label>
-                <select value={form.type} onChange={e => setForm({ ...form, type: e.target.value })}
-                  style={{ padding: "12px 16px", border: "2px solid var(--input-border)", borderRadius: 10, fontSize: 14, background: "var(--bg2)", color: "var(--text)", fontFamily: "var(--font-outfit)", width: "100%", outline: "none" }}>
-                  {leaveTypeOptions.map(t => <option key={t}>{t}</option>)}
-                </select>
+                <SearchSelect
+                  value={form.type}
+                  onChange={(v) => setForm({ ...form, type: v })}
+                  options={leaveTypeOptions.map(t => ({ value: t, label: t }))}
+                  allowEmpty={false}
+                  minWidth={0}
+                  buttonStyle={{ padding: "12px 16px", border: "2px solid var(--input-border)", borderRadius: 10, fontSize: 14, background: "var(--bg2)", color: "var(--text)", fontFamily: "var(--font-outfit)" }}
+                />
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 6, gridColumn: "span 2" }}>
                 <label style={{ fontSize: 12, color: "var(--text2)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Reason (optional)</label>
@@ -675,9 +679,14 @@ export default function LeavesPage() {
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 <label style={{ fontSize: 11, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Type</label>
-                <select value={editLeave.type} onChange={e => setEditLeave({ ...editLeave, type: e.target.value })} style={ip}>
-                  {typeOptions.map(t => <option key={t}>{t}</option>)}
-                </select>
+                <SearchSelect
+                  value={editLeave.type}
+                  onChange={(v) => setEditLeave({ ...editLeave, type: v })}
+                  options={typeOptions.map(t => ({ value: t, label: t }))}
+                  allowEmpty={false}
+                  minWidth={0}
+                  buttonStyle={ip}
+                />
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 <label style={{ fontSize: 11, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Reason</label>

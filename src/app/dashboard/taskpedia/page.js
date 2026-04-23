@@ -3,7 +3,7 @@ import { useEffect, useState, useMemo } from "react";
 import { collection, onSnapshot, addDoc, deleteDoc, doc, updateDoc, orderBy, query } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
-import { Icon, Card, Modal, useConfirm, useToast } from "@/components/ui";
+import { Icon, Card, Modal, SearchSelect, useConfirm, useToast } from "@/components/ui";
 import VLoader from "@/components/VLoader";
 
 const COLUMNS = [
@@ -295,16 +295,20 @@ export default function TaskpediaPage() {
       {isAdmin && (
         <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", padding: "10px 14px", background: "var(--bg3)", borderRadius: 10, border: "1px solid var(--border)" }}>
           <span style={{ fontSize: 10, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1 }}>Filter</span>
-          <select value={fAssignee} onChange={e => setFAssignee(e.target.value)}
-            style={{ padding: "8px 12px", background: "var(--bg4)", border: "1px solid var(--border2)", borderRadius: 8, color: "var(--text)", fontSize: 12 }}>
-            <option value="">All assignees</option>
-            {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
-          </select>
-          <select value={fStatus} onChange={e => setFStatus(e.target.value)}
-            style={{ padding: "8px 12px", background: "var(--bg4)", border: "1px solid var(--border2)", borderRadius: 8, color: "var(--text)", fontSize: 12 }}>
-            <option value="">All statuses</option>
-            {COLUMNS.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
-          </select>
+          <SearchSelect
+            value={fAssignee}
+            onChange={v => setFAssignee(v)}
+            options={users.map(u => ({ value: u.id, label: u.name }))}
+            placeholder="All assignees"
+            buttonStyle={{ padding: "8px 12px", background: "var(--bg4)", border: "1px solid var(--border2)", borderRadius: 8, color: "var(--text)", fontSize: 12 }}
+          />
+          <SearchSelect
+            value={fStatus}
+            onChange={v => setFStatus(v)}
+            options={COLUMNS.map(c => ({ value: c.key, label: c.label }))}
+            placeholder="All statuses"
+            buttonStyle={{ padding: "8px 12px", background: "var(--bg4)", border: "1px solid var(--border2)", borderRadius: 8, color: "var(--text)", fontSize: 12 }}
+          />
           {(fAssignee || fStatus) && (
             <button onClick={() => { setFAssignee(""); setFStatus(""); }}
               style={{ padding: "8px 14px", borderRadius: 8, background: "rgba(248,113,113,0.1)", color: "var(--red)", border: "1px solid rgba(248,113,113,0.3)", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>

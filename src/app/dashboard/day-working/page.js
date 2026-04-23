@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { collection, doc, onSnapshot, addDoc, deleteDoc, setDoc, updateDoc, query, where } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { Card, Icon, IconBtn, Pill, useToast, useConfirm } from "@/components/ui";
+import { Card, Icon, IconBtn, Pill, SearchSelect, useToast, useConfirm } from "@/components/ui";
 import VLoader from "@/components/VLoader";
 
 const INR = (n) => "₹" + Number(n || 0).toLocaleString("en-IN");
@@ -350,10 +350,17 @@ export default function DayWorkingPage() {
             <input placeholder="Custom price ₹ (optional)" type="number" min="0" value={customPrice} onChange={e => setCustomPrice(e.target.value)}
               title="Override the standard menu price for this log entry" style={{ ...input, borderColor: customPrice ? "var(--gold)" : undefined }} />
             <input placeholder="Tip (optional)" type="number" min="0" value={tip} onChange={e => setTip(e.target.value)} style={input} />
-            <select value={tipIn} onChange={e => setTipIn(e.target.value)} style={input}>
-              <option value="cash">Tip · Cash</option>
-              <option value="online">Tip · Online</option>
-            </select>
+            <SearchSelect
+              value={tipIn}
+              onChange={(v) => setTipIn(v)}
+              options={[
+                { value: "cash", label: "Tip · Cash" },
+                { value: "online", label: "Tip · Online" },
+              ]}
+              allowEmpty={false}
+              minWidth={0}
+              buttonStyle={input}
+            />
             <input placeholder="Material sale ₹ (optional)" type="number" min="0" value={matSale} onChange={e => setMatSale(e.target.value)} style={input} />
             <input placeholder="Material name (optional)" value={matName} onChange={e => setMatName(e.target.value)} style={input} />
           </div>

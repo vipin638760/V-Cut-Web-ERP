@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { collection, onSnapshot, doc, deleteDoc, addDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { INR } from "@/lib/calculations";
-import { Card, Pill, TH, TD, IconBtn, PeriodWidget, StatCard, Icon, BranchSelect, useConfirm, useToast } from "@/components/ui";
+import { Card, Pill, TH, TD, IconBtn, PeriodWidget, StatCard, Icon, BranchSelect, SearchSelect, useConfirm, useToast } from "@/components/ui";
 import VLoader from "@/components/VLoader";
 
 
@@ -126,16 +126,28 @@ export default function TxnSetupTab() {
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             <label style={{ fontSize: 11, fontWeight: 900, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.5 }}>Flow Direction</label>
-            <select value={form.cat} onChange={e => setForm({ ...form, cat: e.target.value })} style={{ ...inputStyle, appearance: "none" }}>
-              <option value="expense">Operational Expense (-)</option>
-              <option value="income">External Revenue (+)</option>
-            </select>
+            <SearchSelect
+              value={form.cat}
+              onChange={(v) => setForm({ ...form, cat: v })}
+              options={[
+                { value: "expense", label: "Operational Expense (-)" },
+                { value: "income", label: "External Revenue (+)" },
+              ]}
+              allowEmpty={false}
+              placeholder="Select flow…"
+              minWidth={0}
+            />
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             <label style={{ fontSize: 11, fontWeight: 900, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.5 }}>Classification</label>
-            <select value={form.type} onChange={e => setForm({ ...form, type: e.target.value })} style={{ ...inputStyle, appearance: "none" }}>
-              {allTypes.map((t, i) => <option key={i} value={t}>{t}</option>)}
-            </select>
+            <SearchSelect
+              value={form.type}
+              onChange={(v) => setForm({ ...form, type: v })}
+              options={allTypes.map(t => ({ value: t, label: t }))}
+              allowEmpty={false}
+              placeholder="Select classification…"
+              minWidth={0}
+            />
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             <label style={{ fontSize: 11, fontWeight: 900, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.5 }}>Net Worth (₹)</label>

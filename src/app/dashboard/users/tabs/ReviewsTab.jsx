@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { collection, onSnapshot, query, orderBy, addDoc, deleteDoc, doc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { Icon, IconBtn, Card, PeriodWidget, TH, TD, Modal, Pill, StatCard, useConfirm, useToast } from "@/components/ui";
+import { Icon, IconBtn, Card, PeriodWidget, TH, TD, Modal, Pill, StatCard, SearchSelect, useConfirm, useToast } from "@/components/ui";
 import VLoader from "@/components/VLoader";
 
 
@@ -170,10 +170,14 @@ export default function ReviewsTab() {
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
               <div>
                  <label style={{ fontSize: 11, fontWeight: 900, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.5, display: "block", marginBottom: 10 }}>Target Personnel *</label>
-                 <select required value={form.staff_id} onChange={e => setForm({...form, staff_id: e.target.value})} style={{ ...inputStyle, appearance: "none" }}>
-                   <option value="">-- Identity Select --</option>
-                   {staff.map(s => <option key={s.id} value={s.id}>{s.name} ({s.role})</option>)}
-                 </select>
+                 <SearchSelect
+                   value={form.staff_id}
+                   onChange={(v) => setForm({...form, staff_id: v})}
+                   options={staff.map(s => ({ value: s.id, label: `${s.name} (${s.role})` }))}
+                   allowEmpty={true}
+                   placeholder="-- Identity Select --"
+                   minWidth={0}
+                 />
               </div>
               <div>
                  <label style={{ fontSize: 11, fontWeight: 900, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.5, display: "block", marginBottom: 10 }}>Assessment Date *</label>

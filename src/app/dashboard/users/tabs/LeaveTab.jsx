@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { collection, onSnapshot, query, orderBy, addDoc, deleteDoc, doc, updateDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { Icon, IconBtn, Pill, Card, PeriodWidget, TH, TD, Modal, ToggleGroup, StatCard, useConfirm, useToast } from "@/components/ui";
+import { Icon, IconBtn, Pill, Card, PeriodWidget, TH, TD, Modal, ToggleGroup, StatCard, SearchSelect, useConfirm, useToast } from "@/components/ui";
 import VLoader from "@/components/VLoader";
 
 
@@ -224,10 +224,14 @@ export default function LeaveTab({ view = "admin" }) {
           {view !== "employee" && (
             <div>
               <label style={{ fontSize: 11, fontWeight: 900, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.5, display: "block", marginBottom: 10 }}>Target Member</label>
-              <select value={form.staff_id} onChange={e => setForm({...form, staff_id: e.target.value})} style={inputStyle}>
-                <option value="">Select Employee...</option>
-                {staff.sort((a,b) => a.name.localeCompare(b.name)).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-              </select>
+              <SearchSelect
+                value={form.staff_id}
+                onChange={(v) => setForm({...form, staff_id: v})}
+                options={staff.slice().sort((a,b) => a.name.localeCompare(b.name)).map(s => ({ value: s.id, label: s.name }))}
+                allowEmpty={true}
+                placeholder="Select Employee..."
+                minWidth={0}
+              />
             </div>
           )}
           <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: 20 }}>

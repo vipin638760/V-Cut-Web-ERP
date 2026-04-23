@@ -4,7 +4,7 @@ import { collection, onSnapshot, query, orderBy, where, getDocs, deleteDoc, doc,
 import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
 import { INR, branchIncomeInPeriod, makeFilterPrefix, periodLabel, proRataSalary, staffLeavesInMonth, staffStatusForMonth, MASK } from "@/lib/calculations";
-import { Icon, IconBtn, Pill, Card, PeriodWidget, ToggleGroup, TH, TD, useConfirm, useToast } from "@/components/ui";
+import { Icon, IconBtn, Pill, Card, PeriodWidget, ToggleGroup, TH, TD, SearchSelect, useConfirm, useToast } from "@/components/ui";
 import { useRouter } from "next/navigation";
 import VLoader from "@/components/VLoader";
 
@@ -1842,10 +1842,14 @@ export default function BranchesPage() {
               ))}
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 <label style={{ fontSize: 12, color: "var(--text2)", fontWeight: 700, textTransform: "capitalize", letterSpacing: 1 }}>Type</label>
-                <select value={form.type} onChange={e => setForm({ ...form, type: e.target.value })} style={{ padding: "12px 16px", border: "2px solid var(--input-border)", borderRadius: 10, fontSize: 14, background: "var(--bg2)", color: "var(--text)", fontFamily: "var(--font-outfit)", width: "100%", outline: "none" }}>
-                  <option value="mens">Mens</option>
-                  <option value="unisex">Unisex</option>
-                </select>
+                <SearchSelect
+                  value={form.type}
+                  onChange={v => setForm({ ...form, type: v })}
+                  options={[{ value: "mens", label: "Mens" }, { value: "unisex", label: "Unisex" }]}
+                  allowEmpty={false}
+                  style={{ width: "100%" }}
+                  buttonStyle={{ padding: "12px 16px", border: "2px solid var(--input-border)", borderRadius: 10, fontSize: 14, background: "var(--bg2)", color: "var(--text)", fontFamily: "var(--font-outfit)" }}
+                />
               </div>
             </div>
             <div style={{ display: "flex", gap: 12, marginTop: 16 }}>
@@ -1864,9 +1868,13 @@ export default function BranchesPage() {
         <ToggleGroup label="Type" options={[["all","All"],["mens","Mens"],["unisex","Unisex"]]} value={brTypeFilter} onChange={setBrTypeFilter} />
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span style={{ fontSize: 10, color: "var(--text3)", textTransform: "uppercase", letterSpacing: ".5px" }}>Sort</span>
-          <select value={brSortCol} onChange={e => setBrSortCol(e.target.value)} style={{ padding: "4px 8px", border: "1px solid var(--border2)", borderRadius: 16, fontSize: 11, background: "var(--bg4)", color: "var(--text)", fontFamily: "var(--font-outfit)" }}>
-            <option value="name">Name</option><option value="income">Income</option><option value="pl">Net P&L</option><option value="expense">Expenses</option>
-          </select>
+          <SearchSelect
+            value={brSortCol}
+            onChange={v => setBrSortCol(v)}
+            options={[{ value: "name", label: "Name" }, { value: "income", label: "Income" }, { value: "pl", label: "Net P&L" }, { value: "expense", label: "Expenses" }]}
+            allowEmpty={false}
+            buttonStyle={{ padding: "4px 8px", border: "1px solid var(--border2)", borderRadius: 16, fontSize: 11, background: "var(--bg4)", color: "var(--text)", fontFamily: "var(--font-outfit)" }}
+          />
           <ToggleGroup options={[["asc","Asc ↑"],["desc","Desc ↓"]]} value={brSortDir} onChange={setBrSortDir} />
         </div>
         <div style={{ marginLeft: "auto" }}>

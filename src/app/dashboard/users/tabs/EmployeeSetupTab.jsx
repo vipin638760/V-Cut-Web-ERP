@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { collection, onSnapshot, doc, setDoc, deleteDoc, addDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { INR, staffOverallStatus } from "@/lib/calculations";
-import { Card, Pill, TH, TD, IconBtn, StatCard, Icon, Modal, ToggleGroup, BranchSelect, useConfirm, useToast } from "@/components/ui";
+import { Card, Pill, TH, TD, IconBtn, StatCard, Icon, Modal, ToggleGroup, BranchSelect, SearchSelect, useConfirm, useToast } from "@/components/ui";
 import VLoader from "@/components/VLoader";
 
 
@@ -299,13 +299,20 @@ export default function EmployeeSetupTab() {
             </div>
             <div>
               <label style={{ fontSize: 11, fontWeight: 900, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.5, display: "block", marginBottom: 10 }}>Designated Permission</label>
-              <select value={editForm.role} onChange={e => setEditForm({...editForm, role: e.target.value})} style={{ ...inputStyle, appearance: "none" }}>
-                <option value="Senior Stylist">Chief Strategist / Senior</option>
-                <option value="Stylist">Operations Specialist</option>
-                <option value="Trainee">Junior / Trainee</option>
-                <option value="Receptionist">Front-Desk Curator</option>
-                <option value="Manager">Node Manager</option>
-              </select>
+              <SearchSelect
+                value={editForm.role}
+                onChange={(v) => setEditForm({...editForm, role: v})}
+                options={[
+                  { value: "Senior Stylist", label: "Chief Strategist / Senior" },
+                  { value: "Stylist", label: "Operations Specialist" },
+                  { value: "Trainee", label: "Junior / Trainee" },
+                  { value: "Receptionist", label: "Front-Desk Curator" },
+                  { value: "Manager", label: "Node Manager" },
+                ]}
+                allowEmpty={false}
+                placeholder="Select role…"
+                minWidth={0}
+              />
             </div>
           </div>
 

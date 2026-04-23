@@ -4,7 +4,7 @@ import { collection, onSnapshot, query, orderBy, addDoc, deleteDoc, doc, setDoc,
 import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
 import { INR, proRataSalary } from "@/lib/calculations";
-import { Icon, IconBtn, Pill, Card, PeriodWidget, TH, TD, Modal, BranchSelect, useConfirm, useToast } from "@/components/ui";
+import { Icon, IconBtn, Pill, Card, PeriodWidget, TH, TD, Modal, BranchSelect, SearchSelect, useConfirm, useToast } from "@/components/ui";
 import VLoader from "@/components/VLoader";
 
 // ExcelJS is ~200KB — load only when Template/Upload/Export is actually used.
@@ -1250,9 +1250,14 @@ export default function ExpensesPage() {
 
                   <div>
                      <label style={{ fontSize: 10, color: "var(--text3)", textTransform: "uppercase", fontWeight: 700, display: "block", marginBottom: 6 }}>Category</label>
-                     <select value={form.type} onChange={e => setForm({...form, type: e.target.value})} style={IS}>
-                        {activeCols.map(t => <option key={t} value={t}>{t}</option>)}
-                     </select>
+                     <SearchSelect
+                        value={form.type}
+                        onChange={(v) => setForm({...form, type: v})}
+                        options={activeCols.map(t => ({ value: t, label: t }))}
+                        allowEmpty={false}
+                        minWidth={0}
+                        buttonStyle={IS}
+                     />
                   </div>
 
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>

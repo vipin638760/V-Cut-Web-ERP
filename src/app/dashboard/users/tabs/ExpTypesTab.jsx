@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { collection, onSnapshot, doc, setDoc, deleteDoc, addDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { Card, Pill, TH, TD, IconBtn, Modal, Icon, useConfirm, useToast } from "@/components/ui";
+import { Card, Pill, TH, TD, IconBtn, Modal, Icon, SearchSelect, useConfirm, useToast } from "@/components/ui";
 import VLoader from "@/components/VLoader";
 
 
@@ -174,9 +174,14 @@ export default function ExpTypesTab() {
           </div>
           <div>
             <label style={{ fontSize: 11, fontWeight: 900, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.5, display: "block", marginBottom: 10 }}>Business Category</label>
-            <select value={form.category} onChange={e => setForm({ ...form, category: e.target.value })} style={SS}>
-              {CATEGORIES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-            </select>
+            <SearchSelect
+              value={form.category}
+              onChange={(v) => setForm({ ...form, category: v })}
+              options={CATEGORIES.map(([v, l]) => ({ value: v, label: l }))}
+              allowEmpty={false}
+              placeholder="Select category…"
+              minWidth={0}
+            />
           </div>
           <div>
             <label style={{ fontSize: 11, fontWeight: 900, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.5, display: "block", marginBottom: 10 }}>Contextual Purpose</label>
@@ -236,9 +241,14 @@ export default function ExpTypesTab() {
             </div>
             <div>
               <label style={{ fontSize: 11, fontWeight: 900, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.5, display: "block", marginBottom: 10 }}>Economic Category</label>
-              <select value={editForm.category} onChange={e => setEditForm({ ...editForm, category: e.target.value })} style={SS}>
-                {CATEGORIES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-              </select>
+              <SearchSelect
+                value={editForm.category}
+                onChange={(v) => setEditForm({ ...editForm, category: v })}
+                options={CATEGORIES.map(([v, l]) => ({ value: v, label: l }))}
+                allowEmpty={false}
+                placeholder="Select category…"
+                minWidth={0}
+              />
             </div>
             <div>
               <label style={{ fontSize: 11, fontWeight: 900, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.5, display: "block", marginBottom: 10 }}>Defined Purpose</label>

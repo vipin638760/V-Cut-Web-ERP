@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { collection, onSnapshot, doc, setDoc, deleteDoc, addDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { INR } from "@/lib/calculations";
-import { Card, Pill, TH, TD, IconBtn, StatCard, Icon, useConfirm, useToast } from "@/components/ui";
+import { Card, Pill, TH, TD, IconBtn, StatCard, Icon, SearchSelect, useConfirm, useToast } from "@/components/ui";
 import VLoader from "@/components/VLoader";
 
 
@@ -111,9 +111,14 @@ export default function CostCenterTab() {
           </div>
           <div>
             <label style={{ fontSize: 11, fontWeight: 900, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.5, display: "block", marginBottom: 10 }}>Assigned Department</label>
-            <select value={form.dept} onChange={e => setForm({ ...form, dept: e.target.value })} style={{ ...inputStyle, appearance: "none" }}>
-              {["Accounts & Finance", "Operations", "HR & Admin", "Marketing", "IT Support", "Management", "Other Support"].map(d => <option key={d} value={d}>{d}</option>)}
-            </select>
+            <SearchSelect
+              value={form.dept}
+              onChange={(v) => setForm({ ...form, dept: v })}
+              options={["Accounts & Finance", "Operations", "HR & Admin", "Marketing", "IT Support", "Management", "Other Support"].map(d => ({ value: d, label: d }))}
+              allowEmpty={false}
+              placeholder="Select department…"
+              minWidth={0}
+            />
           </div>
           <div>
             <label style={{ fontSize: 11, fontWeight: 900, color: "var(--gold)", textTransform: "uppercase", letterSpacing: 1.5, display: "block", marginBottom: 10 }}>Net Monthly Provision (₹)</label>

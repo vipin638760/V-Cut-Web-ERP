@@ -4,7 +4,7 @@ import { collection, onSnapshot, query, where, orderBy, addDoc, deleteDoc, doc, 
 import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
 import { INR } from "@/lib/calculations";
-import { Icon, IconBtn, Card, TH, TD, Modal, BranchSelect, useConfirm, useToast } from "@/components/ui";
+import { Icon, IconBtn, Card, TH, TD, Modal, BranchSelect, SearchSelect, useConfirm, useToast } from "@/components/ui";
 import VLoader from "@/components/VLoader";
 
 export default function DailyExpensesPage() {
@@ -241,11 +241,14 @@ export default function DailyExpensesPage() {
       <Card style={{ marginBottom: 16, padding: 14 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <BranchSelect value={branchFilter} onChange={setBranchFilter} branches={branches} placeholder="All Branches" />
-          <select value={typeFilter} onChange={e => setTypeFilter(e.target.value)}
-            style={{ padding: "8px 12px", border: "1px solid var(--border2)", borderRadius: 10, fontSize: 13, background: "var(--bg3)", color: "var(--text)", minWidth: 160 }}>
-            <option value="">All Types</option>
-            {activeTypes.map(t => <option key={t} value={t}>{t}</option>)}
-          </select>
+          <SearchSelect
+            value={typeFilter}
+            onChange={(v) => setTypeFilter(v)}
+            options={activeTypes.map(t => ({ value: t, label: t }))}
+            placeholder="All Types"
+            minWidth={160}
+            buttonStyle={{ padding: "8px 12px", borderRadius: 10, fontSize: 13, background: "var(--bg3)", color: "var(--text)" }}
+          />
           <input type="text" placeholder="Search branch, note, amount…" value={searchText} onChange={e => setSearchText(e.target.value)}
             style={{ padding: "8px 12px", border: "1px solid var(--border2)", borderRadius: 10, fontSize: 13, background: "var(--bg3)", color: "var(--text)", minWidth: 220, flex: 1 }} />
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -378,11 +381,15 @@ export default function DailyExpensesPage() {
           </div>
           <div>
             <label style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Expense Type *</label>
-            <select value={form.expense_type} onChange={e => setForm(f => ({ ...f, expense_type: e.target.value }))}
-              style={{ width: "100%", padding: "10px 12px", borderRadius: 8, background: "var(--bg4)", border: "1px solid var(--border2)", color: "var(--text)", fontSize: 13, marginTop: 4 }}>
-              <option value="">Select type…</option>
-              {activeTypes.map(t => <option key={t} value={t}>{t}</option>)}
-            </select>
+            <SearchSelect
+              value={form.expense_type}
+              onChange={(v) => setForm(f => ({ ...f, expense_type: v }))}
+              options={activeTypes.map(t => ({ value: t, label: t }))}
+              placeholder="Select type…"
+              minWidth={0}
+              style={{ marginTop: 4 }}
+              buttonStyle={{ padding: "10px 12px", borderRadius: 8, background: "var(--bg4)", color: "var(--text)", fontSize: 13 }}
+            />
           </div>
           <div>
             <label style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Amount (₹) *</label>
@@ -415,14 +422,21 @@ export default function DailyExpensesPage() {
           </div>
           <div>
             <label style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Category</label>
-            <select value={newTypeCat} onChange={e => setNewTypeCat(e.target.value)}
-              style={{ width: "100%", padding: "10px 12px", borderRadius: 8, background: "var(--bg4)", border: "1px solid var(--border2)", color: "var(--text)", fontSize: 13, marginTop: 4 }}>
-              <option value="operations">Operations</option>
-              <option value="utilities">Utilities</option>
-              <option value="maintenance">Maintenance</option>
-              <option value="supplies">Supplies</option>
-              <option value="other">Other</option>
-            </select>
+            <SearchSelect
+              value={newTypeCat}
+              onChange={(v) => setNewTypeCat(v)}
+              options={[
+                { value: "operations", label: "Operations" },
+                { value: "utilities", label: "Utilities" },
+                { value: "maintenance", label: "Maintenance" },
+                { value: "supplies", label: "Supplies" },
+                { value: "other", label: "Other" },
+              ]}
+              allowEmpty={false}
+              minWidth={0}
+              style={{ marginTop: 4 }}
+              buttonStyle={{ padding: "10px 12px", borderRadius: 8, background: "var(--bg4)", color: "var(--text)", fontSize: 13 }}
+            />
           </div>
           <div style={{ fontSize: 11, color: "var(--text3)", padding: "8px 12px", borderRadius: 8, background: "var(--bg3)" }}>
             This type will also appear in <strong>Master Setup → Expense Types</strong> for all users.

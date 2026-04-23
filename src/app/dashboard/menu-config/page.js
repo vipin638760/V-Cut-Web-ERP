@@ -5,7 +5,7 @@ import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage
 import { db, storage } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
 import { INR } from "@/lib/calculations";
-import { Icon, IconBtn, Card, Pill, Modal, useConfirm, useToast } from "@/components/ui";
+import { Icon, IconBtn, Card, Pill, Modal, SearchSelect, useConfirm, useToast } from "@/components/ui";
 import VLoader from "@/components/VLoader";
 
 // ── Seed data pulled from the V-Cut PDF menus ──
@@ -641,17 +641,21 @@ export default function MenuConfigPage() {
                 <input required value={editing.name} onChange={e => setEditing({ ...editing, name: e.target.value })} placeholder="e.g. V-Cut DLF · Unisex" />
               </Field>
               <Field label="Type">
-                <select value={editing.type} onChange={e => {
-                  const newType = e.target.value;
-                  const keep = (editing.branches || []).filter(bid => {
-                    const b = branches.find(x => x.id === bid);
-                    return b && (b.type || "mens") === newType;
-                  });
-                  setEditing({ ...editing, type: newType, branches: keep });
-                }}>
-                  <option value="unisex">Unisex</option>
-                  <option value="mens">Mens</option>
-                </select>
+                <SearchSelect
+                  value={editing.type}
+                  onChange={v => {
+                    const newType = v;
+                    const keep = (editing.branches || []).filter(bid => {
+                      const b = branches.find(x => x.id === bid);
+                      return b && (b.type || "mens") === newType;
+                    });
+                    setEditing({ ...editing, type: newType, branches: keep });
+                  }}
+                  options={[{ value: "unisex", label: "Unisex" }, { value: "mens", label: "Mens" }]}
+                  allowEmpty={false}
+                  style={{ padding: 0, border: "none", background: "transparent", width: "100%" }}
+                  buttonStyle={{ padding: "12px 14px", borderRadius: 10, background: "var(--bg3)", border: "1px solid var(--border2)", color: "var(--text)", fontSize: 14 }}
+                />
               </Field>
             </div>
 
