@@ -89,6 +89,7 @@ export default function DashboardPage() {
   const [filterMonth, setFilterMonth] = useState(NOW.getMonth() + 1);
 
   const [showAdvLog, setShowAdvLog]   = useState(false);
+  const [showProjBreakdown, setShowProjBreakdown] = useState(false);
 
   // Dashboard view controls
   const [dashView, setDashView]         = useState("all");
@@ -978,7 +979,8 @@ export default function DashboardPage() {
           : `Month-end forecast${delta > 0 ? ` · +${INR(delta)}` : ""}`;
         return (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 16 }}>
-            <PremiumStatCard label="Projected Cost" value={INR(tEProjected)} sub={projSub} icon="trending" color="var(--orange)" />
+            <PremiumStatCard label="Projected Cost" value={INR(tEProjected)} sub={projSub} icon="trending" color="var(--orange)"
+              onClick={() => setShowProjBreakdown(true)} linkLabel="See projected cost breakdown" />
             <PremiumStatCard
               label="Projected To Earn"
               value={projectedToEarn > 0 ? INR(projectedToEarn) : INR(0)}
@@ -1106,6 +1108,68 @@ export default function DashboardPage() {
         )}
       </div>
       {ToastContainer}
+      {/* Projected-cost breakdown modal — same pattern as Branch Detail's Variable / Fixed / Total Expense drill-down. */}
+      {showProjBreakdown && (() => {
+        const totals = branchData.reduce((acc, d) => {
+          acc.vInc += d.vInc;
+          acc.vMatE += d.vMatE;
+          acc.vOther += d.vOther;
+          acc.fShopRent += d.fShopRent;
+          acc.fRoomRent += d.fRoomRent;
+          acc.fWifi += d.fWifi;
+          acc.fElec += d.fElec;
+          acc.projectedSalary += d.projectedSalary;
+          acc.actualSalary += d.actualSalary;
+          acc.totalGst += d.totalGst;
+          return acc;
+        }, { vInc: 0, vMatE: 0, vOther: 0, fShopRent: 0, fRoomRent: 0, fWifi: 0, fElec: 0, projectedSalary: 0, actualSalary: 0, totalGst: 0 });
+        const remainingSalary = totals.projectedSalary - totals.actualSalary;
+        const rows = [
+          { label: "Variable — Staff Incentives", value: totals.vInc, hint: "Sum of incentive + mat_incentive on every entry in the period", color: "var(--red)" },
+          { label: "Variable — Material Cost", value: totals.vMatE, hint: "Per Master Setup → Material Expense Source (allocations / lumpsum / both)", color: "var(--red)" },
+          { label: "Variable — Other / Petrol", value: totals.vOther, hint: "others + petrol lines on daily entries", color: "var(--red)" },
+          { label: "Fixed — Shop Rent", value: totals.fShopRent, hint: `Charged for the full period regardless of working days`, color: "var(--orange)" },
+          { label: "Fixed — Room Rent", value: totals.fRoomRent, hint: `Full-period accrual`, color: "var(--orange)" },
+          { label: "Fixed — Electricity", value: totals.fElec, hint: `Shop + room electricity`, color: "var(--orange)" },
+          { label: "Fixed — WiFi", value: totals.fWifi, hint: `Full-period accrual`, color: "var(--orange)" },
+          { label: "Salary — Accrued (capped yesterday)", value: totals.actualSalary, hint: "Same salary value the Operating Cost card uses", color: "var(--blue)" },
+          { label: "Salary — Remaining till month-end", value: remainingSalary, hint: "Full-month pro-rata minus what's already accrued — the only delta from Operating Cost", color: "var(--purple, #c084fc)" },
+          { label: "GST Estimate", value: totals.totalGst, hint: "GST extracted from online revenue at the configured rate", color: "var(--red)" },
+        ];
+        const grand = rows.reduce((s, r) => s + r.value, 0);
+        return (
+          <div onClick={() => setShowProjBreakdown(false)}
+            style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.55)", backdropFilter: "blur(6px)", zIndex: 1100, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+            <div onClick={ev => ev.stopPropagation()}
+              style={{ width: "100%", maxWidth: 620, maxHeight: "90vh", overflowY: "auto", background: "var(--bg2)", borderRadius: 16, boxShadow: "0 24px 80px rgba(0,0,0,0.5)" }}>
+              <div style={{ padding: "18px 22px", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, position: "sticky", top: 0, background: "var(--bg2)", zIndex: 1 }}>
+                <div>
+                  <div style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Breakdown</div>
+                  <div style={{ fontSize: 17, fontWeight: 800, color: "var(--orange)", marginTop: 2 }}>Projected Cost — {INR(grand)}</div>
+                  <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 4 }}>Network · {filterMode === "month" ? `${new Date(filterYear, filterMonth - 1).toLocaleString("default", { month: "long", year: "numeric" })}` : filterYear}</div>
+                </div>
+                <button onClick={() => setShowProjBreakdown(false)}
+                  style={{ background: "var(--bg4)", border: "1px solid var(--border2)", color: "var(--text2)", borderRadius: 8, width: 32, height: 32, cursor: "pointer", fontSize: 14, fontWeight: 700 }}>✕</button>
+              </div>
+              <div style={{ padding: "10px 22px 18px" }}>
+                {rows.map(r => (
+                  <div key={r.label} style={{ padding: "12px 0", borderBottom: "1px solid var(--border)" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12 }}>
+                      <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text)" }}>{r.label}</span>
+                      <span style={{ fontSize: 14, fontWeight: 800, color: r.color, whiteSpace: "nowrap" }}>{INR(r.value)}</span>
+                    </div>
+                    <div style={{ fontSize: 10.5, color: "var(--text3)", marginTop: 3 }}>{r.hint}</div>
+                  </div>
+                ))}
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 10, paddingTop: 12, borderTop: "2px solid var(--border2)" }}>
+                  <span style={{ fontSize: 12, fontWeight: 800, color: "var(--gold)", letterSpacing: 1 }}>TOTAL PROJECTED</span>
+                  <span style={{ fontSize: 18, fontWeight: 800, color: "var(--orange)" }}>{INR(grand)}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
