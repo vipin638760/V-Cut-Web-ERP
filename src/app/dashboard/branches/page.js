@@ -4,7 +4,7 @@ import { collection, onSnapshot, query, orderBy, where, getDocs, deleteDoc, doc,
 import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
 import { INR, branchIncomeInPeriod, makeFilterPrefix, periodLabel, proRataSalary, staffLeavesInMonth, staffStatusForMonth, MASK } from "@/lib/calculations";
-import { Icon, IconBtn, Pill, Card, PeriodWidget, ToggleGroup, TH, TD, Modal, SearchSelect, useConfirm, useToast } from "@/components/ui";
+import { Icon, IconBtn, Pill, Card, PeriodWidget, ToggleGroup, TH, TD, Modal, SearchSelect, useConfirm, useToast, useSort } from "@/components/ui";
 import { useRouter } from "next/navigation";
 import VLoader from "@/components/VLoader";
 
@@ -359,6 +359,7 @@ export default function BranchesPage() {
   const [globalSettings, setGlobalSettings] = useState(null);
   const [salHistory, setSalHistory] = useState([]);
   const [selectedStaffHistory, setSelectedStaffHistory] = useState(null);
+  const staffRosterSort = useSort();
   const [attendanceCalendar, setAttendanceCalendar] = useState(null); // branch id
   const [attendanceMonth, setAttendanceMonth] = useState(null); // "YYYY-MM"
   const [attendanceSelectedDay, setAttendanceSelectedDay] = useState(null); // "YYYY-MM-DD"
@@ -2001,92 +2002,121 @@ export default function BranchesPage() {
         })()}
 
         {/* Staff Table */}
-        {openSections.has("staff") && (<>
+        {openSections.has("staff") && (() => {
+          // Precompute every derived value per staff once, then sort + render.
+          // Why: sorting must order by computed metrics (days worked, salary,
+          // billing, etc.) which don't exist on the raw staff doc.
+          const fmtShort = (iso) => {
+            if (!iso) return "—";
+            const d = new Date(iso);
+            if (isNaN(d.getTime())) return iso;
+            return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "2-digit" });
+          };
+          const quotaPerMonth = (b.type === 'unisex' ? globalSettings?.unisex_leaves : globalSettings?.mens_leaves) || (b.type === 'unisex' ? 3 : 2);
+          const computePayrollDays = (mPrefix) => {
+            const [yr, mo] = mPrefix.split('-').map(Number);
+            const daysInMo = new Date(yr, mo, 0).getDate();
+            const mStart = new Date(yr, mo - 1, 1);
+            const mEnd = new Date(yr, mo, 0);
+            return (s) => {
+              const jd = s.join ? new Date(s.join) : null;
+              const ed = s.exit_date ? new Date(s.exit_date) : null;
+              const now = new Date();
+              const isCurrent = now.getFullYear() === yr && now.getMonth() + 1 === mo;
+              let capEnd = mEnd;
+              if (isCurrent) {
+                const y = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+                if (y < mStart) return 0;
+                if (y < mEnd) capEnd = y;
+              }
+              const effStart = (jd && jd > mStart) ? jd : mStart;
+              const effEnd = (ed && ed < capEnd) ? ed : capEnd;
+              if (effStart > effEnd) return 0;
+              const cal = Math.round((effEnd - effStart) / 86400000) + 1;
+              const mLeaves = staffLeavesInMonth(s.id, mPrefix, leaves);
+              const proPaid = Math.ceil(quotaPerMonth * cal / daysInMo);
+              const unpaid = Math.max(0, mLeaves - proPaid);
+              return Math.max(0, cal - unpaid);
+            };
+          };
+
+          const rawRows = branchStaff.map((s) => {
+            let billing = 0, matSale = 0, tips = 0, staffTInc = 0;
+            let curSalary = 0, leavesTaken = 0, daysWorked = 0, paidLeaves = 0, lop = 0, payrollDays = 0;
+
+            if (filterMode === 'month') {
+              curSalary = proRataSalary(s, filterPrefix, branches, salHistory, staff, globalSettings);
+              leavesTaken = staffLeavesInMonth(s.id, filterPrefix, leaves);
+              daysWorked = staffStatusForMonth(s, filterPrefix).daysWorked || 0;
+              paidLeaves = Math.min(leavesTaken, quotaPerMonth);
+              lop = Math.max(0, leavesTaken - quotaPerMonth);
+              payrollDays = computePayrollDays(filterPrefix)(s);
+            } else {
+              for (let m = 1; m <= endMonth; m++) {
+                const mPrefix = `${filterYear}-${String(m).padStart(2, '0')}`;
+                curSalary += proRataSalary(s, mPrefix, branches, salHistory, staff, globalSettings);
+                const mLeaves = staffLeavesInMonth(s.id, mPrefix, leaves);
+                leavesTaken += mLeaves;
+                paidLeaves += Math.min(mLeaves, quotaPerMonth);
+                lop += Math.max(0, mLeaves - quotaPerMonth);
+                daysWorked += staffStatusForMonth(s, mPrefix).daysWorked || 0;
+                payrollDays += computePayrollDays(mPrefix)(s);
+              }
+            }
+
+            periodEntries.forEach(e => {
+              const sb = (e.staff_billing || []).find(x => x.staff_id === s.id);
+              if (sb) {
+                billing += (sb.billing || 0);
+                matSale += (sb.material || 0);
+                tips += (sb.tips || 0);
+                staffTInc += (sb.staff_total_inc || (sb.incentive || 0) + (sb.mat_incentive || 0) + (sb.tips || 0));
+              }
+            });
+            const totalSale = billing + matSale + tips;
+            const pct = Math.min(Math.round(billing / (s.target || 50000) * 100), 100);
+            return { s, billing, matSale, tips, staffTInc, totalSale, pct, curSalary, daysWorked, paidLeaves, lop, payrollDays };
+          });
+
+          // Active rows sort after exited rows when sorting by End date; use
+          // 9999 as a sentinel so "Active" lands at the top on asc / bottom on desc
+          // (consistent with treating no-exit as the latest possible end).
+          const sortedRows = staffRosterSort.sortRows(rawRows, {
+            name:       r => (r.s.name || "").toLowerCase(),
+            role:       r => (r.s.role || "").toLowerCase(),
+            start:      r => r.s.join || "",
+            end:        r => r.s.exit_date || "9999-12-31",
+            days:       r => r.daysWorked,
+            paid:       r => r.paidLeaves,
+            lop:        r => r.lop,
+            salary:     r => r.curSalary,
+            billing:    r => r.billing,
+            staffTInc:  r => r.staffTInc,
+            totalSale:  r => r.totalSale,
+          });
+
+          return (<>
         <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 12, color: "var(--gold)" }}>Branch Staff ({branchStaff.length})</div>
         <Card>
           <table className="pill-table" style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12.5 }}>
             <thead><tr>
-              <TH>#</TH><TH>Name</TH><TH>Role</TH>
-              <TH>Start</TH><TH>End</TH>
-              <TH right title="Days the staff was active in this period (join/exit-aware, excludes LOP)">Days</TH>
-              <TH right title="Approved leaves within the monthly quota">Paid</TH>
-              <TH right title="Loss-of-pay: leaves beyond the monthly quota">LOP</TH>
-              {isAdmin && <TH right>Salary</TH>}<TH right>Billing ({plabel})</TH><TH right>Staff T.Inc</TH><TH right>Staff T.Sale</TH><TH> </TH>
+              <TH>#</TH>
+              <TH sort={staffRosterSort} sortKey="name">Name</TH>
+              <TH sort={staffRosterSort} sortKey="role">Role</TH>
+              <TH sort={staffRosterSort} sortKey="start">Start</TH>
+              <TH sort={staffRosterSort} sortKey="end">End</TH>
+              <TH right title="Days the staff was active in this period (join/exit-aware, excludes LOP)" sort={staffRosterSort} sortKey="days">Days</TH>
+              <TH right title="Approved leaves within the monthly quota" sort={staffRosterSort} sortKey="paid">Paid</TH>
+              <TH right title="Loss-of-pay: leaves beyond the monthly quota" sort={staffRosterSort} sortKey="lop">LOP</TH>
+              {isAdmin && <TH right sort={staffRosterSort} sortKey="salary">Salary</TH>}
+              <TH right sort={staffRosterSort} sortKey="billing">Billing ({plabel})</TH>
+              <TH right sort={staffRosterSort} sortKey="staffTInc">Staff T.Inc</TH>
+              <TH right sort={staffRosterSort} sortKey="totalSale">Staff T.Sale</TH>
+              <TH> </TH>
             </tr></thead>
             <tbody>
-              {branchStaff.map((s, i) => {
-                let billing = 0, matSale = 0, tips = 0, staffTInc = 0;
-
-                // Salary & Leaves logic
-                let curSalary = 0, leavesTaken = 0, daysWorked = 0, paidLeaves = 0, lop = 0, payrollDays = 0;
-                const quotaPerMonth = (b.type === 'unisex' ? globalSettings?.unisex_leaves : globalSettings?.mens_leaves) || (b.type === 'unisex' ? 3 : 2);
-
-                // Mirror proRataSalary's internal window (cap current month to yesterday, subtract LOP).
-                // Shown under the salary cell so the number audit-trails: salary ≈ (monthly / daysInMo) × payrollDays.
-                const computePayrollDays = (mPrefix) => {
-                  const [yr, mo] = mPrefix.split('-').map(Number);
-                  const daysInMo = new Date(yr, mo, 0).getDate();
-                  const mStart = new Date(yr, mo - 1, 1);
-                  const mEnd = new Date(yr, mo, 0);
-                  const jd = s.join ? new Date(s.join) : null;
-                  const ed = s.exit_date ? new Date(s.exit_date) : null;
-                  const now = new Date();
-                  const isCurrent = now.getFullYear() === yr && now.getMonth() + 1 === mo;
-                  let capEnd = mEnd;
-                  if (isCurrent) {
-                    const y = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
-                    if (y < mStart) return 0;
-                    if (y < mEnd) capEnd = y;
-                  }
-                  const effStart = (jd && jd > mStart) ? jd : mStart;
-                  const effEnd = (ed && ed < capEnd) ? ed : capEnd;
-                  if (effStart > effEnd) return 0;
-                  const cal = Math.round((effEnd - effStart) / 86400000) + 1;
-                  const mLeaves = staffLeavesInMonth(s.id, mPrefix, leaves);
-                  const proPaid = Math.ceil(quotaPerMonth * cal / daysInMo);
-                  const unpaid = Math.max(0, mLeaves - proPaid);
-                  return Math.max(0, cal - unpaid);
-                };
-
-                if (filterMode === 'month') {
-                  curSalary = proRataSalary(s, filterPrefix, branches, salHistory, staff, globalSettings);
-                  leavesTaken = staffLeavesInMonth(s.id, filterPrefix, leaves);
-                  daysWorked = staffStatusForMonth(s, filterPrefix).daysWorked || 0;
-                  // Paid vs LOP is settled per month so the quota applies evenly; summing across months
-                  // prevents a staff with 2 leaves in two different months from being marked LOP at a 3-leave quota.
-                  paidLeaves = Math.min(leavesTaken, quotaPerMonth);
-                  lop = Math.max(0, leavesTaken - quotaPerMonth);
-                  payrollDays = computePayrollDays(filterPrefix);
-                } else {
-                  for (let m = 1; m <= endMonth; m++) {
-                    const mPrefix = `${filterYear}-${String(m).padStart(2, '0')}`;
-                    curSalary += proRataSalary(s, mPrefix, branches, salHistory, staff, globalSettings);
-                    const mLeaves = staffLeavesInMonth(s.id, mPrefix, leaves);
-                    leavesTaken += mLeaves;
-                    paidLeaves += Math.min(mLeaves, quotaPerMonth);
-                    lop += Math.max(0, mLeaves - quotaPerMonth);
-                    daysWorked += staffStatusForMonth(s, mPrefix).daysWorked || 0;
-                    payrollDays += computePayrollDays(mPrefix);
-                  }
-                }
-
-                periodEntries.forEach(e => {
-                  const sb = (e.staff_billing || []).find(x => x.staff_id === s.id);
-                  if (sb) {
-                    billing += (sb.billing || 0);
-                    matSale += (sb.material || 0);
-                    tips += (sb.tips || 0);
-                    staffTInc += (sb.staff_total_inc || (sb.incentive || 0) + (sb.mat_incentive || 0) + (sb.tips || 0));
-                  }
-                });
-                const totalSale = billing + matSale + tips;
-                const pct = Math.min(Math.round(billing / (s.target || 50000) * 100), 100);
-                const fmtShort = (iso) => {
-                  if (!iso) return "—";
-                  const d = new Date(iso);
-                  if (isNaN(d.getTime())) return iso;
-                  return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "2-digit" });
-                };
+              {sortedRows.map((row, i) => {
+                const { s, billing, staffTInc, totalSale, pct, curSalary, daysWorked, paidLeaves, lop, payrollDays } = row;
                 const hasExit = !!s.exit_date;
                 return (
                   <tr key={s.id}>
@@ -2137,7 +2167,8 @@ export default function BranchesPage() {
             </tbody>
           </table>
         </Card>
-        </>)}
+        </>);
+        })()}
 
         {/* Individual Staff Monthly History Breakdown — yearly view only */}
         {selectedStaffHistory && filterMode === "year" && (() => {

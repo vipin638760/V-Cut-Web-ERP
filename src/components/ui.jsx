@@ -647,11 +647,54 @@ export function Avatar({ src, name, size = 40, online }) {
   );
 }
 
+// Shared sort controller for pill-tables. Callers pass the current sort state +
+// a map of column-id → key-fn into `sortRows`; TH renders the click handler and
+// the ▲/▼ indicator so tables opt in per-column without re-implementing sort.
+//
+// Usage:
+//   const sort = useSort("name");
+//   <TH sort={sort} sortKey="name">Name</TH>
+//   const rows = sort.sortRows(rawRows, { name: r => r.name, salary: r => r.salary, ... });
+export function useSort(defaultCol = null, defaultDir = "asc") {
+  const [sortCol, setSortCol] = useState(defaultCol);
+  const [sortDir, setSortDir] = useState(defaultDir);
+  const toggle = (col) => {
+    if (sortCol === col) setSortDir(d => d === "asc" ? "desc" : "asc");
+    else { setSortCol(col); setSortDir("asc"); }
+  };
+  const sortRows = (rows, keyFns) => {
+    if (!sortCol || !keyFns || typeof keyFns[sortCol] !== "function") return rows;
+    const fn = keyFns[sortCol];
+    const mult = sortDir === "asc" ? 1 : -1;
+    return [...rows].sort((a, b) => {
+      const av = fn(a), bv = fn(b);
+      // Nulls/undefined always sort to the bottom regardless of direction.
+      if (av == null && bv == null) return 0;
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      if (typeof av === "number" && typeof bv === "number") return (av - bv) * mult;
+      return String(av).localeCompare(String(bv), undefined, { numeric: true }) * mult;
+    });
+  };
+  return { sortCol, sortDir, toggle, sortRows };
+}
+
 // Table components — cleaner, using surface shifts
-export function TH({ children, right, sticky, ...props }) {
+export function TH({ children, right, sticky, sort, sortKey, ...props }) {
+  const clickable = !!(sort && sortKey);
+  const isActive = clickable && sort.sortCol === sortKey;
+  const indicator = isActive ? (sort.sortDir === "asc" ? "▲" : "▼") : (clickable ? "↕" : "");
   return (
-    <th {...props} style={{ background: "var(--bg4)", color: "var(--text3)", fontWeight: 600, fontSize: 10, padding: "14px 20px", textAlign: right ? "right" : "left", borderBottom: "1px solid rgba(72,72,71,0.1)", whiteSpace: "nowrap", textTransform: "uppercase", letterSpacing: "1.5px", fontFamily: "var(--font-body, var(--font-outfit))", ...(sticky ? { position: "sticky", right: 0, background: "var(--bg4)", zIndex: 10 } : {}), ...props.style }}>
+    <th {...props}
+      onClick={clickable ? (e) => { props.onClick?.(e); sort.toggle(sortKey); } : props.onClick}
+      style={{ background: "var(--bg4)", color: "var(--text3)", fontWeight: 600, fontSize: 10, padding: "14px 20px", textAlign: right ? "right" : "left", borderBottom: "1px solid rgba(72,72,71,0.1)", whiteSpace: "nowrap", textTransform: "uppercase", letterSpacing: "1.5px", fontFamily: "var(--font-body, var(--font-outfit))", cursor: clickable ? "pointer" : "default", userSelect: clickable ? "none" : "auto", ...(sticky ? { position: "sticky", right: 0, background: "var(--bg4)", zIndex: 10 } : {}), ...props.style }}>
+      {right && indicator && (
+        <span style={{ opacity: isActive ? 0.95 : 0.35, marginRight: 4, fontSize: 9, color: isActive ? "var(--accent)" : "inherit" }}>{indicator}</span>
+      )}
       {children}
+      {!right && indicator && (
+        <span style={{ opacity: isActive ? 0.95 : 0.35, marginLeft: 4, fontSize: 9, color: isActive ? "var(--accent)" : "inherit" }}>{indicator}</span>
+      )}
     </th>
   );
 }
