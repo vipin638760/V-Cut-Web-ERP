@@ -637,7 +637,7 @@ export default function LeavesPage() {
                           <span style={{ fontSize: 11, color: "var(--text3)", marginRight: 4 }}>Processed</span>
                         )}
                         <IconBtn name="edit" title="Edit record" variant="secondary" onClick={() => setEditLeave({ id: l.id, staff_id: l.staff_id, date: l.date || "", days: l.days || 1, type: l.type || "Leave 1", reason: l.reason || "" })} />
-                        {isAdmin && <IconBtn name="del" title="Delete record" variant="danger" onClick={() => handleDelete(l.id)} />}
+                        {canAction && <IconBtn name="del" title="Delete record" variant="danger" onClick={() => handleDelete(l.id)} />}
                       </div>
                     </TD>
                   )}
