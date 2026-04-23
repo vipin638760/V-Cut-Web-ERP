@@ -1379,7 +1379,7 @@ export default function BranchesPage() {
           salary: dSalaryShare,
           futureSalary: 0,
           gst: dGst,
-          estExpense: dGst,
+          estExpense: 0,
           leaves: dLeaves,
           pl: dIncome - dExpenses,
           isFuture: false,
@@ -1976,7 +1976,8 @@ export default function BranchesPage() {
                   <TH right>WiFi</TH>
                   <TH right>Salary</TH>
                   <TH right title="Projected salary for future days not yet entered">Future Salary</TH>
-                  <TH right title="GST extraction on online income (past) or full projected expense (future)">Est. Expense</TH>
+                  <TH right title={`GST extraction @ ${gstPct}% on online income`}>GST ({gstPct}%)</TH>
+                  <TH right title="Projected fixed cost + salary share for future days not yet entered">Est. Expense</TH>
                   <TH right>{filterMode === "month" ? "Leave Entry" : "Leaves"}</TH>
                   <TH right>Net P&L</TH>
                 </tr></thead>
@@ -1998,7 +1999,8 @@ export default function BranchesPage() {
                       <TD right style={{ color: "var(--orange)" }}>{INR(m.wifi)}</TD>
                       <TD right style={{ color: "var(--blue)" }}>{m.salary > 0 ? INR(m.salary) : "—"}</TD>
                       <TD right style={{ color: "var(--purple, #c084fc)" }}>{(m.futureSalary || 0) > 0 ? INR(m.futureSalary) : "—"}</TD>
-                      <TD right style={{ color: m.isFuture ? "var(--orange)" : "var(--red)" }}>{(m.estExpense || 0) > 0 ? INR(m.estExpense) : "—"}</TD>
+                      <TD right style={{ color: "var(--red)" }}>{(m.gst || 0) > 0 ? INR(m.gst) : "—"}</TD>
+                      <TD right style={{ color: "var(--orange)" }}>{(m.estExpense || 0) > 0 ? INR(m.estExpense) : "—"}</TD>
                       <TD right style={{ fontWeight: 600, color: "var(--text3)" }}>{m.leaves}</TD>
                       <TD right style={{ fontWeight: 700, color: m.pl >= 0 ? "var(--green)" : "var(--red)" }}>{isAdmin ? (INR(m.pl)) : "•••••"}</TD>
                     </tr>
@@ -2017,7 +2019,8 @@ export default function BranchesPage() {
                       <TD right style={{ fontWeight: 800, color: "var(--orange)" }}>{INR(breakdownStats.reduce((s, m) => s + m.wifi, 0))}</TD>
                       <TD right style={{ fontWeight: 800, color: "var(--blue)" }}>{INR(breakdownStats.reduce((s, m) => s + m.salary, 0))}</TD>
                       <TD right style={{ fontWeight: 800, color: "var(--purple, #c084fc)" }}>{INR(breakdownStats.reduce((s, m) => s + (m.futureSalary || 0), 0))}</TD>
-                      <TD right style={{ fontWeight: 800, color: "var(--red)" }}>{INR(breakdownStats.reduce((s, m) => s + (m.estExpense || 0), 0))}</TD>
+                      <TD right style={{ fontWeight: 800, color: "var(--red)" }}>{INR(breakdownStats.reduce((s, m) => s + (m.gst || 0), 0))}</TD>
+                      <TD right style={{ fontWeight: 800, color: "var(--orange)" }}>{INR(breakdownStats.reduce((s, m) => s + (m.estExpense || 0), 0))}</TD>
                       <TD right style={{ fontWeight: 800, color: "var(--text2)" }}>{breakdownStats.reduce((s, m) => s + m.leaves, 0)}</TD>
                       <TD right style={{ fontWeight: 800, color: breakdownStats.reduce((s, m) => s + m.pl, 0) >= 0 ? "var(--green)" : "var(--red)" }}>
                         {isAdmin ? INR(breakdownStats.reduce((s, m) => s + m.pl, 0)) : "•••••"}
