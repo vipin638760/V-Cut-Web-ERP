@@ -28,21 +28,26 @@ export function getStaffSalaryForMonth(staffId, monthStr, salaryHistory, staffLi
  *  - Paid allowance is pro-rated based on the active portion of the month.
  *  - Each approved leave consumes the paid allowance first; the remainder is unpaid and reduces salary.
  */
+// Pro-rata salary policy:
+//   • No week-offs — every calendar day in the month is a potential pay day.
+//   • Denominator is always daysInMonth (so per-day rate = salary / daysInMonth).
+//   • Paid-leave quota scales with the active window, ceil'd in the employee's favour
+//     (e.g. 3 leaves / month × 5 active days / 30 = 0.5 → 1 day allowance).
+//   • Approved leaves beyond that ceil'd quota are LOP and deduct whole days of pay.
+//   • For the *current* month the window is capped to yesterday, so the number reflects
+//     what's actually been earned so far — today's shift hasn't happened yet.
 export function proRataSalary(st, monthStr, branches, salaryHistory, staffList, globalSettings = {}, leaves = []) {
   const salary = getStaffSalaryForMonth(st.id, monthStr, salaryHistory, staffList);
   if (!salary) return 0;
 
   const [yr, mo] = monthStr.split('-').map(Number);
   const daysInMonth = new Date(yr, mo, 0).getDate();
-  const weeklyOffs = Math.floor(daysInMonth / 7) * 2 + (daysInMonth % 7 >= 6 ? 1 : 0);
-  const workingDays = daysInMonth - weeklyOffs;
 
   const branch = branches?.find(b => b.id === st.branch_id);
-  // Use global settings if available, else fallback to legacy defaults
-  let paidLeave = branch && branch.type === 'unisex' ? 3 : 2;
+  let quotaPerMonth = branch && branch.type === 'unisex' ? 3 : 2;
   if (globalSettings) {
-    if (branch?.type === 'mens' && globalSettings.mens_leaves !== undefined) paidLeave = globalSettings.mens_leaves;
-    if (branch?.type === 'unisex' && globalSettings.unisex_leaves !== undefined) paidLeave = globalSettings.unisex_leaves;
+    if (branch?.type === 'mens' && globalSettings.mens_leaves !== undefined) quotaPerMonth = globalSettings.mens_leaves;
+    if (branch?.type === 'unisex' && globalSettings.unisex_leaves !== undefined) quotaPerMonth = globalSettings.unisex_leaves;
   }
 
   const monthStart = new Date(yr, mo - 1, 1);
@@ -50,36 +55,32 @@ export function proRataSalary(st, monthStr, branches, salaryHistory, staffList, 
   const joinDate = st.join ? new Date(st.join) : null;
   const exitDate = st.exit_date ? new Date(st.exit_date) : null;
 
-  // Full month
-  if ((!joinDate || joinDate <= monthStart) && (!exitDate || exitDate >= monthEnd)) {
-    return salary;
+  // For the current month, cap the effective end to yesterday.
+  const now = new Date();
+  const isCurrentMonth = now.getFullYear() === yr && now.getMonth() + 1 === mo;
+  let capEnd = monthEnd;
+  if (isCurrentMonth) {
+    const y = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+    if (y < monthStart) return 0;
+    if (y < monthEnd) capEnd = y;
   }
 
-  // Pro-rata
   const effectiveStart = (joinDate && joinDate > monthStart) ? joinDate : monthStart;
-  const effectiveEnd = (exitDate && exitDate < monthEnd) ? exitDate : monthEnd;
-
+  const effectiveEnd = (exitDate && exitDate < capEnd) ? exitDate : capEnd;
   if (effectiveStart > effectiveEnd) return 0;
 
   const calDays = Math.round((effectiveEnd - effectiveStart) / 86400000) + 1;
-  const periodOffs = Math.floor(calDays / 7) * 2 + (calDays % 7 >= 6 ? 1 : 0);
-  const periodWorkDays = Math.max(0, calDays - periodOffs);
-  const proPaidLeave = Math.round(paidLeave * calDays / daysInMonth);
-  const fullPayBasis = workingDays + paidLeave;
+  // Pro-rata allowance ceil'd so fractional entitlement never costs the employee a day.
+  const proPaidLeave = Math.ceil(quotaPerMonth * calDays / daysInMonth);
 
-  // Approved leaves in this month for this staff
   const approvedLeaves = (leaves || []).filter(l =>
     l.staff_id === st.id && l.status === 'approved' && l.date && l.date.startsWith(monthStr)
   );
   const totalLeaveDays = approvedLeaves.reduce((s, l) => s + (Number(l.days) || 1), 0);
-  // Paid allowance covers up to proPaidLeave days; the rest is unpaid (reduces salary).
   const unpaidLeaveDays = Math.max(0, totalLeaveDays - proPaidLeave);
-  const payableDays = Math.max(
-    0,
-    Math.min(periodWorkDays + proPaidLeave, workingDays + paidLeave) - unpaidLeaveDays
-  );
 
-  return Math.round(salary * payableDays / fullPayBasis);
+  const payableDays = Math.max(0, calDays - unpaidLeaveDays);
+  return Math.round((salary / daysInMonth) * payableDays);
 }
 
 /** Staff overall status — active/inactive relative to a given month */
@@ -132,8 +133,8 @@ export function staffStatusForMonth(st, monthStr, opts = {}) {
   const effStart = (joinDate && joinDate > monthStart) ? joinDate : monthStart;
   const effEnd = (exitDate && exitDate < monthEnd) ? exitDate : monthEnd;
   const calDays = Math.round((effEnd - effStart) / 86400000) + 1;
-  const offDays = Math.floor(calDays / 7) * 2 + (calDays % 7 >= 6 ? 1 : 0);
-  const worked = Math.max(0, calDays - offDays);
+  // No week-off concept — every calendar day in the active window counts.
+  const worked = Math.max(0, calDays);
   const spansFullWindow = (!joinDate || joinDate <= monthStart) && (!exitDate || exitDate >= monthEnd);
   return {
     status: spansFullWindow && !fullMonth ? 'active' : 'partial',
