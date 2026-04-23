@@ -1809,29 +1809,40 @@ export default function BranchesPage() {
         <Card>
           <table className="pill-table" style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12.5 }}>
             <thead><tr>
-              <TH>#</TH><TH>Name</TH><TH>Role</TH>{isAdmin && <TH right>Salary</TH>}<TH right>Leaves (T/L)</TH><TH right>Billing ({plabel})</TH><TH right>Staff T.Inc</TH><TH right>Staff T.Sale</TH><TH> </TH>
+              <TH>#</TH><TH>Name</TH><TH>Role</TH>
+              <TH>Start</TH><TH>End</TH>
+              <TH right title="Days the staff was active in this period (join/exit-aware, excludes LOP)">Days</TH>
+              <TH right title="Approved leaves within the monthly quota">Paid</TH>
+              <TH right title="Loss-of-pay: leaves beyond the monthly quota">LOP</TH>
+              {isAdmin && <TH right>Salary</TH>}<TH right>Billing ({plabel})</TH><TH right>Staff T.Inc</TH><TH right>Staff T.Sale</TH><TH> </TH>
             </tr></thead>
             <tbody>
               {branchStaff.map((s, i) => {
                 let billing = 0, matSale = 0, tips = 0, staffTInc = 0;
-                
+
                 // Salary & Leaves logic
-                let curSalary = 0, leavesTaken = 0;
+                let curSalary = 0, leavesTaken = 0, daysWorked = 0, paidLeaves = 0, lop = 0;
                 const quotaPerMonth = (b.type === 'unisex' ? globalSettings?.unisex_leaves : globalSettings?.mens_leaves) || (b.type === 'unisex' ? 3 : 2);
-                
+
                 if (filterMode === 'month') {
                   curSalary = proRataSalary(s, filterPrefix, branches, salHistory, staff, globalSettings);
                   leavesTaken = staffLeavesInMonth(s.id, filterPrefix, leaves);
+                  daysWorked = staffStatusForMonth(s, filterPrefix).daysWorked || 0;
+                  // Paid vs LOP is settled per month so the quota applies evenly; summing across months
+                  // prevents a staff with 2 leaves in two different months from being marked LOP at a 3-leave quota.
+                  paidLeaves = Math.min(leavesTaken, quotaPerMonth);
+                  lop = Math.max(0, leavesTaken - quotaPerMonth);
                 } else {
-                  // Sum for the year (Jan to endMonth)
                   for (let m = 1; m <= endMonth; m++) {
                     const mPrefix = `${filterYear}-${String(m).padStart(2, '0')}`;
                     curSalary += proRataSalary(s, mPrefix, branches, salHistory, staff, globalSettings);
-                    leavesTaken += staffLeavesInMonth(s.id, mPrefix, leaves);
+                    const mLeaves = staffLeavesInMonth(s.id, mPrefix, leaves);
+                    leavesTaken += mLeaves;
+                    paidLeaves += Math.min(mLeaves, quotaPerMonth);
+                    lop += Math.max(0, mLeaves - quotaPerMonth);
+                    daysWorked += staffStatusForMonth(s, mPrefix).daysWorked || 0;
                   }
                 }
-                const quota = quotaPerMonth * factor;
-                const leavesLeft = Math.max(0, quota - leavesTaken);
 
                 periodEntries.forEach(e => {
                   const sb = (e.staff_billing || []).find(x => x.staff_id === s.id);
@@ -1844,17 +1855,26 @@ export default function BranchesPage() {
                 });
                 const totalSale = billing + matSale + tips;
                 const pct = Math.min(Math.round(billing / (s.target || 50000) * 100), 100);
+                const fmtShort = (iso) => {
+                  if (!iso) return "—";
+                  const d = new Date(iso);
+                  if (isNaN(d.getTime())) return iso;
+                  return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "2-digit" });
+                };
+                const hasExit = !!s.exit_date;
                 return (
                   <tr key={s.id}>
                     <TD style={{ color: "var(--text3)" }}>{i + 1}</TD>
                     <TD style={{ fontWeight: 600 }}>{s.name}</TD>
                     <TD><Pill label={s.role || "—"} color="blue" /></TD>
-                    {isAdmin && <TD right style={{ color: "var(--gold)", fontWeight: 600 }}>{INR(curSalary)}</TD>}
-                    <TD right>
-                      <span style={{ color: leavesTaken > quota ? "var(--red)" : "var(--green)", fontWeight: 600 }}>{leavesTaken}</span>
-                      <span style={{ color: "var(--text3)", margin: "0 4px" }}>/</span>
-                      <span style={{ color: leavesLeft > 0 ? "var(--green)" : "var(--red)" }}>{leavesLeft}</span>
+                    <TD style={{ color: "var(--text2)", fontSize: 11, fontWeight: 600 }}>{fmtShort(s.join)}</TD>
+                    <TD style={{ color: hasExit ? "var(--red)" : "var(--green)", fontSize: 11, fontWeight: 600 }}>
+                      {hasExit ? fmtShort(s.exit_date) : "Active"}
                     </TD>
+                    <TD right style={{ fontWeight: 700, color: "var(--blue, #60a5fa)" }}>{daysWorked}</TD>
+                    <TD right style={{ fontWeight: 700, color: paidLeaves > 0 ? "var(--green)" : "var(--text3)" }}>{paidLeaves}</TD>
+                    <TD right style={{ fontWeight: 700, color: lop > 0 ? "var(--red)" : "var(--text3)" }}>{lop}</TD>
+                    {isAdmin && <TD right style={{ color: "var(--gold)", fontWeight: 600 }}>{INR(curSalary)}</TD>}
                     <TD right>
                       <span style={{ color: pct >= 100 ? "var(--green)" : "var(--blue)", fontWeight: 600 }}>{INR(billing)}</span>
                       <div style={{ height: 4, background: "var(--border2)", borderRadius: 4, marginTop: 4, overflow: "hidden", minWidth: 60 }}>
@@ -1880,7 +1900,7 @@ export default function BranchesPage() {
                   </tr>
                 );
               })}
-              {branchStaff.length === 0 && <tr><td colSpan={6} style={{ textAlign: "center", padding: 24, color: "var(--text3)" }}>No staff in this branch</td></tr>}
+              {branchStaff.length === 0 && <tr><td colSpan={isAdmin ? 13 : 12} style={{ textAlign: "center", padding: 24, color: "var(--text3)" }}>No staff in this branch</td></tr>}
             </tbody>
           </table>
         </Card>
