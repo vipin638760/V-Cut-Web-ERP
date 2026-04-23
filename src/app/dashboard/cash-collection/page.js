@@ -109,6 +109,13 @@ export default function CashCollectionPage() {
     if (customRangeActive) return d >= dateFrom && d <= dateTo;
     return filterMode === "month" ? d.startsWith(filterPrefix) : d.startsWith(String(filterYear));
   };
+  // Concrete period bounds — used to compute each branch's opening balance
+  // (everything that happened *before* periodStart). Custom range wins; else we
+  // derive from filterMode. periodEnd is informational (the UI uses inPeriod).
+  const periodStart = customRangeActive
+    ? dateFrom
+    : (filterMode === "month" ? `${filterPrefix}-01` : `${filterYear}-01-01`);
+  const beforePeriod = (d) => d && d < periodStart;
 
   const allRows = branches.map(b => {
     const bEntries = entries.filter(e => e.branch_id === b.id && inPeriod(e.date));
@@ -116,13 +123,25 @@ export default function CashCollectionPage() {
     const online = bEntries.reduce((s, e) => s + (e.online || 0), 0);
     const cih = bEntries.reduce((s, e) => s + (e.cash_in_hand || 0), 0);
 
+    // Opening Balance = everything the branch was holding *before* the period started.
+    // It's the net of historical CIH minus historical collections. So when the weekly
+    // range spans a month boundary, cash that accrued earlier still gets collected here.
+    const priorCih = entries
+      .filter(e => e.branch_id === b.id && beforePeriod(e.date))
+      .reduce((s, e) => s + (e.cash_in_hand || 0), 0);
+    const priorCollected = collections
+      .filter(c => c.branch_id === b.id && beforePeriod(c.collected_on))
+      .reduce((s, c) => s + (Number(c.amount) || 0), 0);
+    const openingBalance = Math.max(0, priorCih - priorCollected);
+
     // Collections for this branch scoped to the same period as the entries.
     const bCollections = collections.filter(c => c.branch_id === b.id && inPeriod(c.collected_on));
     const fifoEntries = bEntries.map(e => ({ date: e.date, cih: e.cash_in_hand || 0 }));
     const fifo = fifoConsume(fifoEntries, bCollections);
     const collectedInPeriod = bCollections.reduce((s, c) => s + (Number(c.amount) || 0), 0);
+    const totalCash = openingBalance + cih; // physical cash the branch should be holding across the window
 
-    return { b, entries: bEntries, cash, online, cih, collections: bCollections, fifo, collectedInPeriod };
+    return { b, entries: bEntries, cash, online, cih, collections: bCollections, fifo, collectedInPeriod, openingBalance, totalCash };
   });
   const branchRows = (selected.size === 0 ? allRows : allRows.filter(r => selected.has(r.b.id)))
     .slice()
@@ -274,20 +293,26 @@ export default function CashCollectionPage() {
   });
 
   const saveCollection = async () => {
+    // Per-branch reconciliation totals — pulled from the current view so every
+    // row knows its opening balance and in-period CIH.
+    const rowInfo = new Map(branchRows.map(r => [r.b.id, { opening: r.openingBalance, expected: r.cih, total: r.totalCash }]));
     const entered = Object.entries(batchForm.rows)
-      .map(([bid, r]) => ({ bid, collected: Number(r?.collected) || 0, reason: (r?.reason || "").trim() }))
-      .filter(r => r.collected > 0 || r.reason);
-    const nonZero = entered.filter(r => r.collected > 0);
+      .map(([bid, r]) => ({
+        bid,
+        collected: Number(r?.collected) || 0,
+        leftInBranch: Number(r?.leftInBranch) || 0,
+        reason: (r?.reason || "").trim(),
+      }))
+      .filter(r => r.collected > 0 || r.leftInBranch > 0 || r.reason);
+    const nonZero = entered.filter(r => r.collected > 0 || r.leftInBranch > 0);
     if (nonZero.length === 0) {
-      toast({ title: "No amounts", message: "Enter a collected amount for at least one branch.", type: "warning" });
+      toast({ title: "No amounts", message: "Enter a collected amount (or left-in-branch) for at least one branch.", type: "warning" });
       return;
     }
-    // Expected per branch — used to auto-compute excess/less without making the
-    // user type the diff themselves.
-    const expectedByBranch = new Map(branchRows.map(r => [r.b.id, r.fifo.totals.outstanding]));
+    // Excess/Less now compares physical reconciliation: (collected + left) vs total cash.
     const missingReason = nonZero.find(r => {
-      const expected = expectedByBranch.get(r.bid) ?? 0;
-      const diff = r.collected - expected;
+      const info = rowInfo.get(r.bid) || { total: 0 };
+      const diff = (r.collected + r.leftInBranch) - info.total;
       return diff !== 0 && !r.reason;
     });
     if (missingReason) {
@@ -303,6 +328,8 @@ export default function CashCollectionPage() {
       const batchDenoms = Object.fromEntries(DENOMS.map(d => [String(d), Number(batchForm.denoms[d]) || 0]));
       const batchRef = await addDoc(collection(db, "cash_collection_batches"), {
         collected_on: batchForm.collected_on,
+        period_start: periodStart,
+        period_end: customRangeActive ? dateTo : null,
         total_amount: batchTotal,
         denoms: batchDenoms,
         note: batchForm.note?.trim() || "",
@@ -312,14 +339,18 @@ export default function CashCollectionPage() {
       });
       await Promise.all(nonZero.map(r => {
         const branch = branches.find(b => b.id === r.bid);
-        const expected = expectedByBranch.get(r.bid) ?? 0;
+        const info = rowInfo.get(r.bid) || { opening: 0, expected: 0, total: 0 };
+        const excess = (r.collected + r.leftInBranch) - info.total;
         return addDoc(collection(db, "cash_collections"), {
           branch_id: r.bid,
           branch_name: branch?.name || "",
           collected_on: batchForm.collected_on,
           amount: r.collected,
-          expected,
-          excess: r.collected - expected,
+          opening_balance: info.opening,
+          expected: info.total,              // total cash the branch should have held in the window
+          period_expected: info.expected,    // CIH accrued inside the window only
+          left_in_branch: r.leftInBranch,
+          excess,
           reason: r.reason || "",
           note: batchForm.note?.trim() || "",
           batch_id: batchRef.id,
@@ -717,43 +748,75 @@ export default function CashCollectionPage() {
             </div>
           </div>
 
+          {/* Period banner — makes the opening-balance concept explicit. */}
+          <div style={{ padding: "10px 14px", borderRadius: 10, background: "var(--bg3)", border: "1px solid var(--border)", fontSize: 12, color: "var(--text2)", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 10, color: "var(--text3)", fontWeight: 800, textTransform: "uppercase", letterSpacing: 1 }}>Window</span>
+            <strong style={{ color: "var(--gold)" }}>{plabel}</strong>
+            <span style={{ color: "var(--text3)" }}>·</span>
+            <span style={{ fontSize: 11, color: "var(--text3)" }}>
+              Opening Balance = prior CIH not yet collected (before {periodStart})
+              &nbsp;+&nbsp;Expected Cash = CIH in this window
+              &nbsp;=&nbsp;Total Cash (what each branch should physically hold)
+            </span>
+          </div>
+
           {/* Per-branch rows */}
           <div style={{ border: "1px solid var(--border2)", borderRadius: 10, overflow: "hidden" }}>
-            <div style={{ maxHeight: 340, overflowY: "auto" }}>
+            <div style={{ maxHeight: 360, overflowY: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
                 <thead style={{ position: "sticky", top: 0, background: "var(--bg4)", zIndex: 1 }}>
                   <tr>
                     <TH>Branch</TH>
-                    <TH right>Expected</TH>
+                    <TH right title="Outstanding cash from before this window — carried forward">Opening Bal.</TH>
+                    <TH right title="Cash-in-hand accrued inside this window">Expected</TH>
+                    <TH right title="Opening + Expected — the cash a branch should be holding">Total Cash</TH>
                     <TH right>Collected</TH>
+                    <TH right title="Physical cash still at the branch after this collection">Left at Branch</TH>
                     <TH right>Excess / Less</TH>
                     <TH>Reason</TH>
                   </tr>
                 </thead>
                 <tbody>
                   {branchRows.length === 0 && (
-                    <tr><td colSpan={5} style={{ padding: 24, textAlign: "center", color: "var(--text3)", fontSize: 12 }}>No branches available for {plabel}.</td></tr>
+                    <tr><td colSpan={8} style={{ padding: 24, textAlign: "center", color: "var(--text3)", fontSize: 12 }}>No branches available for {plabel}.</td></tr>
                   )}
                   {branchRows.map(r => {
                     const rowState = batchForm.rows[r.b.id] || {};
-                    const expected = r.fifo.totals.outstanding;
+                    const opening = r.openingBalance;
+                    const expected = r.cih;
+                    const total = r.totalCash;
                     const collected = Number(rowState.collected) || 0;
-                    const diff = rowState.collected !== "" && rowState.collected !== undefined ? collected - expected : 0;
-                    const diffLabel = diff > 0 ? `+${INR(diff)}` : diff < 0 ? `-${INR(Math.abs(diff))}` : "—";
-                    const diffColor = diff > 0 ? "var(--green)" : diff < 0 ? "var(--red)" : "var(--text3)";
-                    const reasonRequired = diff !== 0;
+                    const leftRaw = rowState.leftInBranch;
+                    const left = Number(leftRaw) || 0;
+                    const hasCollectedInput = rowState.collected !== "" && rowState.collected !== undefined;
+                    const hasLeftInput = leftRaw !== "" && leftRaw !== undefined;
+                    // Reconciliation only meaningful once at least one side is entered; once entered the
+                    // un-filled side is treated as 0 (e.g. "collected 3500, left 0" means all taken).
+                    const recon = (hasCollectedInput || hasLeftInput) ? (collected + left) - total : 0;
+                    const diffLabel = recon > 0 ? `+${INR(recon)}` : recon < 0 ? `-${INR(Math.abs(recon))}` : "—";
+                    const diffColor = recon > 0 ? "var(--green)" : recon < 0 ? "var(--red)" : "var(--text3)";
+                    const reasonRequired = recon !== 0;
                     return (
                       <tr key={r.b.id} style={{ borderBottom: "1px solid var(--border)" }}>
                         <TD style={{ fontWeight: 600 }}>{r.b.name.replace("V-CUT ", "")}</TD>
+                        <TD right style={{ color: opening > 0 ? "var(--orange)" : "var(--text3)" }}>{opening > 0 ? INR(opening) : "—"}</TD>
                         <TD right style={{ color: expected > 0 ? "var(--gold)" : "var(--text3)" }}>{expected > 0 ? INR(expected) : "—"}</TD>
-                        <TD right style={{ padding: "6px 10px" }}>
+                        <TD right style={{ color: "var(--text2)", fontWeight: 700 }}>{INR(total)}</TD>
+                        <TD right style={{ padding: "6px 8px" }}>
                           <input type="number" min="0" placeholder="0"
                             value={rowState.collected ?? ""}
                             onChange={e => setBatchForm(f => ({ ...f, rows: { ...f.rows, [r.b.id]: { ...(f.rows[r.b.id] || {}), collected: e.target.value } } }))}
-                            style={{ width: 110, padding: "6px 8px", borderRadius: 6, background: "var(--bg3)", border: `1px solid ${collected > 0 ? "var(--accent)" : "var(--border)"}`, color: collected > 0 ? "var(--accent)" : "var(--text)", fontSize: 13, fontWeight: 700, outline: "none", textAlign: "right" }}
+                            style={{ width: 96, padding: "6px 8px", borderRadius: 6, background: "var(--bg3)", border: `1px solid ${collected > 0 ? "var(--accent)" : "var(--border)"}`, color: collected > 0 ? "var(--accent)" : "var(--text)", fontSize: 13, fontWeight: 700, outline: "none", textAlign: "right" }}
                           />
                         </TD>
-                        <TD right style={{ color: diffColor, fontWeight: diff !== 0 ? 700 : 500 }}>{diffLabel}</TD>
+                        <TD right style={{ padding: "6px 8px" }}>
+                          <input type="number" min="0" placeholder="0"
+                            value={rowState.leftInBranch ?? ""}
+                            onChange={e => setBatchForm(f => ({ ...f, rows: { ...f.rows, [r.b.id]: { ...(f.rows[r.b.id] || {}), leftInBranch: e.target.value } } }))}
+                            style={{ width: 96, padding: "6px 8px", borderRadius: 6, background: "var(--bg3)", border: `1px solid ${left > 0 ? "var(--gold)" : "var(--border)"}`, color: left > 0 ? "var(--gold)" : "var(--text)", fontSize: 13, fontWeight: 700, outline: "none", textAlign: "right" }}
+                          />
+                        </TD>
+                        <TD right style={{ color: diffColor, fontWeight: recon !== 0 ? 700 : 500 }}>{diffLabel}</TD>
                         <TD style={{ padding: "6px 10px" }}>
                           <input type="text"
                             placeholder={reasonRequired ? "Required — explain the diff" : "Optional"}
@@ -768,10 +831,14 @@ export default function CashCollectionPage() {
                 </tbody>
                 <tfoot>
                   <tr style={{ background: "var(--bg3)", borderTop: "2px solid var(--border2)" }}>
-                    <TD style={{ fontWeight: 800, color: "var(--gold)", textTransform: "uppercase", letterSpacing: 0.5 }}>Total Collected</TD>
-                    <TD right style={{ fontWeight: 700, color: "var(--text3)" }}>{INR(branchRows.reduce((s, r) => s + r.fifo.totals.outstanding, 0))}</TD>
+                    <TD style={{ fontWeight: 800, color: "var(--gold)", textTransform: "uppercase", letterSpacing: 0.5 }}>Totals</TD>
+                    <TD right style={{ fontWeight: 700, color: "var(--orange)" }}>{INR(branchRows.reduce((s, r) => s + r.openingBalance, 0))}</TD>
+                    <TD right style={{ fontWeight: 700, color: "var(--gold)" }}>{INR(branchRows.reduce((s, r) => s + r.cih, 0))}</TD>
+                    <TD right style={{ fontWeight: 800, color: "var(--text2)" }}>{INR(branchRows.reduce((s, r) => s + r.totalCash, 0))}</TD>
                     <TD right style={{ fontWeight: 800, color: "var(--accent)", fontSize: 14 }}>{INR(batchTotal)}</TD>
-                    <TD right></TD><TD></TD>
+                    <TD right style={{ fontWeight: 800, color: "var(--gold)" }}>{INR(Object.values(batchForm.rows).reduce((s, r) => s + (Number(r?.leftInBranch) || 0), 0))}</TD>
+                    <TD right></TD>
+                    <TD></TD>
                   </tr>
                 </tfoot>
               </table>
