@@ -1317,16 +1317,15 @@ export default function BranchesPage() {
       const activeStaffInMonth = staff.filter(s => s.branch_id === b.id && staffStatusForMonth(s, filterPrefix).status !== 'inactive');
       const mActualSalary = activeStaffInMonth.reduce((s, st) => s + proRataSalary(st, filterPrefix, branches, salHistory, staff, globalSettings), 0);
 
-      // Iterate every day in the month. Past days with no entry/leave are still skipped
-      // (closed / holiday), but future days always render with their projected fixed cost
-      // + pro-rated salary so the daily total reconciles with the top Full Net P&L.
+      // Iterate every day in the month. Any day without an entry (past *or* future) renders
+      // as a projection row with its pro-rated fixed-cost + salary share, so the daily total
+      // always reconciles with the top Full Net P&L regardless of which days are entered yet.
+      // Leaves-only days (no entry but approved leaves on file) still show as actual rows.
       for (let d = 1; d <= daysCount; d++) {
         const dayPrefix = `${filterYear}-${String(filterMonth).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-        const isFutureDay = d > endDay;
         const dEntries = entries.filter(e => e.branch_id === b.id && e.date === dayPrefix);
         const dLeaves = leaves.filter(l => l.staff_id && activeStaffInMonth.some(as => as.id === l.staff_id) && l.status === 'approved' && l.date === dayPrefix).reduce((s, l) => s + (l.days || 1), 0);
-
-        if (!isFutureDay && dEntries.length === 0 && dLeaves === 0) continue;
+        const isProjected = dEntries.length === 0;
 
         const dShopRent = (b.shop_rent || 0) * dayFactor;
         const dRoomRent = (b.room_rent || 0) * dayFactor;
@@ -1336,9 +1335,9 @@ export default function BranchesPage() {
         const dSalaryShare = mActualSalary * dayFactor;
         const label = `${d} ${new Date(filterYear, filterMonth - 1).toLocaleString('default', { month: 'short' })}`;
 
-        if (isFutureDay) {
+        if (isProjected) {
           // Projected row — fixed cost accrues regardless of activity, salary sits in the "Future Salary"
-          // column so past-day Salary totals stay comparable, and Est. Expense captures the whole day's projection.
+          // column so actual Salary totals stay comparable, and Est. Expense captures the whole day's projection.
           const estExpense = dFixedFees + dSalaryShare;
           breakdownStats.push({
             label,
@@ -1346,7 +1345,7 @@ export default function BranchesPage() {
             shopRent: dShopRent, roomRent: dRoomRent, elec: dElec, wifi: dWifi,
             salary: 0, futureSalary: dSalaryShare,
             gst: 0, estExpense,
-            leaves: 0,
+            leaves: dLeaves,
             pl: -estExpense,
             isFuture: true,
           });
