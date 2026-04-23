@@ -4,7 +4,7 @@ import { collection, onSnapshot, query, orderBy, where, getDocs, deleteDoc, doc,
 import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
 import { INR, branchIncomeInPeriod, makeFilterPrefix, periodLabel, proRataSalary, staffLeavesInMonth, staffStatusForMonth, MASK } from "@/lib/calculations";
-import { Icon, IconBtn, Pill, Card, PeriodWidget, ToggleGroup, TH, TD, SearchSelect, useConfirm, useToast } from "@/components/ui";
+import { Icon, IconBtn, Pill, Card, PeriodWidget, ToggleGroup, TH, TD, Modal, SearchSelect, useConfirm, useToast } from "@/components/ui";
 import { useRouter } from "next/navigation";
 import VLoader from "@/components/VLoader";
 
@@ -402,6 +402,9 @@ export default function BranchesPage() {
 
   // Recalculate modal
   const [recalcModal, setRecalcModal] = useState(null); // { branches: [{id, name}] }
+  // Admin-only breakdown modal for the Salary column in Daily/Monthly Performance.
+  // { label, salary, monthlyTotal, dayFactor, daysInMonth, branchName, staffRows: [{id,name,role,base,proRated}] }
+  const [salaryDetail, setSalaryDetail] = useState(null);
   const [recalcFrom, setRecalcFrom] = useState(() => { const d = new Date(); d.setDate(1); return d.toISOString().slice(0, 10); });
   const [recalcTo, setRecalcTo] = useState(() => new Date().toISOString().slice(0, 10));
   const [recalcBusy, setRecalcBusy] = useState(false);
@@ -1280,6 +1283,91 @@ export default function BranchesPage() {
     </div>
   ) : null;
 
+  // ── Admin-only Salary Breakdown modal ──────────────────────────────
+  const salaryDetailEl = salaryDetail ? (
+    <Modal isOpen={!!salaryDetail} onClose={() => setSalaryDetail(null)} title="Salary Breakdown" width={620}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 10 }}>
+          <div>
+            <div style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>
+              {salaryDetail.branchName}
+            </div>
+            <div style={{ fontSize: 15, fontWeight: 800, color: "var(--gold)", marginTop: 2 }}>
+              {salaryDetail.label}
+            </div>
+          </div>
+          <div style={{ textAlign: "right" }}>
+            <div style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>
+              {salaryDetail.mode === "month" ? "This day's salary share" : "Monthly salary"}
+            </div>
+            <div style={{ fontSize: 20, fontWeight: 800, color: "var(--blue)", marginTop: 2 }}>
+              {INR(salaryDetail.salary)}
+            </div>
+          </div>
+        </div>
+
+        {salaryDetail.mode === "month" && (
+          <div style={{ padding: "10px 14px", borderRadius: 10, background: "var(--bg3)", border: "1px solid var(--border)", fontSize: 12, color: "var(--text2)", lineHeight: 1.5 }}>
+            <div style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>How this day&apos;s ₹ was computed</div>
+            Monthly salary total for this branch <strong style={{ color: "var(--blue)" }}>{INR(salaryDetail.monthlyTotal)}</strong> ÷ <strong>{salaryDetail.daysInMonth}</strong> days in month
+            {" = "}
+            <strong style={{ color: "var(--blue)" }}>{INR(Math.round(salaryDetail.monthlyTotal / salaryDetail.daysInMonth))}</strong> per day.
+          </div>
+        )}
+
+        <div style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>
+          Active staff ({salaryDetail.staffRows.length}) — pro-rated for the month
+        </div>
+
+        <Card style={{ padding: 0, overflowX: "auto", maxHeight: "50vh" }}>
+          <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
+            <thead>
+              <tr style={{ background: "var(--bg4)" }}>
+                <TH>Staff</TH>
+                <TH>Role</TH>
+                <TH right>Base Salary</TH>
+                <TH right>Pro-rated</TH>
+                {salaryDetail.mode === "month" && <TH right>Day Share</TH>}
+              </tr>
+            </thead>
+            <tbody>
+              {salaryDetail.staffRows.length === 0 && (
+                <tr><td colSpan={salaryDetail.mode === "month" ? 5 : 4} style={{ padding: 20, textAlign: "center", color: "var(--text3)", fontSize: 12 }}>No active staff in this month.</td></tr>
+              )}
+              {salaryDetail.staffRows.map(r => (
+                <tr key={r.id} style={{ borderBottom: "1px solid var(--border)" }}>
+                  <TD style={{ fontWeight: 600 }}>{r.name}</TD>
+                  <TD style={{ color: "var(--text3)", fontSize: 11 }}>{r.role || "—"}</TD>
+                  <TD right style={{ color: "var(--text3)" }}>{INR(r.base)}</TD>
+                  <TD right style={{ fontWeight: 700, color: "var(--blue)" }}>{INR(Math.round(r.proRated))}</TD>
+                  {salaryDetail.mode === "month" && (
+                    <TD right style={{ color: "var(--accent)" }}>{INR(Math.round(r.proRated / salaryDetail.daysInMonth))}</TD>
+                  )}
+                </tr>
+              ))}
+              {salaryDetail.staffRows.length > 0 && (
+                <tr style={{ background: "var(--bg3)", borderTop: "2px solid var(--border2)", fontWeight: 800 }}>
+                  <TD style={{ color: "var(--gold)" }}>TOTAL</TD>
+                  <TD></TD>
+                  <TD right style={{ color: "var(--text2)" }}>{INR(salaryDetail.staffRows.reduce((s, r) => s + r.base, 0))}</TD>
+                  <TD right style={{ color: "var(--blue)" }}>{INR(Math.round(salaryDetail.monthlyTotal))}</TD>
+                  {salaryDetail.mode === "month" && (
+                    <TD right style={{ color: "var(--accent)" }}>{INR(Math.round(salaryDetail.monthlyTotal / salaryDetail.daysInMonth))}</TD>
+                  )}
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </Card>
+
+        <div style={{ fontSize: 11, color: "var(--text3)", lineHeight: 1.5 }}>
+          Pro-rated uses each staff&apos;s join/exit dates, mid-month transfers, and any approved unpaid leaves.
+          Staff marked inactive for the entire month are excluded.
+        </div>
+      </div>
+    </Modal>
+  ) : null;
+
   // ── Branch Detail View ───────────────────────────────────────────
   if (selectedBranch) {
     const b = branches.find(x => x.id === selectedBranch);
@@ -1409,6 +1497,7 @@ export default function BranchesPage() {
         
         breakdownStats.push({
           label: new Date(filterYear, m - 1).toLocaleString('default', { month: 'short' }),
+          monthPrefix,
           income: mIncome,
           incentives: mIncExp,
           material: mAllocMat,
@@ -2016,7 +2105,41 @@ export default function BranchesPage() {
                       <TD right style={{ color: "var(--orange)" }}>{INR(m.roomRent)}</TD>
                       <TD right style={{ color: "var(--orange)" }}>{INR(m.elec)}</TD>
                       <TD right style={{ color: "var(--orange)" }}>{INR(m.wifi)}</TD>
-                      <TD right style={{ color: "var(--blue)" }}>{m.salary > 0 ? INR(m.salary) : "—"}</TD>
+                      <TD right style={{ color: "var(--blue)" }}>
+                        {m.salary > 0 ? (
+                          isAdmin ? (
+                            <button
+                              onClick={() => {
+                                const monthPrefix = filterMode === "month" ? filterPrefix : m.monthPrefix;
+                                if (!monthPrefix) return;
+                                const daysInMonth = new Date(Number(monthPrefix.slice(0, 4)), Number(monthPrefix.slice(5, 7)), 0).getDate();
+                                const monthStaff = staff.filter(s => s.branch_id === b.id && staffStatusForMonth(s, monthPrefix).status !== 'inactive');
+                                const staffRows = monthStaff.map(s => ({
+                                  id: s.id,
+                                  name: s.name,
+                                  role: s.role || "",
+                                  base: Number(s.salary) || 0,
+                                  proRated: proRataSalary(s, monthPrefix, branches, salHistory, staff, globalSettings),
+                                })).sort((a, z) => z.proRated - a.proRated);
+                                const monthlyTotal = staffRows.reduce((s, r) => s + r.proRated, 0);
+                                setSalaryDetail({
+                                  branchName: b.name,
+                                  label: m.label,
+                                  mode: filterMode,
+                                  daysInMonth,
+                                  monthlyTotal,
+                                  salary: m.salary,
+                                  staffRows,
+                                });
+                              }}
+                              style={{ background: "transparent", border: "none", color: "var(--blue)", cursor: "pointer", padding: 0, fontSize: "inherit", fontWeight: "inherit", fontFamily: "inherit", textDecoration: "underline", textDecorationStyle: "dotted", textUnderlineOffset: 3 }}
+                              title="Salary breakdown — admin only"
+                            >
+                              {INR(m.salary)}
+                            </button>
+                          ) : INR(m.salary)
+                        ) : "—"}
+                      </TD>
                       <TD right style={{ color: "var(--purple, #c084fc)" }}>{(m.futureSalary || 0) > 0 ? INR(m.futureSalary) : "—"}</TD>
                       <TD right style={{ color: "var(--red)" }}>{(m.gst || 0) > 0 ? INR(m.gst) : "—"}</TD>
                       <TD right style={{ color: "var(--orange)" }}>{(m.estExpense || 0) > 0 ? INR(m.estExpense) : "—"}</TD>
@@ -2193,6 +2316,7 @@ export default function BranchesPage() {
         )}
         {attendanceModalEl}
         {recalcModalEl}
+        {salaryDetailEl}
         {ConfirmDialog}
         {ToastContainer}
       </div>
@@ -2400,6 +2524,7 @@ export default function BranchesPage() {
       )}
       {attendanceModalEl}
       {recalcModalEl}
+      {salaryDetailEl}
       {ConfirmDialog}
       {ToastContainer}
     </div>
