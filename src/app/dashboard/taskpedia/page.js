@@ -364,6 +364,15 @@ export default function TaskpediaPage() {
                       <div style={{ display: "flex", alignItems: "flex-start", gap: 8, marginBottom: 6 }}>
                         <div style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 700, color: "var(--text)", lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis" }}>{t.title}</div>
                         {unread && <span title="New for you" style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--red)", flexShrink: 0, marginTop: 4 }} />}
+                        {isAdmin && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleDelete(t); }}
+                            title="Delete task"
+                            style={{ flexShrink: 0, width: 24, height: 24, display: "inline-flex", alignItems: "center", justifyContent: "center", background: "rgba(248,113,113,0.1)", color: "var(--red)", border: "1px solid rgba(248,113,113,0.3)", borderRadius: 6, cursor: "pointer" }}
+                          >
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/></svg>
+                          </button>
+                        )}
                       </div>
                       {t.description && (
                         <div style={{ fontSize: 11, color: "var(--text3)", marginBottom: 8, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{t.description}</div>
