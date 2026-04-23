@@ -190,11 +190,13 @@ export default function CashCollectionPage() {
     setDateTo(iso(today));
   };
 
-  // ── Print Collection Slip ──
+  // ── Collection Slip ──
   // Opens a new window with a simple printable slip: one row per selected branch
   // with Expected / Collected / Carry-forward / Signature columns so the cashier
   // can fill it in on the visit and get each counter handler to sign.
-  const printCollectionSlip = () => {
+  // Pass `autoPrint: true` to trigger the browser print dialog immediately; omit
+  // (or false) to just preview the slip in a new tab.
+  const openCollectionSlip = ({ autoPrint = false } = {}) => {
     if (branchRows.length === 0) return;
     const rowsHtml = branchRows.map((r, i) => `
       <tr>
@@ -281,7 +283,11 @@ export default function CashCollectionPage() {
     w.document.open();
     w.document.write(html);
     w.document.close();
-    setTimeout(() => { try { w.focus(); w.print(); } catch { /* ignore */ } }, 350);
+    if (autoPrint) {
+      setTimeout(() => { try { w.focus(); w.print(); } catch { /* ignore */ } }, 350);
+    } else {
+      try { w.focus(); } catch { /* ignore */ }
+    }
   };
 
   // ── Record Collection helpers ──
@@ -535,16 +541,27 @@ export default function CashCollectionPage() {
       <Card style={{ overflow: "hidden" }}>
         <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--border)", fontWeight: 700, color: "var(--gold)", fontSize: 12, textTransform: "uppercase", letterSpacing: 1, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <span>Per-branch cash flow · {plabel}</span>
-          <button onClick={printCollectionSlip} disabled={branchRows.length === 0}
-            title="Open a printable cash collection slip for the current selection"
-            style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "7px 14px", borderRadius: 8, fontSize: 11, fontWeight: 800, letterSpacing: 0.5, background: branchRows.length === 0 ? "var(--bg4)" : "linear-gradient(135deg, var(--accent), var(--gold2))", color: branchRows.length === 0 ? "var(--text3)" : "#000", border: "none", cursor: branchRows.length === 0 ? "not-allowed" : "pointer", textTransform: "uppercase", opacity: branchRows.length === 0 ? 0.5 : 1 }}>
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="6 9 6 2 18 2 18 9"/>
-              <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/>
-              <rect x="6" y="14" width="12" height="8"/>
-            </svg>
-            Print Collection Slip
-          </button>
+          <div style={{ display: "inline-flex", gap: 6 }}>
+            <button onClick={() => openCollectionSlip({ autoPrint: false })} disabled={branchRows.length === 0}
+              title="Open the slip in a new tab without triggering the print dialog"
+              style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "7px 12px", borderRadius: 8, fontSize: 11, fontWeight: 800, letterSpacing: 0.5, background: branchRows.length === 0 ? "var(--bg4)" : "var(--bg3)", color: branchRows.length === 0 ? "var(--text3)" : "var(--accent)", border: `1px solid ${branchRows.length === 0 ? "var(--border)" : "rgba(var(--accent-rgb),0.4)"}`, cursor: branchRows.length === 0 ? "not-allowed" : "pointer", textTransform: "uppercase", opacity: branchRows.length === 0 ? 0.5 : 1 }}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                <circle cx="12" cy="12" r="3"/>
+              </svg>
+              Preview
+            </button>
+            <button onClick={() => openCollectionSlip({ autoPrint: true })} disabled={branchRows.length === 0}
+              title="Open the slip and immediately trigger the print dialog"
+              style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "7px 14px", borderRadius: 8, fontSize: 11, fontWeight: 800, letterSpacing: 0.5, background: branchRows.length === 0 ? "var(--bg4)" : "linear-gradient(135deg, var(--accent), var(--gold2))", color: branchRows.length === 0 ? "var(--text3)" : "#000", border: "none", cursor: branchRows.length === 0 ? "not-allowed" : "pointer", textTransform: "uppercase", opacity: branchRows.length === 0 ? 0.5 : 1 }}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="6 9 6 2 18 2 18 9"/>
+                <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/>
+                <rect x="6" y="14" width="12" height="8"/>
+              </svg>
+              Print Collection Slip
+            </button>
+          </div>
         </div>
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12.5, minWidth: 720 }}>
