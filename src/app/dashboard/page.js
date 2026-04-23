@@ -951,15 +951,34 @@ export default function DashboardPage() {
         <PeriodWidget filterMode={filterMode} setFilterMode={setFilterMode} filterYear={filterYear} setFilterYear={setFilterYear} filterMonth={filterMonth} setFilterMonth={setFilterMonth} />
       </div>
 
-      {/* Admin Metrics */}
+      {/* Admin Metrics — actuals row */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 16 }}>
         <PremiumStatCard label="Gross Revenue" value={INR(tI)} sub="Total turnover" icon="trending" color="var(--green)" />
         <PremiumStatCard label="Operating Cost" value={INR(tE)} sub="Salary + Overheads" icon="wallet" color="var(--red)"
           onClick={() => router.push("/dashboard/branches?view=summary")} linkLabel="See expense breakdown" />
-        <PremiumStatCard label="Projected Cost" value={INR(tEProjected)} sub={`Month-end forecast${tEProjected > tE ? ` · +${INR(tEProjected - tE)}` : ""}`} icon="trending" color="var(--orange)" />
         <PremiumStatCard label="Net P&L" value={INR(net)} sub="Bottom line earnings" icon="pie" color={net >= 0 ? "var(--green)" : "var(--red)"} />
         <PremiumStatCard label="Service Force" value={staff.length} sub="Active stylists" icon="users" color="var(--accent)" />
       </div>
+
+      {/* Month-end forecast row — projected cost + revenue gap to break even. */}
+      {(() => {
+        const projectedToEarn = Math.max(0, tEProjected - tI);
+        const surplus = tI - tEProjected;
+        return (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 16 }}>
+            <PremiumStatCard label="Projected Cost" value={INR(tEProjected)} sub={`Month-end forecast${tEProjected > tE ? ` · +${INR(tEProjected - tE)}` : ""}`} icon="trending" color="var(--orange)" />
+            <PremiumStatCard
+              label="Projected To Earn"
+              value={projectedToEarn > 0 ? INR(projectedToEarn) : INR(0)}
+              sub={projectedToEarn > 0
+                ? `Revenue needed to break even at forecast`
+                : `Target met · ${INR(surplus)} surplus`}
+              icon="pie"
+              color={projectedToEarn > 0 ? "var(--gold)" : "var(--green)"}
+            />
+          </div>
+        );
+      })()}
 
       {/* Persistent filter bar — stays visible across Mixed / Branch Only / Staff Only */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12, padding: "14px 16px", background: "var(--bg3)", border: "1px solid var(--border)", borderRadius: 12 }}>
