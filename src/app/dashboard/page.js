@@ -1102,12 +1102,12 @@ export default function DashboardPage() {
 
       {/* Daily business bar chart — month mode only */}
       {filterMode === "month" && (dashView === "all" || dashView === "shop") && (
-        <DailyBusinessChart entries={entries} filterYear={filterYear} filterMonth={filterMonth} />
+        <DailyBusinessChart entries={entries} branches={branches} filterYear={filterYear} filterMonth={filterMonth} />
       )}
 
       {/* Monthly business bar chart — year mode only (12 bars instead of 365) */}
       {filterMode === "year" && (dashView === "all" || dashView === "shop") && (
-        <MonthlyBusinessChart entries={entries} filterYear={filterYear} />
+        <MonthlyBusinessChart entries={entries} branches={branches} filterYear={filterYear} />
       )}
 
       {/* Daily material consumption bar chart — respects the global
@@ -2049,7 +2049,7 @@ function DailyMaterialChart({ entries, allocations, branches = [], filterYear, f
   );
 }
 
-function DailyBusinessChart({ entries, filterYear, filterMonth }) {
+function DailyBusinessChart({ entries, branches = [], filterYear, filterMonth }) {
   const [hover, setHover] = useState(null);
   const [showAvg, setShowAvg] = useState(false);
   const prefix = `${filterYear}-${String(filterMonth).padStart(2, "0")}`;
@@ -2059,23 +2059,26 @@ function DailyBusinessChart({ entries, filterYear, filterMonth }) {
 
   // Split cash vs non-cash so the stacked bar shows the mix at a glance.
   // Non-cash bucket = online + material sale (the "digital + upsell" portion).
-  // Online and material are ALSO tracked individually so the hover tooltip can
-  // show the full breakdown (Online / Cash / Material) without re-walking entries.
+  // Per-branch per-day sale is tracked too so the hover tooltip can show
+  // which branch contributed what — the user's primary verification signal.
   const byDay = new Array(daysInMonth).fill(0);
   const byDayCash = new Array(daysInMonth).fill(0);
   const byDayNonCash = new Array(daysInMonth).fill(0);
-  const byDayOnline = new Array(daysInMonth).fill(0);
-  const byDayMat = new Array(daysInMonth).fill(0);
+  // `${branchId}|${dIdx}` → sale on that day for that branch (online + cash + mat)
+  const byDayBranch = new Map();
   entries.forEach(e => {
     if (!e.date || !e.date.startsWith(prefix)) return;
     const dIdx = Number(e.date.slice(8, 10)) - 1;
     if (dIdx < 0 || dIdx >= daysInMonth) return;
     const matSale = (e.staff_billing || []).reduce((s, sb) => s + (sb.material || 0), 0);
+    const sale = (e.online || 0) + (e.cash || 0) + matSale;
     byDayCash[dIdx] += (e.cash || 0);
-    byDayOnline[dIdx] += (e.online || 0);
-    byDayMat[dIdx] += matSale;
     byDayNonCash[dIdx] += (e.online || 0) + matSale;
-    byDay[dIdx] += (e.online || 0) + (e.cash || 0) + matSale;
+    byDay[dIdx] += sale;
+    if (e.branch_id) {
+      const k = `${e.branch_id}|${dIdx}`;
+      byDayBranch.set(k, (byDayBranch.get(k) || 0) + sale);
+    }
   });
 
   const max = Math.max(1, ...byDay);
@@ -2226,7 +2229,15 @@ function DailyBusinessChart({ entries, filterYear, filterMonth }) {
               const clipId = `bar-clip-${filterYear}-${filterMonth}-${i}`;
               return (
                 <g key={i}
-                  onMouseEnter={() => hasValue && setHover({ i, v, cash: byDayCash[i], online: byDayOnline[i], mat: byDayMat[i], nonCash: byDayNonCash[i], dateStr })}
+                  onMouseEnter={() => hasValue && setHover({
+                    i, v, cash: byDayCash[i], nonCash: byDayNonCash[i], dateStr,
+                    // Per-branch split for this day, highest first. Only branches
+                    // that actually had a sale on the day appear in the hover card.
+                    byBranch: branches
+                      .map(b => ({ id: b.id, name: (b.name || "").replace("V-CUT ", ""), v: byDayBranch.get(`${b.id}|${i}`) || 0 }))
+                      .filter(x => x.v > 0)
+                      .sort((a, b) => b.v - a.v),
+                  })}
                   onMouseLeave={() => setHover(null)}
                   style={{ cursor: hasValue ? "pointer" : "default", transition: "opacity .15s" }}
                   opacity={dim}>
@@ -2327,26 +2338,25 @@ function DailyBusinessChart({ entries, filterYear, filterMonth }) {
           {hover && (
             <div style={{
               position: "absolute",
-              left: Math.min(LEFT + hover.i * (BAR_W + GAP) + BAR_W + 10, W - 180),
+              left: Math.min(LEFT + hover.i * (BAR_W + GAP) + BAR_W + 10, W - 240),
               top: 4, pointerEvents: "none",
               background: "var(--bg4)", border: "1px solid rgba(var(--accent-rgb),0.35)", borderRadius: 8,
-              padding: "10px 14px", boxShadow: "0 6px 20px rgba(0,0,0,0.5)", fontSize: 11, zIndex: 3, minWidth: 180,
+              padding: "10px 14px", boxShadow: "0 6px 20px rgba(0,0,0,0.5)", fontSize: 11, zIndex: 3, minWidth: 220, maxWidth: 260,
             }}>
               <div style={{ fontSize: 9, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, fontWeight: 700 }}>{hover.dateStr} · {dayOfWeek(hover.i + 1)}</div>
               <div style={{ fontSize: 15, fontWeight: 800, color: "var(--green)", marginTop: 2 }}>{INR(hover.v)}</div>
               <div style={{ borderTop: "1px dashed var(--border2)", margin: "6px 0" }} />
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 10.5, padding: "2px 0" }}>
-                <span style={{ color: "var(--blue, #60a5fa)", fontWeight: 700 }}>Online</span>
-                <span style={{ color: "var(--blue, #60a5fa)", fontWeight: 700 }}>{INR(hover.online || 0)}</span>
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 10.5, padding: "2px 0" }}>
-                <span style={{ color: "#c084fc", fontWeight: 700 }}>Cash</span>
-                <span style={{ color: "#c084fc", fontWeight: 700 }}>{INR(hover.cash || 0)}</span>
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 10.5, padding: "2px 0" }}>
-                <span style={{ color: "var(--orange)", fontWeight: 700 }}>Material</span>
-                <span style={{ color: "var(--orange)", fontWeight: 700 }}>{INR(hover.mat || 0)}</span>
-              </div>
+              <div style={{ fontSize: 9, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, fontWeight: 700, marginBottom: 4 }}>Branch-wise</div>
+              {(hover.byBranch && hover.byBranch.length > 0) ? (
+                hover.byBranch.map(b => (
+                  <div key={b.id} style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 10.5, padding: "2px 0" }}>
+                    <span style={{ color: "var(--text2)", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{b.name}</span>
+                    <span style={{ color: "var(--accent)", fontWeight: 700 }}>{INR(b.v)}</span>
+                  </div>
+                ))
+              ) : (
+                <div style={{ fontSize: 10, color: "var(--text3)", fontStyle: "italic" }}>No branch-level records</div>
+              )}
             </div>
           )}
         </div>
@@ -2358,7 +2368,7 @@ function DailyBusinessChart({ entries, filterYear, filterMonth }) {
 // Year-mode twin of DailyBusinessChart — 12 bars, one per month, with the same
 // stacked cash / non-cash split and a hover popup that breaks down Online,
 // Cash, and Material for quick month-to-month verification.
-function MonthlyBusinessChart({ entries, filterYear }) {
+function MonthlyBusinessChart({ entries, branches = [], filterYear }) {
   const [hover, setHover] = useState(null);
   const [showAvg, setShowAvg] = useState(false);
   const NOW = new Date();
@@ -2366,19 +2376,22 @@ function MonthlyBusinessChart({ entries, filterYear }) {
 
   const byMo = new Array(12).fill(0);
   const byMoCash = new Array(12).fill(0);
-  const byMoOnline = new Array(12).fill(0);
-  const byMoMat = new Array(12).fill(0);
   const byMoNonCash = new Array(12).fill(0);
+  // `${branchId}|${mIdx}` → sale on that month for that branch
+  const byMoBranch = new Map();
   entries.forEach(e => {
     if (!e.date || !e.date.startsWith(String(filterYear))) return;
     const mIdx = Number(e.date.slice(5, 7)) - 1;
     if (mIdx < 0 || mIdx > 11) return;
     const matSale = (e.staff_billing || []).reduce((s, sb) => s + (sb.material || 0), 0);
+    const sale = (e.online || 0) + (e.cash || 0) + matSale;
     byMoCash[mIdx] += (e.cash || 0);
-    byMoOnline[mIdx] += (e.online || 0);
-    byMoMat[mIdx] += matSale;
     byMoNonCash[mIdx] += (e.online || 0) + matSale;
-    byMo[mIdx] += (e.online || 0) + (e.cash || 0) + matSale;
+    byMo[mIdx] += sale;
+    if (e.branch_id) {
+      const k = `${e.branch_id}|${mIdx}`;
+      byMoBranch.set(k, (byMoBranch.get(k) || 0) + sale);
+    }
   });
 
   const max = Math.max(1, ...byMo);
@@ -2487,7 +2500,13 @@ function MonthlyBusinessChart({ entries, filterYear }) {
               const clipId = `mbar-clip-${filterYear}-${i}`;
               return (
                 <g key={i}
-                  onMouseEnter={() => hasValue && setHover({ i, v, cash: byMoCash[i], online: byMoOnline[i], mat: byMoMat[i] })}
+                  onMouseEnter={() => hasValue && setHover({
+                    i, v, cash: byMoCash[i], nonCash: byMoNonCash[i],
+                    byBranch: branches
+                      .map(b => ({ id: b.id, name: (b.name || "").replace("V-CUT ", ""), v: byMoBranch.get(`${b.id}|${i}`) || 0 }))
+                      .filter(x => x.v > 0)
+                      .sort((a, b) => b.v - a.v),
+                  })}
                   onMouseLeave={() => setHover(null)}
                   style={{ cursor: hasValue ? "pointer" : "default", transition: "opacity .15s" }}
                   opacity={dim}>
@@ -2555,26 +2574,25 @@ function MonthlyBusinessChart({ entries, filterYear }) {
           {hover && (
             <div style={{
               position: "absolute",
-              left: Math.min(LEFT + hover.i * (BAR_W + GAP) + BAR_W + 10, W - 200),
+              left: Math.min(LEFT + hover.i * (BAR_W + GAP) + BAR_W + 10, W - 240),
               top: 4, pointerEvents: "none",
               background: "var(--bg4)", border: "1px solid rgba(var(--accent-rgb),0.35)", borderRadius: 8,
-              padding: "10px 14px", boxShadow: "0 6px 20px rgba(0,0,0,0.5)", fontSize: 11, zIndex: 3, minWidth: 190,
+              padding: "10px 14px", boxShadow: "0 6px 20px rgba(0,0,0,0.5)", fontSize: 11, zIndex: 3, minWidth: 220, maxWidth: 260,
             }}>
               <div style={{ fontSize: 9, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, fontWeight: 700 }}>{MONTHS_SHORT[hover.i]} {filterYear}</div>
               <div style={{ fontSize: 15, fontWeight: 800, color: "var(--green)", marginTop: 2 }}>{INR(hover.v)}</div>
               <div style={{ borderTop: "1px dashed var(--border2)", margin: "6px 0" }} />
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 10.5, padding: "2px 0" }}>
-                <span style={{ color: "var(--blue, #60a5fa)", fontWeight: 700 }}>Online</span>
-                <span style={{ color: "var(--blue, #60a5fa)", fontWeight: 700 }}>{INR(hover.online || 0)}</span>
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 10.5, padding: "2px 0" }}>
-                <span style={{ color: "#c084fc", fontWeight: 700 }}>Cash</span>
-                <span style={{ color: "#c084fc", fontWeight: 700 }}>{INR(hover.cash || 0)}</span>
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 10.5, padding: "2px 0" }}>
-                <span style={{ color: "var(--orange)", fontWeight: 700 }}>Material</span>
-                <span style={{ color: "var(--orange)", fontWeight: 700 }}>{INR(hover.mat || 0)}</span>
-              </div>
+              <div style={{ fontSize: 9, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, fontWeight: 700, marginBottom: 4 }}>Branch-wise</div>
+              {(hover.byBranch && hover.byBranch.length > 0) ? (
+                hover.byBranch.map(b => (
+                  <div key={b.id} style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 10.5, padding: "2px 0" }}>
+                    <span style={{ color: "var(--text2)", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{b.name}</span>
+                    <span style={{ color: "var(--accent)", fontWeight: 700 }}>{INR(b.v)}</span>
+                  </div>
+                ))
+              ) : (
+                <div style={{ fontSize: 10, color: "var(--text3)", fontStyle: "italic" }}>No branch-level records</div>
+              )}
             </div>
           )}
         </div>
