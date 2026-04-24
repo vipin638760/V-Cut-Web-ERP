@@ -53,6 +53,88 @@ export default function MaterialsPage() {
   const [catalogSaving, setCatalogSaving] = useState(false);
   const [catalogReady, setCatalogReady] = useState(false);
   const [branchDetail, setBranchDetail] = useState(null); // branch object to expand in detail
+  // Month filter for the transfers section (YYYY-MM). Defaults to current month.
+  const [materialMonth, setMaterialMonth] = useState(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  });
+
+  // Open a printable per-branch material bill for a given month.
+  const openBranchMaterialBill = (branch, branchAllocs, monthLabel) => {
+    const items = branchAllocs.flatMap(a => (a.items || []).map(it => ({
+      ...it,
+      date: a.date || (a.transferred_at || "").slice(0, 10),
+      allocTotal: Number(a.total) || 0,
+      subtotal: Number(a.subtotal) || Number(a.total) || 0,
+      opsCost: Number(a.operation_cost) || 0,
+      opsPct: Number(a.operation_cost_pct) || 0,
+    }))).sort((x, y) => (x.date || "").localeCompare(y.date || ""));
+    const totalAmount = branchAllocs.reduce((s, a) => s + (Number(a.total) || 0), 0);
+    const totalSubtotal = branchAllocs.reduce((s, a) => s + (Number(a.subtotal) || Number(a.total) || 0), 0);
+    const totalOps = branchAllocs.reduce((s, a) => s + (Number(a.operation_cost) || 0), 0);
+    const rowsHtml = items.map((it, i) => `
+      <tr>
+        <td style="text-align:center;">${i + 1}</td>
+        <td>${(it.date || "").replace(/</g, "&lt;")}</td>
+        <td>${(it.name || "").replace(/</g, "&lt;")}</td>
+        <td style="text-align:right;">${(it.qty || "")} ${(it.unit || "").replace(/</g, "&lt;")}</td>
+        <td style="text-align:right;">&#8377;${Math.round(Number(it.price_at_transfer) || 0).toLocaleString("en-IN")}</td>
+        <td style="text-align:right;"><strong>&#8377;${Math.round(Number(it.line_total) || (Number(it.qty) * Number(it.price_at_transfer)) || 0).toLocaleString("en-IN")}</strong></td>
+      </tr>
+    `).join("");
+    const printedOn = new Date().toLocaleString();
+    const branchName = branch.name.replace(/</g, "&lt;");
+    const html = `<!DOCTYPE html>
+<html><head><meta charset="utf-8" /><title>Material Bill — ${branchName} — ${monthLabel}</title>
+<style>
+  *{box-sizing:border-box;}
+  body{font-family:Arial,Helvetica,sans-serif;color:#000;padding:24px;font-size:12px;}
+  h1{text-align:center;margin:0 0 4px;font-size:18px;letter-spacing:1px;}
+  .sub{text-align:center;color:#555;font-size:11px;margin-bottom:18px;}
+  .meta{display:flex;justify-content:space-between;gap:16px;margin-bottom:12px;font-size:12px;}
+  .meta div{flex:1;}
+  table{width:100%;border-collapse:collapse;margin-top:8px;}
+  th,td{border:1px solid #333;padding:8px 10px;font-size:12px;vertical-align:middle;}
+  th{background:#f2f2f2;text-align:left;}
+  tfoot td{font-weight:bold;background:#fafafa;}
+  .summary{margin-top:20px;border:1px solid #333;padding:12px 16px;background:#fafafa;}
+  .summary-row{display:flex;justify-content:space-between;padding:4px 0;font-size:13px;}
+  .summary-row.grand{border-top:2px solid #333;padding-top:10px;margin-top:6px;font-size:15px;font-weight:800;}
+  .actions{margin-top:20px;text-align:center;}
+  .actions button{padding:8px 18px;font-size:12px;border:1px solid #333;background:#065f46;color:#fff;border-radius:4px;cursor:pointer;}
+  @media print{.actions{display:none;}body{padding:0;}}
+</style></head><body>
+  <h1>V-CUT SALON — MATERIAL TRANSFER BILL</h1>
+  <div class="sub">Printed on ${printedOn}</div>
+  <div class="meta">
+    <div><strong>Branch:</strong> ${branchName}</div>
+    <div><strong>Period:</strong> ${monthLabel}</div>
+    <div><strong>Transfers:</strong> ${branchAllocs.length}</div>
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th style="width:32px;text-align:center;">#</th>
+        <th style="width:95px;">Date</th>
+        <th>Material</th>
+        <th style="width:90px;text-align:right;">Qty</th>
+        <th style="width:100px;text-align:right;">Unit ₹</th>
+        <th style="width:110px;text-align:right;">Line Total</th>
+      </tr>
+    </thead>
+    <tbody>${rowsHtml || '<tr><td colspan="6" style="text-align:center;color:#888;padding:16px;">No transfers in this period.</td></tr>'}</tbody>
+  </table>
+  <div class="summary">
+    <div class="summary-row"><span>Material Subtotal</span><span>&#8377;${Math.round(totalSubtotal).toLocaleString("en-IN")}</span></div>
+    ${totalOps > 0 ? `<div class="summary-row"><span>Operation / Delivery Cost</span><span>&#8377;${Math.round(totalOps).toLocaleString("en-IN")}</span></div>` : ''}
+    <div class="summary-row grand"><span>GRAND TOTAL</span><span>&#8377;${Math.round(totalAmount).toLocaleString("en-IN")}</span></div>
+  </div>
+  <div class="actions"><button onclick="window.print()">Print / Save as PDF</button></div>
+</body></html>`;
+    const w = window.open("", "_blank", "width=900,height=800");
+    if (!w) return;
+    w.document.open(); w.document.write(html); w.document.close();
+  };
   const [selectedUids, setSelectedUids] = useState([]);
   const [transferConfirmOpen, setTransferConfirmOpen] = useState(false); // date confirm dialog
   const toggleSelectUid = (uid) => setSelectedUids(prev => prev.includes(uid) ? prev.filter(x => x !== uid) : [...prev, uid]);
@@ -2121,76 +2203,128 @@ export default function MaterialsPage() {
             {/* End legacy catalog UI (dead branch — never renders). */}
 
             {/* Branch-wise history with date-wise material rollup */}
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, flexWrap: "wrap", gap: 10 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 10 }}>
               <div style={{ fontSize: 13, fontWeight: 800, color: "var(--gold)", textTransform: "uppercase", letterSpacing: 1 }}>
-                Transferred Materials {allocView === "branches" ? "by Branch" : "— All Transfers"}
+                Transferred Materials {allocView === "branches" ? "· By Branch" : "— All Transfers"}
               </div>
-              <div style={{ display: "inline-flex", gap: 2, background: "var(--bg4)", padding: 3, borderRadius: 10 }}>
-                {[["branches", "By Branch"], ["table", "Table"]].map(([v, l]) => (
-                  <button key={v} onClick={() => setAllocView(v)}
-                    style={{ padding: "6px 14px", borderRadius: 8, fontSize: 11, fontWeight: 800, letterSpacing: 0.5, textTransform: "uppercase", border: "none", cursor: "pointer",
-                      background: allocView === v ? "linear-gradient(135deg,var(--accent),var(--gold2))" : "transparent",
-                      color: allocView === v ? "#000" : "var(--text3)" }}>
-                    {l}
-                  </button>
-                ))}
+              <div style={{ display: "inline-flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 0.5 }}>
+                  Month
+                  <input type="month" value={materialMonth} onChange={e => setMaterialMonth(e.target.value)}
+                    style={{ padding: "6px 10px", borderRadius: 8, background: "var(--bg3)", border: "1px solid var(--border2)", color: "var(--text)", fontSize: 12, outline: "none" }} />
+                </label>
+                <div style={{ display: "inline-flex", gap: 2, background: "var(--bg4)", padding: 3, borderRadius: 10 }}>
+                  {[["branches", "By Branch"], ["table", "Table"]].map(([v, l]) => (
+                    <button key={v} onClick={() => setAllocView(v)}
+                      style={{ padding: "6px 14px", borderRadius: 8, fontSize: 11, fontWeight: 800, letterSpacing: 0.5, textTransform: "uppercase", border: "none", cursor: "pointer",
+                        background: allocView === v ? "linear-gradient(135deg,var(--accent),var(--gold2))" : "transparent",
+                        color: allocView === v ? "#000" : "var(--text3)" }}>
+                      {l}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
 
-            {allocView === "branches" ? (
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(320px,1fr))", gap: 12 }}>
-                {branches.map(b => {
-                  const bAllocs = allocations.filter(a => a.branch_id === b.id);
-                  const branchTotal = bAllocs.reduce((s, a) => s + (Number(a.total) || 0), 0);
-                  return (
-                    <Card key={b.id} style={{ padding: 0 }}>
-                      <div onClick={() => setBranchDetail(branchDetail?.id === b.id ? null : b)}
-                        style={{ padding: "10px 14px", borderBottom: branchDetail?.id === b.id ? "1px solid var(--border)" : "none", background: "var(--bg4)", display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }}>
-                        <div>
-                          <div style={{ fontWeight: 800, fontSize: 13 }}>{b.name.replace("V-CUT ", "")}</div>
-                          <div style={{ fontSize: 10, color: "var(--text3)", marginTop: 2 }}>{bAllocs.length} transfer{bAllocs.length === 1 ? "" : "s"}</div>
+            {allocView === "branches" ? (() => {
+              const monthLabel = (() => {
+                const [yr, mo] = materialMonth.split("-").map(Number);
+                return new Date(yr, (mo || 1) - 1, 1).toLocaleString("en-IN", { month: "long", year: "numeric" });
+              })();
+              // Keep only branches that had transfers this month so 13 empty cards don't clutter the page.
+              const branchesWithData = branches
+                .map(b => ({ b, allocs: allocations.filter(a => a.branch_id === b.id && (a.date || (a.transferred_at || "")).startsWith(materialMonth)) }))
+                .filter(row => row.allocs.length > 0)
+                .sort((x, y) => y.allocs.reduce((s, a) => s + (Number(a.total) || 0), 0) - x.allocs.reduce((s, a) => s + (Number(a.total) || 0), 0));
+              const monthGrand = branchesWithData.reduce((s, row) => s + row.allocs.reduce((ss, a) => ss + (Number(a.total) || 0), 0), 0);
+              if (branchesWithData.length === 0) {
+                return (
+                  <Card style={{ padding: 40, textAlign: "center", color: "var(--text3)", fontSize: 13, fontStyle: "italic" }}>
+                    No material transfers recorded in <strong style={{ color: "var(--text2)", fontStyle: "normal" }}>{monthLabel}</strong>. Pick a different month or switch to Table view for the full history.
+                  </Card>
+                );
+              }
+              return (<>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 10, padding: "10px 14px", background: "linear-gradient(90deg, rgba(34,211,238,0.06), transparent)", border: "1px solid rgba(34,211,238,0.2)", borderRadius: 10, flexWrap: "wrap" }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1 }}>
+                    {monthLabel} · {branchesWithData.length} branch{branchesWithData.length === 1 ? "" : "es"} with activity
+                  </div>
+                  <div style={{ fontSize: 14, fontWeight: 800, color: "var(--green)" }}>Grand Total {INR(monthGrand)}</div>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                  {branchesWithData.map(({ b, allocs }) => {
+                    const branchTotal = allocs.reduce((s, a) => s + (Number(a.total) || 0), 0);
+                    const itemCount = allocs.reduce((s, a) => s + (a.items || []).length, 0);
+                    const rows = allocs.flatMap(a =>
+                      (a.items || []).map((it, i) => ({ ...it, alloc: a, date: a.date || (a.transferred_at || "").slice(0, 10), first: i === 0, rowSpan: (a.items || []).length, key: `${a.id}-${i}` }))
+                    ).sort((x, y) => (y.date || "").localeCompare(x.date || ""));
+                    return (
+                      <Card key={b.id} style={{ padding: 0 }}>
+                        <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--border)", background: "var(--bg4)", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                          <div>
+                            <div style={{ fontWeight: 800, fontSize: 14, color: "var(--text)" }}>{b.name.replace("V-CUT ", "")}</div>
+                            <div style={{ fontSize: 10, color: "var(--text3)", marginTop: 2 }}>{allocs.length} transfer{allocs.length === 1 ? "" : "s"} · {itemCount} item{itemCount === 1 ? "" : "s"} · {monthLabel}</div>
+                          </div>
+                          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                            <div style={{ fontSize: 16, color: "var(--green)", fontWeight: 800 }}>{INR(branchTotal)}</div>
+                            <button onClick={() => openBranchMaterialBill(b, allocs, monthLabel)}
+                              title="Open a printable material bill for this branch and month"
+                              style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "7px 14px", borderRadius: 8, fontSize: 11, fontWeight: 800, letterSpacing: 0.5, background: "linear-gradient(135deg,var(--accent),var(--gold2))", color: "#000", border: "none", cursor: "pointer", textTransform: "uppercase" }}>
+                              <Icon name="save" size={12} /> Print Bill
+                            </button>
+                          </div>
                         </div>
-                        <div style={{ fontSize: 14, color: "var(--green)", fontWeight: 800 }}>{INR(branchTotal)}</div>
-                      </div>
-                      {branchDetail?.id === b.id && (
-                        <div style={{ padding: 10 }}>
-                          {bAllocs.length === 0 ? (
-                            <div style={{ padding: 12, color: "var(--text3)", fontSize: 11, fontStyle: "italic", textAlign: "center" }}>No transfers yet.</div>
-                          ) : (
-                            <table style={{ width: "100%", fontSize: 11, borderCollapse: "separate", borderSpacing: 0 }}>
-                              <thead><tr style={{ background: "var(--bg3)" }}>
-                                <TH>Date</TH><TH>Material</TH><TH right>Qty</TH><TH right>Total</TH>
-                                {canDeleteAllocation && <TH> </TH>}
-                              </tr></thead>
-                              <tbody>
-                                {bAllocs.flatMap(a =>
-                                  (a.items || []).map((it, i) => ({ ...it, alloc: a, date: a.date || (a.transferred_at || "").slice(0, 10), key: `${a.id}-${i}` }))
-                                )
-                                .sort((x, y) => (y.date || "").localeCompare(x.date || ""))
-                                .slice(0, 40)
-                                .map(row => (
+                        <div style={{ padding: "2px 0 4px" }}>
+                          <table className="pill-table" style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
+                            <thead><tr>
+                              <TH>Date</TH>
+                              <TH>Material</TH>
+                              <TH right>Qty</TH>
+                              <TH right>Line Total</TH>
+                              <TH right title="Transfer subtotal (items only, no ops cost)">Subtotal</TH>
+                              <TH right title="Operation / delivery charge applied to this transfer">Ops</TH>
+                              <TH right>Transfer Total</TH>
+                              {canDeleteAllocation && <TH> </TH>}
+                            </tr></thead>
+                            <tbody>
+                              {rows.map(row => {
+                                const sub = Number(row.alloc.subtotal) || Number(row.alloc.total) || 0;
+                                const ops = Number(row.alloc.operation_cost) || 0;
+                                const opsPct = Number(row.alloc.operation_cost_pct) || 0;
+                                return (
                                   <tr key={row.key}>
                                     <TD style={{ whiteSpace: "nowrap", color: "var(--text3)" }}>{row.date || "—"}</TD>
                                     <TD style={{ fontWeight: 600 }}>{row.name}</TD>
                                     <TD right>{row.qty} {row.unit}</TD>
-                                    <TD right style={{ fontWeight: 800, color: "var(--green)" }}>{INR(row.line_total || (row.qty * row.price_at_transfer) || 0)}</TD>
-                                    {canDeleteAllocation && (
-                                      <TD>
-                                        <IconBtn name="del" variant="danger" title="Delete parent transfer (removes all items in this record)" onClick={() => handleDeleteAllocation(row.alloc)} />
+                                    <TD right style={{ fontWeight: 700, color: "var(--green)" }}>{INR(row.line_total || (row.qty * row.price_at_transfer) || 0)}</TD>
+                                    {row.first ? <TD right rowSpan={row.rowSpan} style={{ color: "var(--text2)" }}>{INR(sub)}</TD> : null}
+                                    {row.first ? (
+                                      <TD right rowSpan={row.rowSpan} style={{ color: ops > 0 ? "var(--orange)" : "var(--text3)" }}>
+                                        {ops > 0 ? <>{INR(ops)}<span style={{ fontSize: 9, color: "var(--text3)", marginLeft: 4 }}>({opsPct}%)</span></> : "—"}
                                       </TD>
-                                    )}
+                                    ) : null}
+                                    {row.first ? <TD right rowSpan={row.rowSpan} style={{ fontWeight: 800, color: "var(--gold)", borderLeft: "1px solid var(--border2)" }}>{INR(row.alloc.total || 0)}</TD> : null}
+                                    {canDeleteAllocation && row.first ? (
+                                      <TD rowSpan={row.rowSpan}>
+                                        <IconBtn name="del" variant="danger" title="Delete this transfer (removes every item row in the same record)" onClick={() => handleDeleteAllocation(row.alloc)} />
+                                      </TD>
+                                    ) : null}
                                   </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          )}
+                                );
+                              })}
+                              <tr style={{ background: "var(--bg3)", borderTop: "2px solid var(--border2)" }}>
+                                <TD colSpan={3} style={{ fontWeight: 800, color: "var(--gold)", letterSpacing: 0.5, textTransform: "uppercase", fontSize: 11 }}>Branch Total ({monthLabel})</TD>
+                                <TD right colSpan={canDeleteAllocation ? 5 : 4} style={{ fontWeight: 800, color: "var(--green)", fontSize: 14 }}>{INR(branchTotal)}</TD>
+                              </tr>
+                            </tbody>
+                          </table>
                         </div>
-                      )}
-                    </Card>
-                  );
-                })}
-              </div>
-            ) : (
+                      </Card>
+                    );
+                  })}
+                </div>
+              </>);
+            })() : (
               /* Flat table — every transfer across every branch, newest first. */
               (() => {
                 const sortedAllocs = allocations.slice().sort((x, y) => (y.date || y.transferred_at || "").localeCompare(x.date || x.transferred_at || ""));
