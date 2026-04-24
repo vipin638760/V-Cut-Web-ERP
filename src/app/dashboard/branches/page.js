@@ -2870,6 +2870,9 @@ function DraggableBranchGrid({ branchData, isAdmin, canSelect, selectedBranches,
         const isDragging = dragging === b.id;
         const isOver = dragOver === b.id;
         const isSelected = selectedBranches?.has(b.id) || false;
+        const isProfit = n > 0;
+        const accent = isSelected ? "var(--accent)" : isProfit ? "var(--green)" : "var(--red)";
+        const accentBg = isSelected ? "rgba(34,211,238,0.06)" : isProfit ? "rgba(74,222,128,0.06)" : "rgba(248,113,113,0.06)";
 
         return (
           <div key={b.id}
@@ -2880,25 +2883,26 @@ function DraggableBranchGrid({ branchData, isAdmin, canSelect, selectedBranches,
             onDragEnd={handleDragEnd}
             onClick={(ev) => handleClick(ev, b.id)}
             style={{
-              background: "linear-gradient(160deg,var(--bg3),var(--bg2))",
+              position: "relative",
+              background: `linear-gradient(168deg, var(--bg3) 0%, var(--bg2) 100%)`,
               border: isOver
-                ? "2px dashed var(--gold)"
-                : isSelected
-                  ? "2px solid var(--accent)"
-                  : `2px solid ${n > 0 ? "var(--green)" : "var(--red)"}`,
-              borderRadius: 12,
+                ? "1.5px dashed var(--gold)"
+                : `1px solid ${isSelected ? "rgba(34,211,238,0.45)" : isProfit ? "rgba(74,222,128,0.22)" : "rgba(248,113,113,0.22)"}`,
+              borderRadius: 14,
               overflow: "hidden",
               cursor: isDragging ? "grabbing" : "grab",
-              transition: "transform .2s, box-shadow .2s, border .2s",
-              opacity: isDragging ? 0.4 : 1,
-              transform: isOver ? "scale(1.02)" : "scale(1)",
+              transition: "transform .2s ease, box-shadow .2s ease, border-color .2s",
+              opacity: isDragging ? 0.45 : 1,
+              transform: isOver ? "scale(1.015)" : "scale(1)",
               boxShadow: isOver
-                ? "0 8px 24px rgba(var(--gold-rgb),0.25)"
+                ? "0 10px 28px rgba(var(--gold-rgb),0.22)"
                 : isDragging
-                  ? "0 12px 32px rgba(0,0,0,0.5)"
+                  ? "0 14px 36px rgba(0,0,0,0.55)"
                   : isSelected
-                    ? "0 4px 20px rgba(var(--accent-rgb),0.35)"
-                    : n > 0 ? "0 0 22px rgba(74,222,128,.45), 0 0 1px rgba(74,222,128,.8) inset" : "0 0 22px rgba(248,113,113,.45), 0 0 1px rgba(248,113,113,.8) inset",
+                    ? "0 6px 22px rgba(34,211,238,0.25)"
+                    : isProfit
+                      ? "0 4px 18px rgba(0,0,0,0.28), 0 0 0 1px rgba(74,222,128,0.04) inset"
+                      : "0 4px 18px rgba(0,0,0,0.28), 0 0 0 1px rgba(248,113,113,0.04) inset",
               userSelect: "none"
             }}
             onMouseEnter={ev => {
@@ -2908,7 +2912,11 @@ function DraggableBranchGrid({ branchData, isAdmin, canSelect, selectedBranches,
               if (!isDragging && !isOver) ev.currentTarget.style.transform = "scale(1)";
             }}
           >
-            <div style={{ background: "var(--bg4)", borderBottom: "1px solid var(--border)", padding: "12px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, fontWeight: 700, fontSize: 13, color: "var(--gold)", letterSpacing: "0.5px" }}>
+            {/* Left accent stripe — profit/loss indicator at a glance */}
+            <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 3, background: `linear-gradient(180deg, ${accent}, transparent)`, opacity: 0.8 }} />
+
+            {/* Header */}
+            <div style={{ padding: "12px 14px 10px", display: "flex", alignItems: "center", gap: 8 }}>
               {canSelect && (
                 <span
                   role="button"
@@ -2920,47 +2928,85 @@ function DraggableBranchGrid({ branchData, isAdmin, canSelect, selectedBranches,
                   onDragStart={ev => { ev.preventDefault(); ev.stopPropagation(); }}
                   title={isSelected ? "Click to deselect" : "Click to select for bulk recalculate"}
                   style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    width: 26, height: 26,
-                    marginLeft: -4,
-                    borderRadius: 6,
-                    background: isSelected ? "rgba(var(--accent-rgb),0.18)" : "transparent",
-                    border: isSelected ? "1px solid rgba(var(--accent-rgb),0.5)" : "1px solid transparent",
-                    cursor: "pointer",
-                    transition: "background .15s, border .15s",
-                    flexShrink: 0,
+                    display: "inline-flex", alignItems: "center", justifyContent: "center",
+                    width: 22, height: 22, borderRadius: 5, flexShrink: 0,
+                    background: isSelected ? "rgba(34,211,238,0.22)" : "var(--bg4)",
+                    border: `1px solid ${isSelected ? "var(--accent)" : "var(--border2)"}`,
+                    cursor: "pointer", transition: "all .15s",
                   }}>
-                  <input type="checkbox" readOnly checked={isSelected}
-                    tabIndex={-1}
-                    style={{ cursor: "pointer", accentColor: "var(--accent)", pointerEvents: "none", margin: 0 }} />
+                  {isSelected && <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="3.5"><polyline points="20 6 9 17 4 12"/></svg>}
                 </span>
               )}
-              <span title={b.name} style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{b.name}</span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div title={b.name} style={{ fontSize: 13, fontWeight: 800, color: "var(--text)", letterSpacing: 0.3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontFamily: "var(--font-headline, var(--font-outfit))" }}>{b.name.replace("V-CUT ", "")}</div>
+                <div style={{ fontSize: 9, color: "var(--text3)", fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", marginTop: 1 }}>
+                  {b.type === "unisex" ? "Unisex" : "Mens"} · {staffCount} staff
+                </div>
+              </div>
               <button onClick={ev => { ev.stopPropagation(); onCalendarClick?.(b.id); }}
                 title="Attendance calendar"
-                style={{ background: "rgba(var(--accent-rgb),0.1)", border: "1px solid rgba(var(--accent-rgb),0.35)", color: "var(--accent)", borderRadius: 6, padding: "2px 8px", cursor: "pointer", fontSize: 13, lineHeight: 1 }}>📅</button>
-              <Pill label={b.type === "unisex" ? "Unisex" : "Mens"} color={b.type === "unisex" ? "purple" : "blue"} />
+                draggable={false}
+                onMouseDown={ev => ev.stopPropagation()}
+                onDragStart={ev => { ev.preventDefault(); ev.stopPropagation(); }}
+                style={{ background: "rgba(34,211,238,0.08)", border: "1px solid rgba(34,211,238,0.3)", color: "var(--accent)", borderRadius: 7, width: 26, height: 26, display: "inline-flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 }}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+              </button>
             </div>
-            <div style={{ padding: "14px 16px" }}>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "10px 8px" }}>
-                <CompactStat label="Income" val={INR(i)} col="var(--green)" />
-                <CompactStat label="P&L" val={isAdmin ? (INR(n)) : "•••"} col={n >= 0 ? "var(--green)" : "var(--red)"} bold />
-                <CompactStat label="Salary" val={isAdmin ? INR(actualSalary) : "•••"} col="var(--blue)" />
-                <CompactStat label="Inc/Mat" val={INR(vInc + vMatE)} col="var(--red)" />
-                <CompactStat label="Rent (S)" val={INR(fShopRent)} col="var(--orange)" />
-                <CompactStat label="Rent (R)" val={INR(fRoomRent)} col="var(--orange)" />
-                <CompactStat label="Travel" val={INR(vOther)} col="var(--red)" />
-                <CompactStat label="Elec/Wifi" val={INR(fElec + fWifi)} col="var(--orange)" />
-                <CompactStat label="Leaves" val={actualLeaves + " d"} col="var(--text3)" />
-                <CompactStat label="Deficit" val={totalDeficit ? INR(totalDeficit) : "—"} col={totalDeficit ? "var(--red)" : "var(--text3)"} />
-                <CompactStat label="Excess" val={totalExcess ? INR(totalExcess) : "—"} col={totalExcess ? "var(--green)" : "var(--text3)"} />
-                <CompactStat label={`Net (${reconciledDays}d)`} val={reconciledDays ? (netDiff === 0 ? "✓ Match" : (netDiff > 0 ? "+" : "") + INR(netDiff)) : "—"} col={!reconciledDays ? "var(--text3)" : netDiff === 0 ? "var(--green)" : netDiff > 0 ? "var(--green)" : "var(--red)"} bold />
+
+            {/* Hero: Income + P&L chip */}
+            <div style={{ padding: "2px 14px 12px", display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 10 }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 8.5, color: "var(--text3)", fontWeight: 800, letterSpacing: 1.4, textTransform: "uppercase" }}>Income</div>
+                <div style={{ fontSize: 20, fontWeight: 800, color: "var(--green)", fontFamily: "var(--font-headline, var(--font-outfit))", letterSpacing: -0.5, lineHeight: 1.15 }}>
+                  {INR(i)}
+                </div>
               </div>
-              <div style={{ marginTop: 14, textAlign: "center", fontSize: 10, color: "var(--gold)", fontWeight: 600, opacity: 0.7, borderTop: "1px solid var(--border)", paddingTop: 10, letterSpacing: 0.5 }}>
-                ⋮⋮ DRAG TO REORDER · CLICK TO EXPAND
+              <div style={{
+                padding: "5px 10px", borderRadius: 999,
+                background: isAdmin ? accentBg : "var(--bg4)",
+                border: `1px solid ${isAdmin ? accent : "var(--border)"}`,
+                color: isAdmin ? accent : "var(--text3)",
+                fontSize: 11, fontWeight: 800, letterSpacing: 0.3,
+                fontFamily: "var(--font-headline, var(--font-outfit))",
+                whiteSpace: "nowrap", flexShrink: 0,
+              }}>
+                {isAdmin ? (n > 0 ? "▲ " : n < 0 ? "▼ " : "") + INR(Math.abs(n)) : "P&L •••"}
               </div>
+            </div>
+
+            {/* Metric grid — two columns, grouped visually by a thin inner divider */}
+            <div style={{ padding: "0 14px 12px", display: "grid", gridTemplateColumns: "1fr 1fr", columnGap: 12, rowGap: 10, borderTop: "1px solid var(--border)", paddingTop: 12, marginTop: 0 }}>
+              <ElegantRow label="Salary" val={isAdmin ? INR(actualSalary) : "•••••"} col="var(--blue)" />
+              <ElegantRow label="Inc / Mat" val={INR(vInc + vMatE)} col="var(--red)" />
+              <ElegantRow label="Rent (Shop)" val={INR(fShopRent)} col="var(--orange)" />
+              <ElegantRow label="Rent (Room)" val={INR(fRoomRent)} col="var(--orange)" />
+              <ElegantRow label="Elec / WiFi" val={INR(fElec + fWifi)} col="var(--orange)" />
+              <ElegantRow label="Travel" val={INR(vOther)} col="var(--red)" />
+              <ElegantRow label="Leaves" val={actualLeaves > 0 ? `${actualLeaves} days` : "None"} col={actualLeaves > 0 ? "var(--purple, #c084fc)" : "var(--text3)"} />
+              <ElegantRow label="Staff" val={`${staffCount}`} col="var(--text2)" />
+            </div>
+
+            {/* Reconciliation pill — replaces the old Deficit / Excess / Net cells */}
+            {reconciledDays > 0 && (
+              <div style={{ padding: "0 14px 12px" }}>
+                {(() => {
+                  let bg, bd, fg, label;
+                  if (netDiff === 0) { bg = "rgba(74,222,128,0.10)"; bd = "rgba(74,222,128,0.3)"; fg = "var(--green)"; label = `✓ Reconciled · ${reconciledDays} day${reconciledDays === 1 ? "" : "s"}`; }
+                  else if (netDiff > 0) { bg = "rgba(74,222,128,0.08)"; bd = "rgba(74,222,128,0.3)"; fg = "var(--green)"; label = `▲ Excess ${INR(netDiff)} · ${reconciledDays}d`; }
+                  else { bg = "rgba(248,113,113,0.08)"; bd = "rgba(248,113,113,0.3)"; fg = "var(--red)"; label = `▼ Deficit ${INR(Math.abs(netDiff))} · ${reconciledDays}d`; }
+                  return (
+                    <div style={{ padding: "6px 10px", borderRadius: 8, background: bg, border: `1px solid ${bd}`, color: fg, fontSize: 10.5, fontWeight: 700, letterSpacing: 0.3, textAlign: "center", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 6 }}>
+                      <span style={{ fontSize: 9, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1 }}>Cash recon</span>
+                      <span>{label}</span>
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
+
+            {/* Footer hint */}
+            <div style={{ padding: "8px 14px", borderTop: "1px solid var(--border)", background: "rgba(0,0,0,0.15)", fontSize: 9, color: "var(--text3)", fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", textAlign: "center" }}>
+              ⋮⋮ Drag · Click to open
             </div>
           </div>
         );
@@ -2974,6 +3020,15 @@ function CompactStat({ label, val, col, bold }) {
     <div style={{ textAlign: "center" }}>
       <div style={{ fontSize: 7, color: "var(--text3)", textTransform: "uppercase", fontWeight: 700, marginBottom: 1 }}>{label}</div>
       <div style={{ fontSize: 10.5, fontWeight: bold ? 800 : 700, color: col, whiteSpace: "nowrap" }}>{val}</div>
+    </div>
+  );
+}
+
+function ElegantRow({ label, val, col }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
+      <span style={{ fontSize: 8.5, color: "var(--text3)", fontWeight: 700, letterSpacing: 0.8, textTransform: "uppercase", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{label}</span>
+      <span style={{ fontSize: 12.5, fontWeight: 700, color: col, fontFamily: "var(--font-headline, var(--font-outfit))", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", letterSpacing: -0.2 }}>{val}</span>
     </div>
   );
 }
@@ -3234,7 +3289,66 @@ function DailyCashOnline({ branches, entries, filterMode, filterPrefix, filterYe
     { key: "online", label: "Daily Online / UPI", color: "var(--blue)", rgb: "34,211,238" },
     { key: "cash",   label: "Daily Cash",         color: "var(--green)", rgb: "74,222,128" },
     { key: "total",  label: "Daily Total",        color: "var(--gold)",  rgb: "250,204,21" },
+    { key: "missing", label: "Missing Entries",   color: "var(--red)",   rgb: "248,113,113" },
   ];
+
+  // Capped at yesterday — today's entry may still be in progress, so only
+  // past-and-closed days count as "missing". Compare as YYYY-MM-DD strings
+  // so local vs UTC midnight doesn't come into play (same pitfall as the
+  // staff join-day salary bug).
+  const yesterdayStr = (() => {
+    const now = new Date();
+    const y = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+    return `${y.getFullYear()}-${String(y.getMonth() + 1).padStart(2, "0")}-${String(y.getDate()).padStart(2, "0")}`;
+  })();
+  const missingRows = days
+    .filter(d => d <= yesterdayStr)
+    .map(date => ({ date, missing: branches.filter(b => !byKey.has(`${b.id}|${date}`)) }))
+    .filter(r => r.missing.length > 0);
+  const missingCount = missingRows.reduce((s, r) => s + r.missing.length, 0);
+
+  const renderMissing = () => (
+    <div style={{ borderTop: "1px solid var(--border)", overflowX: "auto", maxHeight: "60vh" }}>
+      {missingRows.length === 0 ? (
+        <div style={{ padding: 24, textAlign: "center", color: "var(--green)", fontWeight: 700, fontSize: 13 }}>
+          ✓ All branches have entries through {yesterdayStr}
+        </div>
+      ) : (
+        <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 11 }}>
+          <thead style={{ position: "sticky", top: 0, zIndex: 5 }}>
+            <tr style={{ background: "var(--bg4)" }}>
+              <TH style={{ fontSize: 10, width: 90 }}>Day</TH>
+              <TH style={{ fontSize: 10, width: 110 }}>Date</TH>
+              <TH style={{ fontSize: 10 }}>Missing Branches</TH>
+              <TH right style={{ fontSize: 10, width: 70 }}>Count</TH>
+            </tr>
+          </thead>
+          <tbody>
+            {missingRows.map(({ date, missing }) => {
+              const dow = dayOfWeek(date);
+              const isWeekend = dow === "SAT" || dow === "SUN";
+              return (
+                <tr key={date} style={{ background: isWeekend ? "rgba(251,146,60,0.07)" : "var(--bg3)" }}>
+                  <TD style={{ fontWeight: 800, color: isWeekend ? "var(--orange)" : "var(--text2)", fontSize: 10 }}>{dow}</TD>
+                  <TD style={{ color: isWeekend ? "var(--orange)" : "var(--text3)", fontSize: 10, fontFamily: "monospace" }}>{date}</TD>
+                  <TD>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                      {missing.map(b => (
+                        <span key={b.id} style={{ padding: "3px 10px", borderRadius: 999, background: "rgba(248,113,113,0.12)", color: "var(--red)", fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: 0.5, whiteSpace: "nowrap", border: "1px solid rgba(248,113,113,0.25)" }}>
+                          {b.name.replace("V-CUT ", "")}
+                        </span>
+                      ))}
+                    </div>
+                  </TD>
+                  <TD right style={{ fontWeight: 800, color: "var(--red)" }}>{missing.length}</TD>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
 
   const renderTable = (field, color) => {
     const colTotals = branches.map(b => days.reduce((s, d) => s + cell(b.id, d, field), 0));
@@ -3300,11 +3414,12 @@ function DailyCashOnline({ branches, entries, filterMode, filterPrefix, filterYe
   return (
     <div style={{ display: "grid", gap: 14 }}>
       {cards.map(c => {
-        const s = stats(c.key);
+        const isMissing = c.key === "missing";
+        const s = isMissing ? null : stats(c.key);
         const isOpen = expanded === c.key;
         return (
           <Card key={c.key} style={{ padding: 0, overflow: "hidden" }}>
-            {/* Clickable header — always shows Avg + Total */}
+            {/* Clickable header — always shows Avg + Total (or missing count) */}
             <div onClick={() => setExpanded(isOpen ? null : c.key)}
               role="button" tabIndex={0}
               onKeyDown={(ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); setExpanded(isOpen ? null : c.key); } }}
@@ -3323,22 +3438,31 @@ function DailyCashOnline({ branches, entries, filterMode, filterPrefix, filterYe
                 <div>
                   <div style={{ fontSize: 11, fontWeight: 800, color: c.color, textTransform: "uppercase", letterSpacing: 1.5 }}>{c.label}</div>
                   <div style={{ fontSize: 10, color: "var(--text3)", marginTop: 2 }}>
-                    {s.activeDays} {s.activeDays === 1 ? "day" : "days"} of business
+                    {isMissing
+                      ? (missingRows.length === 0 ? `Complete through ${yesterdayStr}` : `${missingRows.length} day${missingRows.length === 1 ? "" : "s"} with gaps`)
+                      : `${s.activeDays} ${s.activeDays === 1 ? "day" : "days"} of business`}
                   </div>
                 </div>
               </div>
               <div style={{ display: "flex", gap: 28, alignItems: "center" }}>
-                <div style={{ textAlign: "right" }}>
-                  <div style={{ fontSize: 9, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, fontWeight: 700 }}>Daily Avg</div>
-                  <div style={{ fontSize: 18, fontWeight: 800, color: c.color, fontFamily: "var(--font-headline, var(--font-outfit))" }}>{INR(s.avg)}</div>
-                </div>
-                <div style={{ textAlign: "right" }}>
-                  <div style={{ fontSize: 9, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, fontWeight: 700 }}>Total</div>
-                  <div style={{ fontSize: 18, fontWeight: 800, color: c.color, fontFamily: "var(--font-headline, var(--font-outfit))" }}>{INR(s.total)}</div>
-                </div>
+                {isMissing ? (
+                  <div style={{ textAlign: "right" }}>
+                    <div style={{ fontSize: 9, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, fontWeight: 700 }}>Missing Entries</div>
+                    <div style={{ fontSize: 18, fontWeight: 800, color: missingCount === 0 ? "var(--green)" : c.color, fontFamily: "var(--font-headline, var(--font-outfit))" }}>{missingCount === 0 ? "None" : missingCount}</div>
+                  </div>
+                ) : (<>
+                  <div style={{ textAlign: "right" }}>
+                    <div style={{ fontSize: 9, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, fontWeight: 700 }}>Daily Avg</div>
+                    <div style={{ fontSize: 18, fontWeight: 800, color: c.color, fontFamily: "var(--font-headline, var(--font-outfit))" }}>{INR(s.avg)}</div>
+                  </div>
+                  <div style={{ textAlign: "right" }}>
+                    <div style={{ fontSize: 9, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, fontWeight: 700 }}>Total</div>
+                    <div style={{ fontSize: 18, fontWeight: 800, color: c.color, fontFamily: "var(--font-headline, var(--font-outfit))" }}>{INR(s.total)}</div>
+                  </div>
+                </>)}
               </div>
             </div>
-            {isOpen && renderTable(c.key, c.color)}
+            {isOpen && (isMissing ? renderMissing() : renderTable(c.key, c.color))}
           </Card>
         );
       })}
