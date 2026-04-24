@@ -2028,37 +2028,54 @@ export default function EntryPage() {
       {/* Recent Entries Table */}
       {pageView === "recent" && (
       <>
-      <div style={{ margin: "20px 0 12px", display: "flex", flexDirection: "column", gap: 10 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
-          <div style={{ fontSize: 16, fontWeight: 800, color: "var(--gold)", letterSpacing: 1 }}>
-            Recent Entries — {visibleEntries.length} records
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-            {/* View toggles */}
-            <div style={{ display: "flex", gap: 3, background: "var(--bg4)", padding: 3, borderRadius: 10 }}>
-              {[
-                ["branch", recentBranchIds.length > 1 ? `${recentBranchIds.length} branches` : recentBranchIds.length === 1 ? (branchesById.get(recentBranchIds[0])?.name?.replace("V-CUT ","") || "Branch") : (selBranch ? (branchesById.get(selBranch)?.name?.replace("V-CUT ","") || "Branch") : "Branch")],
-                ["date", "Date"],
-                ["range", "Range"],
-                ["all", "All"]
-              ].map(([val, label]) => (
-                <button key={val} onClick={() => { setRecentView(val); if (val === "date" && !recentDate) setRecentDate(selDate); if (val === "range" && !rangeFrom) { setRangeFrom(selDate); setRangeTo(selDate); } }}
-                  style={{ padding: "5px 12px", borderRadius: 7, fontSize: 10, fontWeight: 700, border: "none", cursor: "pointer", transition: "all .2s", textTransform: "uppercase", letterSpacing: 0.5, background: recentView === val ? "linear-gradient(135deg, var(--accent), var(--gold2))" : "transparent", color: recentView === val ? "#000" : "var(--text3)" }}>
-                  {label}
-                </button>
-              ))}
+      <div style={{ margin: "20px 0 12px", display: "flex", flexDirection: "column", gap: 12 }}>
+        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+          <div>
+            <div style={{ fontSize: 10, fontWeight: 800, color: "var(--accent)", textTransform: "uppercase", letterSpacing: 2 }}>Archive</div>
+            <div style={{ fontSize: 22, fontWeight: 800, color: "var(--gold)", letterSpacing: 0.5, fontFamily: "var(--font-headline, var(--font-outfit))", marginTop: 2 }}>
+              Recent Entries <span style={{ fontSize: 13, color: "var(--text3)", fontWeight: 600, marginLeft: 6 }}>· {visibleEntries.length} record{visibleEntries.length === 1 ? "" : "s"}</span>
             </div>
-            {/* Branch multi-select — works for the "branch" AND "range" modes */}
+          </div>
+        </div>
+
+        {/* Filter bar — labelled groups, full-width card, uniform button
+            sizes so all controls read as siblings. */}
+        <Card style={{ padding: "14px 18px" }}>
+          <div style={{ display: "flex", alignItems: "stretch", gap: 20, flexWrap: "wrap", rowGap: 14 }}>
+            {/* Scope switcher */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 260 }}>
+              <label style={{ fontSize: 9, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.5 }}>Scope</label>
+              <div style={{ display: "inline-flex", gap: 3, background: "var(--bg4)", padding: 3, borderRadius: 10, border: "1px solid var(--border)" }}>
+                {[
+                  ["branch", recentBranchIds.length > 1 ? `${recentBranchIds.length} branches` : recentBranchIds.length === 1 ? (branchesById.get(recentBranchIds[0])?.name?.replace("V-CUT ","") || "Branch") : (selBranch ? (branchesById.get(selBranch)?.name?.replace("V-CUT ","") || "Branch") : "Branch")],
+                  ["date", "Date"],
+                  ["range", "Range"],
+                  ["all", "All"]
+                ].map(([val, label]) => (
+                  <button key={val} onClick={() => { setRecentView(val); if (val === "date" && !recentDate) setRecentDate(selDate); if (val === "range" && !rangeFrom) { setRangeFrom(selDate); setRangeTo(selDate); } }}
+                    style={{ padding: "8px 14px", borderRadius: 7, fontSize: 11, fontWeight: 700, border: "none", cursor: "pointer", transition: "all .2s", textTransform: "uppercase", letterSpacing: 0.5, background: recentView === val ? "linear-gradient(135deg, var(--accent), var(--gold2))" : "transparent", color: recentView === val ? "#000" : "var(--text3)", boxShadow: recentView === val ? "0 2px 10px rgba(34,211,238,0.25)" : "none" }}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Branches picker — only meaningful when scope covers multiple branches */}
             {(recentView === "branch" || recentView === "range") && (
-              <div style={{ position: "relative" }}>
-                <button onClick={() => setShowBranchPicker(v => !v)}
-                  style={{ padding: "5px 10px", borderRadius: 8, background: recentBranchIds.length ? "rgba(var(--accent-rgb),0.12)" : "var(--bg4)", border: `1px solid ${recentBranchIds.length ? "rgba(var(--accent-rgb),0.35)" : "var(--border)"}`, color: recentBranchIds.length ? "var(--accent)" : "var(--text3)", fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 }}>
-                  🔎 {recentBranchIds.length > 0 ? `${recentBranchIds.length} selected` : "Pick branches"}
-                  {recentBranchIds.length > 0 && (
-                    <span onClick={(ev) => { ev.stopPropagation(); setRecentBranchIds([]); }}
-                      style={{ color: "var(--red)", fontWeight: 800, cursor: "pointer", marginLeft: 2 }}>×</span>
-                  )}
-                </button>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 180 }}>
+                <label style={{ fontSize: 9, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.5 }}>Branches</label>
+                <div style={{ position: "relative" }}>
+                  <button onClick={() => setShowBranchPicker(v => !v)}
+                    style={{ padding: "8px 14px", borderRadius: 10, background: recentBranchIds.length ? "rgba(34,211,238,0.12)" : "var(--bg4)", border: `1px solid ${recentBranchIds.length ? "rgba(34,211,238,0.45)" : "var(--border2)"}`, color: recentBranchIds.length ? "var(--accent)" : "var(--text2)", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 8, minHeight: 36, width: "100%", justifyContent: "space-between" }}>
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                      {recentBranchIds.length > 0 ? `${recentBranchIds.length} selected` : "Pick branches"}
+                    </span>
+                    {recentBranchIds.length > 0 && (
+                      <span onClick={(ev) => { ev.stopPropagation(); setRecentBranchIds([]); }}
+                        style={{ color: "var(--red)", fontWeight: 800, cursor: "pointer" }}>×</span>
+                    )}
+                  </button>
                 {showBranchPicker && (
                   <div style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, width: 260, background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 10, boxShadow: "0 10px 30px rgba(0,0,0,0.4)", zIndex: 100, overflow: "hidden" }}>
                     <div style={{ padding: 8, borderBottom: "1px solid var(--border)" }}>
@@ -2094,44 +2111,59 @@ export default function EntryPage() {
                     </div>
                   </div>
                 )}
+                </div>
               </div>
             )}
-            {/* Rows limit */}
-            <div style={{ display: "flex", gap: 2, background: "var(--bg4)", padding: 3, borderRadius: 10 }}>
-              {[50, 100, 200].map(n => (
-                <button key={n} onClick={() => setRecentLimit(n)}
-                  style={{ padding: "5px 10px", borderRadius: 7, fontSize: 10, fontWeight: 700, border: "none", cursor: "pointer", transition: "all .2s", background: recentLimit === n ? "var(--accent)" : "transparent", color: recentLimit === n ? "#000" : "var(--text3)" }}>
-                  {n}
-                </button>
-              ))}
+
+            {/* Inline date pickers for Date / Range scope */}
+            {recentView === "date" && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                <label style={{ fontSize: 9, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.5 }}>Date</label>
+                <input type="date" value={activeRecentDate} onChange={e => setRecentDate(e.target.value)}
+                  style={{ padding: "9px 12px", borderRadius: 10, border: "1px solid var(--border2)", background: "var(--bg4)", color: "var(--text)", fontSize: 12.5, fontWeight: 700, minHeight: 36 }} />
+              </div>
+            )}
+            {recentView === "range" && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                <label style={{ fontSize: 9, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.5 }}>From — To</label>
+                <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                  <input type="date" value={rangeFrom} onChange={e => setRangeFrom(e.target.value)}
+                    style={{ padding: "9px 12px", borderRadius: 10, border: "1px solid var(--border2)", background: "var(--bg4)", color: "var(--text)", fontSize: 12.5, fontWeight: 700, minHeight: 36 }} />
+                  <span style={{ fontSize: 11, color: "var(--text3)", fontWeight: 700 }}>→</span>
+                  <input type="date" value={rangeTo} onChange={e => setRangeTo(e.target.value)}
+                    style={{ padding: "9px 12px", borderRadius: 10, border: "1px solid var(--border2)", background: "var(--bg4)", color: "var(--text)", fontSize: 12.5, fontWeight: 700, minHeight: 36 }} />
+                </div>
+              </div>
+            )}
+
+            {/* Flex spacer pushes Rows + Export to the right edge */}
+            <div style={{ flex: 1, minWidth: 8 }} />
+
+            {/* Rows-per-page — labelled toggle matching the Scope buttons */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <label style={{ fontSize: 9, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.5 }}>Rows per page</label>
+              <div style={{ display: "inline-flex", gap: 3, background: "var(--bg4)", padding: 3, borderRadius: 10, border: "1px solid var(--border)" }}>
+                {[50, 100, 200].map(n => (
+                  <button key={n} onClick={() => setRecentLimit(n)}
+                    style={{ padding: "8px 14px", borderRadius: 7, fontSize: 11, fontWeight: 700, border: "none", cursor: "pointer", transition: "all .2s", background: recentLimit === n ? "linear-gradient(135deg, var(--accent), var(--gold2))" : "transparent", color: recentLimit === n ? "#000" : "var(--text3)", boxShadow: recentLimit === n ? "0 2px 10px rgba(34,211,238,0.25)" : "none" }}>
+                    {n}
+                  </button>
+                ))}
+              </div>
             </div>
-            {/* Export */}
+
+            {/* Export — sized to match every other button so the row reads as one bar */}
             {canEdit && (
-              <button onClick={exportToExcel} title="Export to CSV"
-                style={{ padding: "5px 10px", borderRadius: 8, background: "var(--bg4)", border: "1px solid var(--border)", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 5, fontSize: 10, fontWeight: 700, color: "var(--green)", textTransform: "uppercase" }}>
-                <Icon name="save" size={12} /> Export
-              </button>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                <label style={{ fontSize: 9, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.5 }}>&nbsp;</label>
+                <button onClick={exportToExcel} title="Export to CSV"
+                  style={{ padding: "9px 16px", borderRadius: 10, background: "rgba(74,222,128,0.1)", border: "1px solid rgba(74,222,128,0.35)", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 7, fontSize: 11, fontWeight: 800, color: "var(--green)", textTransform: "uppercase", letterSpacing: 0.5, minHeight: 36 }}>
+                  <Icon name="save" size={13} /> Export
+                </button>
+              </div>
             )}
           </div>
-        </div>
-        {/* Date / Range pickers */}
-        {recentView === "date" && (
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ fontSize: 11, color: "var(--text3)", fontWeight: 600 }}>Date:</span>
-            <input type="date" value={activeRecentDate} onChange={e => setRecentDate(e.target.value)}
-              style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg4)", color: "var(--text)", fontSize: 12, fontWeight: 600 }} />
-          </div>
-        )}
-        {recentView === "range" && (
-          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-            <span style={{ fontSize: 11, color: "var(--text3)", fontWeight: 600 }}>From:</span>
-            <input type="date" value={rangeFrom} onChange={e => setRangeFrom(e.target.value)}
-              style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg4)", color: "var(--text)", fontSize: 12, fontWeight: 600 }} />
-            <span style={{ fontSize: 11, color: "var(--text3)", fontWeight: 600 }}>To:</span>
-            <input type="date" value={rangeTo} onChange={e => setRangeTo(e.target.value)}
-              style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg4)", color: "var(--text)", fontSize: 12, fontWeight: 600 }} />
-          </div>
-        )}
+        </Card>
       </div>
       <Card>
         <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12.5 }}>
