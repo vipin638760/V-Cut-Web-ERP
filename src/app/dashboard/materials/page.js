@@ -1531,6 +1531,9 @@ export default function MaterialsPage() {
           <button key={k} onClick={() => {
             setTab(k);
             if (k === "add" && addRows.length === 0) setAddRowsPrompt({ count: addNumRows || 10 });
+            // Open the POS-style form automatically when landing on Transfers,
+            // unless one is already open (e.g. user is mid-transfer and toggled tabs).
+            if (k === "transfers" && !transferModal) openTransferModal();
           }}
             style={{ flex: 1, padding: "10px 14px", fontSize: 12, fontWeight: 800, border: "none", borderRadius: 8, cursor: "pointer", textTransform: "uppercase", letterSpacing: 0.5,
               background: tab === k ? "linear-gradient(135deg,var(--accent),var(--gold2))" : "transparent",
@@ -1887,37 +1890,24 @@ export default function MaterialsPage() {
       })()}
 
       {tab === "transfers" && (() => {
-        const q = catalogSearch.trim().toLowerCase();
-        const visibleRows = catalogRows.filter(r =>
-          (!q || (r.name || "").toLowerCase().includes(q)) &&
-          (!catalogGroup || materials.find(m => m.id === r.material_id)?.group === catalogGroup)
-        );
-        const inp = { padding: "6px 8px", borderRadius: 6, background: "var(--bg3)", border: "1px solid var(--border2)", color: "var(--text)", fontSize: 12, width: "100%", outline: "none" };
         return (
           <>
-            {/* Top controls */}
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 10 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                  <label style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase" }}>Date *</label>
-                  <input type="date" value={catalogDate} onChange={e => setCatalogDate(e.target.value)}
-                    style={{ padding: "8px 12px", borderRadius: 8, background: "var(--bg3)", border: "1px solid var(--border2)", color: "var(--text)", fontSize: 13, outline: "none" }} />
+            {/* Prominent call-to-action: open the POS-style transfer form. */}
+            <Card style={{ marginBottom: 16, padding: 20, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, flexWrap: "wrap", background: "linear-gradient(135deg, rgba(34,211,238,0.08), rgba(250,204,21,0.04))", border: "1px solid rgba(34,211,238,0.25)" }}>
+              <div>
+                <div style={{ fontSize: 12, color: "var(--accent)", fontWeight: 800, textTransform: "uppercase", letterSpacing: 1.5, marginBottom: 4 }}>New Material Transfer</div>
+                <div style={{ fontSize: 13, color: "var(--text2)", lineHeight: 1.5 }}>
+                  Search the master catalog, pick materials (stock-aware), set operation cost %, preview the slip, then confirm.
                 </div>
-                <label style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 10, background: "rgba(74,222,128,0.08)", border: "1px solid rgba(74,222,128,0.25)", fontSize: 11, color: "var(--green)" }}>
-                  <input type="checkbox" checked={catalogAutoUpdate} onChange={e => setCatalogAutoUpdate(e.target.checked)} />
-                  Auto-update each branch's daily entry
-                </label>
               </div>
-              <div style={{ display: "flex", gap: 8 }}>
-                <button onClick={resetCatalog} disabled={catalogSaving}
-                  style={{ padding: "8px 14px", borderRadius: 8, background: "var(--bg4)", color: "var(--text2)", border: "1px solid var(--border2)", cursor: "pointer", fontWeight: 700, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5 }}>Clear Qtys</button>
-                <button onClick={() => setTransferConfirmOpen(true)} disabled={catalogSaving || filledCatalog.length === 0 || !catalogDate}
-                  style={{ padding: "10px 18px", borderRadius: 10, background: "linear-gradient(135deg,var(--accent),var(--gold2))", color: "#000", border: "none", cursor: (catalogSaving || filledCatalog.length === 0 || !catalogDate) ? "not-allowed" : "pointer", fontWeight: 800, fontSize: 12, textTransform: "uppercase", letterSpacing: 0.5, opacity: (catalogSaving || filledCatalog.length === 0 || !catalogDate) ? 0.5 : 1, display: "inline-flex", alignItems: "center", gap: 6 }}>
-                  <Icon name="save" size={14} /> {catalogSaving ? "Transferring…" : `Transfer ${filledCatalog.length} Row${filledCatalog.length === 1 ? "" : "s"}`}
-                </button>
-              </div>
-            </div>
+              <button onClick={openTransferModal}
+                style={{ padding: "14px 28px", borderRadius: 12, background: "linear-gradient(135deg,var(--accent),var(--gold2))", color: "#000", border: "none", cursor: "pointer", fontWeight: 900, fontSize: 13, textTransform: "uppercase", letterSpacing: 1, display: "inline-flex", alignItems: "center", gap: 8, boxShadow: "0 4px 18px rgba(34,211,238,0.3)" }}>
+                <Icon name="plus" size={16} /> Start Transfer →
+              </button>
+            </Card>
 
+            {/* Hidden — kept only so legacy refs compile. Real flow is the modal above. */}
+            <div style={{ display: "none" }}>
             {/* Catalog filters + stats */}
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
               <input placeholder="Search material name…" value={catalogSearch} onChange={e => setCatalogSearch(e.target.value)}
@@ -2131,6 +2121,8 @@ export default function MaterialsPage() {
                 </button>
               </div>
             </div>
+            </div>
+            {/* End legacy catalog UI (hidden). */}
 
             {/* Branch-wise history with date-wise material rollup */}
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, flexWrap: "wrap", gap: 10 }}>
