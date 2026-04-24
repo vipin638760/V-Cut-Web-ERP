@@ -1669,12 +1669,23 @@ function DailyMaterialChart({ entries, allocations, branches = [], filterYear, f
   const byDayLump = new Array(daysInMonth).fill(0);
   // Branch-level rollups so we can show "who consumed the most".
   const byBranch = new Map(); // id -> { name, alloc, lump, total }
+  // Per-day per-branch breakdown — feeds the hover tooltip so the user can
+  // see which branches drove the spike on a given day.
+  // dayBreakdown[dIdx] = Map<branchId, { name, alloc, lump, total }>
+  const dayBreakdown = Array.from({ length: daysInMonth }, () => new Map());
 
   const bumpBranch = (id, key, amt) => {
     const row = byBranch.get(id) || { name: branches.find(b => b.id === id)?.name || "—", alloc: 0, lump: 0, total: 0 };
     row[key] += amt;
     row.total += amt;
     byBranch.set(id, row);
+  };
+  const bumpDayBranch = (dIdx, id, key, amt) => {
+    const dayMap = dayBreakdown[dIdx];
+    const row = dayMap.get(id) || { name: branches.find(b => b.id === id)?.name || "—", alloc: 0, lump: 0, total: 0 };
+    row[key] += amt;
+    row.total += amt;
+    dayMap.set(id, row);
   };
 
   if (useAllocations) {
@@ -1685,7 +1696,10 @@ function DailyMaterialChart({ entries, allocations, branches = [], filterYear, f
       if (dIdx < 0 || dIdx >= daysInMonth) return;
       const total = Number(a.total) || (a.items || []).reduce((s, it) => s + (Number(it.line_total) || (Number(it.qty) * Number(it.price_at_transfer)) || 0), 0);
       byDayAlloc[dIdx] += total;
-      if (a.branch_id) bumpBranch(a.branch_id, "alloc", total);
+      if (a.branch_id) {
+        bumpBranch(a.branch_id, "alloc", total);
+        bumpDayBranch(dIdx, a.branch_id, "alloc", total);
+      }
     });
   }
   if (useLumpsum) {
@@ -1696,7 +1710,10 @@ function DailyMaterialChart({ entries, allocations, branches = [], filterYear, f
       const amt = Number(e.mat_expense) || 0;
       if (amt <= 0) return;
       byDayLump[dIdx] += amt;
-      if (e.branch_id) bumpBranch(e.branch_id, "lump", amt);
+      if (e.branch_id) {
+        bumpBranch(e.branch_id, "lump", amt);
+        bumpDayBranch(dIdx, e.branch_id, "lump", amt);
+      }
     });
   }
   // Ensure every branch shows up — even ones with zero consumption.
@@ -1855,7 +1872,10 @@ function DailyMaterialChart({ entries, allocations, branches = [], filterYear, f
               const dim = hover && hover.i !== i ? 0.35 : 1;
               return (
                 <g key={i}
-                  onMouseEnter={() => hasValue && setHover({ i, v, alloc: byDayAlloc[i], lump: byDayLump[i], dateStr })}
+                  onMouseEnter={() => hasValue && setHover({
+                    i, v, alloc: byDayAlloc[i], lump: byDayLump[i], dateStr,
+                    dayBranches: Array.from(dayBreakdown[i].values()).sort((a, b) => b.total - a.total),
+                  })}
                   onMouseLeave={() => setHover(null)}
                   style={{ cursor: hasValue ? "pointer" : "default", transition: "opacity .15s" }}
                   opacity={dim}>
@@ -1924,23 +1944,43 @@ function DailyMaterialChart({ entries, allocations, branches = [], filterYear, f
           {hover && (
             <div style={{
               position: "absolute",
-              left: Math.min(LEFT + hover.i * (BAR_W + GAP) + BAR_W + 10, W - 170),
+              left: Math.min(LEFT + hover.i * (BAR_W + GAP) + BAR_W + 10, W - 240),
               top: 4, pointerEvents: "none",
               background: "var(--bg4)", border: "1px solid rgba(192,132,252,0.35)", borderRadius: 8,
-              padding: "8px 12px", boxShadow: "0 6px 20px rgba(0,0,0,0.5)", fontSize: 11, zIndex: 3, minWidth: 160,
+              padding: "8px 12px", boxShadow: "0 6px 20px rgba(0,0,0,0.5)", fontSize: 11, zIndex: 3, minWidth: 220, maxWidth: 260,
             }}>
               <div style={{ fontSize: 9, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, fontWeight: 700 }}>{hover.dateStr} · {dayOfWeek(hover.i + 1)}</div>
               <div style={{ fontSize: 14, fontWeight: 800, color: "#d7a6ff", marginTop: 2 }}>{INR(hover.v)}</div>
-              {useAllocations && (
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 10, marginTop: 4 }}>
-                  <span style={{ color: "#d7a6ff", fontWeight: 700 }}>Allocations</span>
-                  <span style={{ color: "#d7a6ff" }}>{INR(hover.alloc || 0)}</span>
-                </div>
+              {useAllocations && useLumpsum && (
+                <>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 10, marginTop: 4 }}>
+                    <span style={{ color: "#d7a6ff", fontWeight: 700 }}>Allocations</span>
+                    <span style={{ color: "#d7a6ff" }}>{INR(hover.alloc || 0)}</span>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 10 }}>
+                    <span style={{ color: "var(--accent)", fontWeight: 700 }}>Daily Entry</span>
+                    <span style={{ color: "var(--accent)" }}>{INR(hover.lump || 0)}</span>
+                  </div>
+                </>
               )}
-              {useLumpsum && (
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 10 }}>
-                  <span style={{ color: "var(--accent)", fontWeight: 700 }}>Daily Entry</span>
-                  <span style={{ color: "var(--accent)" }}>{INR(hover.lump || 0)}</span>
+              {hover.dayBranches && hover.dayBranches.length > 0 && (
+                <div style={{ marginTop: 8, paddingTop: 6, borderTop: "1px dashed rgba(255,255,255,0.08)" }}>
+                  <div style={{ fontSize: 8.5, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.2, fontWeight: 800, marginBottom: 4 }}>
+                    Branches ({hover.dayBranches.length})
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 3, maxHeight: 200, overflowY: "auto" }}>
+                    {hover.dayBranches.slice(0, 12).map((br, idx) => (
+                      <div key={idx} style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 10 }}>
+                        <span style={{ color: "var(--text2)", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{br.name.replace("V-CUT ", "")}</span>
+                        <span style={{ color: "var(--text)", fontWeight: 700, whiteSpace: "nowrap" }}>{INR(br.total)}</span>
+                      </div>
+                    ))}
+                    {hover.dayBranches.length > 12 && (
+                      <div style={{ fontSize: 9, color: "var(--text3)", fontStyle: "italic", marginTop: 2 }}>
+                        +{hover.dayBranches.length - 12} more
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
