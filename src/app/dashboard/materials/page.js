@@ -1243,8 +1243,10 @@ export default function MaterialsPage() {
       toast({ title: "Imported", message: `${created} added, ${updated} updated (${priceChanges} price changes), ${unchanged} unchanged.`, type: "success" });
       setReviewModal(null);
 
-      // After import, open the transfer/allocation modal so the user can send these materials to a branch.
+      // After import, open the transfer/allocation form (inline on the Transfers tab)
+      // so the user can send these materials to a branch.
       if (justImported.length > 0) {
+        setTab("transfers");
         setTransferModal({
           branch_id: "",
           date: today,
@@ -1269,6 +1271,8 @@ export default function MaterialsPage() {
     });
     // Seed with any pre-selected materials, but the new POS-style picker means
     // users can also open with an empty cart and search as they go.
+    // Always force the Transfers tab because the form renders inline there.
+    setTab("transfers");
     setTransferModal({ branch_id: "", date: new Date().toISOString().slice(0, 10), items, note: "", auto_entry_update: true, operation_cost_pct: 5 });
   };
 
@@ -2536,9 +2540,20 @@ export default function MaterialsPage() {
         )}
       </Modal>
 
-      {/* Transfer Modal */}
-      <Modal isOpen={!!transferModal} onClose={() => setTransferModal(null)} title="Transfer Materials to Branch" width={1080}>
-        {transferModal && (() => {
+      {/* Transfer form — rendered inline (not as an overlay) so it feels like a normal form.
+          openTransferModal / post-import / row-count-prompt all force tab="transfers" so this
+          card always appears inside the Transfers tab context. */}
+      {transferModal && (
+        <div style={{ margin: "0 0 20px", background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 16, overflow: "hidden" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 20px", borderBottom: "1px solid var(--border)", background: "var(--bg3)" }}>
+            <div style={{ fontSize: 13, fontWeight: 800, color: "var(--gold)", textTransform: "uppercase", letterSpacing: 1 }}>Transfer Materials to Branch</div>
+            <button onClick={() => setTransferModal(null)}
+              style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 12px", borderRadius: 8, background: "var(--bg4)", border: "1px solid var(--border2)", color: "var(--text2)", fontSize: 11, fontWeight: 700, cursor: "pointer", textTransform: "uppercase", letterSpacing: 0.5 }}>
+              ✕ Close
+            </button>
+          </div>
+          <div style={{ padding: 20 }}>
+            {(() => {
           const cartIds = new Set(transferModal.items.map(i => i.material_id).filter(Boolean));
           const q = (pickerSearch || "").trim().toLowerCase();
           // Catalog shown in the left panel: un-archived master records, filtered
@@ -2779,8 +2794,10 @@ export default function MaterialsPage() {
               </div>
             </div>
           );
-        })()}
-      </Modal>
+            })()}
+          </div>
+        </div>
+      )}
 
       {/* Add / Edit Material Modal */}
       <Modal isOpen={!!addMaterialModal} onClose={() => setAddMaterialModal(null)} title={addMaterialModal?.editingId ? "Record Purchase" : "Add Material / Record Purchase"} width={560}>
@@ -2956,6 +2973,7 @@ export default function MaterialsPage() {
                 style={{ padding: "10px 18px", borderRadius: 10, background: "var(--bg4)", color: "var(--text2)", border: "1px solid var(--border2)", fontWeight: 600, fontSize: 12, cursor: "pointer" }}>Cancel</button>
               <button onClick={() => {
                 const n = Math.max(1, Math.min(200, Number(rowCountPrompt.count) || 1));
+                setTab("transfers");
                 setTransferModal({
                   branch_id: "",
                   date: new Date().toISOString().slice(0, 10),

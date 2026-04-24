@@ -2148,7 +2148,11 @@ function DailyBusinessChart({ entries, branches = [], filterYear, filterMonth })
       {totalBusiness === 0 ? (
         <div style={{ height: H, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text3)", fontStyle: "italic", fontSize: 13 }}>No business entries recorded for {monthLabel} yet.</div>
       ) : (
-        <div style={{ position: "relative", overflowX: "auto" }}>
+        // Outer wrapper is position:relative with visible overflow so a long
+        // hover card (up to ~500px tall with 15 branches) doesn't get clipped.
+        // SVG sits in its own scroll container so wide charts still scroll X.
+        <div style={{ position: "relative" }}>
+          <div style={{ overflowX: "auto" }}>
           <svg width={W} height={H + PAD_TOP + PAD_BOTTOM} style={{ display: "block" }}>
             <defs>
               {/* Palette — softer gradients with more restrained contrast. */}
@@ -2338,6 +2342,7 @@ function DailyBusinessChart({ entries, branches = [], filterYear, filterMonth })
               );
             })()}
           </svg>
+          </div>
 
           {hover && (() => {
             const TIP_W = 320;
@@ -2395,7 +2400,7 @@ function DailyBusinessChart({ entries, branches = [], filterYear, filterMonth })
                 <div style={{ fontSize: 9, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.2, fontWeight: 700, marginBottom: 6 }}>
                   Branch-wise ({filled.length}/{(hover.byBranch || []).length} reported)
                 </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 260, overflowY: "auto" }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                   {filled.length === 0 && (
                     <div style={{ fontSize: 11, color: "var(--text3)", fontStyle: "italic" }}>No branch-level records for this day.</div>
                   )}
@@ -2524,7 +2529,10 @@ function MonthlyBusinessChart({ entries, branches = [], filterYear }) {
       {totalBusiness === 0 ? (
         <div style={{ height: H, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text3)", fontStyle: "italic", fontSize: 13 }}>No business entries recorded for {filterYear} yet.</div>
       ) : (
-        <div style={{ position: "relative", overflowX: "auto" }}>
+        // Same nested wrapper as DailyBusinessChart — outer is visible so the
+        // hover tooltip can extend below the chart card; inner handles X scroll.
+        <div style={{ position: "relative" }}>
+          <div style={{ overflowX: "auto" }}>
           <svg width={W} height={H + PAD_TOP + PAD_BOTTOM} style={{ display: "block" }}>
             <defs>
               <linearGradient id="mbar-blue" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#38d9f2" /><stop offset="100%" stopColor="#0891a8" stopOpacity="0.75" /></linearGradient>
@@ -2640,6 +2648,7 @@ function MonthlyBusinessChart({ entries, branches = [], filterYear }) {
               );
             })()}
           </svg>
+          </div>
 
           {hover && (() => {
             const TIP_W = 320;
@@ -2689,7 +2698,7 @@ function MonthlyBusinessChart({ entries, branches = [], filterYear }) {
                 <div style={{ fontSize: 9, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.2, fontWeight: 700, marginBottom: 6 }}>
                   Branch-wise ({filled.length}/{(hover.byBranch || []).length} reported)
                 </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 260, overflowY: "auto" }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                   {filled.length === 0 && (
                     <div style={{ fontSize: 11, color: "var(--text3)", fontStyle: "italic" }}>No branch-level records for this month.</div>
                   )}
