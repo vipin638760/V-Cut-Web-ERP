@@ -2064,6 +2064,8 @@ function DailyBusinessChart({ entries, branches = [], filterYear, filterMonth })
   const byDay = new Array(daysInMonth).fill(0);
   const byDayCash = new Array(daysInMonth).fill(0);
   const byDayNonCash = new Array(daysInMonth).fill(0);
+  const byDayOnline = new Array(daysInMonth).fill(0);
+  const byDayMat = new Array(daysInMonth).fill(0);
   // `${branchId}|${dIdx}` → sale on that day for that branch (online + cash + mat)
   const byDayBranch = new Map();
   entries.forEach(e => {
@@ -2073,6 +2075,8 @@ function DailyBusinessChart({ entries, branches = [], filterYear, filterMonth })
     const matSale = (e.staff_billing || []).reduce((s, sb) => s + (sb.material || 0), 0);
     const sale = (e.online || 0) + (e.cash || 0) + matSale;
     byDayCash[dIdx] += (e.cash || 0);
+    byDayOnline[dIdx] += (e.online || 0);
+    byDayMat[dIdx] += matSale;
     byDayNonCash[dIdx] += (e.online || 0) + matSale;
     byDay[dIdx] += sale;
     if (e.branch_id) {
@@ -2230,12 +2234,12 @@ function DailyBusinessChart({ entries, branches = [], filterYear, filterMonth })
               return (
                 <g key={i}
                   onMouseEnter={() => hasValue && setHover({
-                    i, v, cash: byDayCash[i], nonCash: byDayNonCash[i], dateStr,
-                    // Per-branch split for this day, highest first. Only branches
-                    // that actually had a sale on the day appear in the hover card.
+                    i, v, cash: byDayCash[i], online: byDayOnline[i], mat: byDayMat[i], nonCash: byDayNonCash[i], dateStr,
+                    // Per-branch split for this day, highest first. Every branch
+                    // the chain knows about appears — zero-sale ones are dimmed
+                    // so gaps are obvious during verification.
                     byBranch: branches
                       .map(b => ({ id: b.id, name: (b.name || "").replace("V-CUT ", ""), v: byDayBranch.get(`${b.id}|${i}`) || 0 }))
-                      .filter(x => x.v > 0)
                       .sort((a, b) => b.v - a.v),
                   })}
                   onMouseLeave={() => setHover(null)}
@@ -2335,30 +2339,93 @@ function DailyBusinessChart({ entries, branches = [], filterYear, filterMonth })
             })()}
           </svg>
 
-          {hover && (
-            <div style={{
-              position: "absolute",
-              left: Math.min(LEFT + hover.i * (BAR_W + GAP) + BAR_W + 10, W - 240),
-              top: 4, pointerEvents: "none",
-              background: "var(--bg4)", border: "1px solid rgba(var(--accent-rgb),0.35)", borderRadius: 8,
-              padding: "10px 14px", boxShadow: "0 6px 20px rgba(0,0,0,0.5)", fontSize: 11, zIndex: 3, minWidth: 220, maxWidth: 260,
-            }}>
-              <div style={{ fontSize: 9, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, fontWeight: 700 }}>{hover.dateStr} · {dayOfWeek(hover.i + 1)}</div>
-              <div style={{ fontSize: 15, fontWeight: 800, color: "var(--green)", marginTop: 2 }}>{INR(hover.v)}</div>
-              <div style={{ borderTop: "1px dashed var(--border2)", margin: "6px 0" }} />
-              <div style={{ fontSize: 9, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, fontWeight: 700, marginBottom: 4 }}>Branch-wise</div>
-              {(hover.byBranch && hover.byBranch.length > 0) ? (
-                hover.byBranch.map(b => (
-                  <div key={b.id} style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 10.5, padding: "2px 0" }}>
-                    <span style={{ color: "var(--text2)", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{b.name}</span>
-                    <span style={{ color: "var(--accent)", fontWeight: 700 }}>{INR(b.v)}</span>
+          {hover && (() => {
+            const TIP_W = 320;
+            // Keep the tooltip on screen — align to the right of the bar when
+            // there's room, otherwise flip to the left. Clamp so the card never
+            // overflows the chart container.
+            const barCenter = LEFT + hover.i * (BAR_W + GAP) + BAR_W / 2;
+            const preferRight = barCenter + BAR_W / 2 + 10 + TIP_W <= W;
+            const left = preferRight
+              ? Math.min(barCenter + BAR_W / 2 + 10, W - TIP_W - 4)
+              : Math.max(4, barCenter - BAR_W / 2 - 10 - TIP_W);
+            const filled = (hover.byBranch || []).filter(b => b.v > 0);
+            const empty = (hover.byBranch || []).filter(b => b.v === 0);
+            return (
+              <div style={{
+                position: "absolute",
+                left, top: 4, pointerEvents: "none",
+                width: TIP_W,
+                background: "linear-gradient(160deg, rgba(18,22,30,0.98), rgba(12,14,20,0.98))",
+                border: "1px solid rgba(var(--accent-rgb),0.45)",
+                borderRadius: 12,
+                padding: "14px 16px",
+                boxShadow: "0 12px 40px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.04)",
+                fontSize: 12, zIndex: 5,
+              }}>
+                {/* Header — date + grand total */}
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 8 }}>
+                  <div>
+                    <div style={{ fontSize: 10, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.2, fontWeight: 700 }}>{dayOfWeek(hover.i + 1)}</div>
+                    <div style={{ fontSize: 14, fontWeight: 800, color: "var(--text)", fontFamily: "var(--font-headline, var(--font-outfit))" }}>{hover.dateStr}</div>
                   </div>
-                ))
-              ) : (
-                <div style={{ fontSize: 10, color: "var(--text3)", fontStyle: "italic" }}>No branch-level records</div>
-              )}
-            </div>
-          )}
+                  <div style={{ textAlign: "right" }}>
+                    <div style={{ fontSize: 9, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.2, fontWeight: 700 }}>Total</div>
+                    <div style={{ fontSize: 18, fontWeight: 900, color: "var(--green)", fontFamily: "var(--font-headline, var(--font-outfit))" }}>{INR(hover.v)}</div>
+                  </div>
+                </div>
+
+                {/* Stream split chips */}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, marginBottom: 10 }}>
+                  <div style={{ padding: "6px 8px", borderRadius: 8, background: "rgba(96,165,250,0.10)", border: "1px solid rgba(96,165,250,0.3)" }}>
+                    <div style={{ fontSize: 8.5, color: "var(--blue, #60a5fa)", textTransform: "uppercase", letterSpacing: 1, fontWeight: 800 }}>Online</div>
+                    <div style={{ fontSize: 11.5, fontWeight: 800, color: "var(--blue, #60a5fa)" }}>{INR(hover.online || 0)}</div>
+                  </div>
+                  <div style={{ padding: "6px 8px", borderRadius: 8, background: "rgba(192,132,252,0.10)", border: "1px solid rgba(192,132,252,0.3)" }}>
+                    <div style={{ fontSize: 8.5, color: "#c084fc", textTransform: "uppercase", letterSpacing: 1, fontWeight: 800 }}>Cash</div>
+                    <div style={{ fontSize: 11.5, fontWeight: 800, color: "#c084fc" }}>{INR(hover.cash || 0)}</div>
+                  </div>
+                  <div style={{ padding: "6px 8px", borderRadius: 8, background: "rgba(251,146,60,0.10)", border: "1px solid rgba(251,146,60,0.3)" }}>
+                    <div style={{ fontSize: 8.5, color: "var(--orange)", textTransform: "uppercase", letterSpacing: 1, fontWeight: 800 }}>Material</div>
+                    <div style={{ fontSize: 11.5, fontWeight: 800, color: "var(--orange)" }}>{INR(hover.mat || 0)}</div>
+                  </div>
+                </div>
+
+                {/* Per-branch breakdown with share bars */}
+                <div style={{ fontSize: 9, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.2, fontWeight: 700, marginBottom: 6 }}>
+                  Branch-wise ({filled.length}/{(hover.byBranch || []).length} reported)
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 260, overflowY: "auto" }}>
+                  {filled.length === 0 && (
+                    <div style={{ fontSize: 11, color: "var(--text3)", fontStyle: "italic" }}>No branch-level records for this day.</div>
+                  )}
+                  {filled.map(b => {
+                    const pct = hover.v > 0 ? Math.round((b.v / hover.v) * 100) : 0;
+                    return (
+                      <div key={b.id} style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10, fontSize: 11.5 }}>
+                          <span style={{ color: "var(--text)", fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{b.name}</span>
+                          <span style={{ display: "flex", alignItems: "baseline", gap: 6, flexShrink: 0 }}>
+                            <span style={{ fontSize: 9.5, color: "var(--text3)", fontWeight: 700 }}>{pct}%</span>
+                            <span style={{ color: "var(--accent)", fontWeight: 800 }}>{INR(b.v)}</span>
+                          </span>
+                        </div>
+                        <div style={{ height: 3, background: "rgba(255,255,255,0.06)", borderRadius: 2, overflow: "hidden" }}>
+                          <div style={{ height: "100%", width: `${pct}%`, background: "linear-gradient(90deg, var(--blue, #60a5fa), var(--accent))", borderRadius: 2 }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {empty.length > 0 && (
+                    <div style={{ marginTop: 6, paddingTop: 6, borderTop: "1px dashed rgba(255,255,255,0.08)", fontSize: 10, color: "var(--text3)" }}>
+                      <div style={{ fontWeight: 700, marginBottom: 2, color: "var(--red)", textTransform: "uppercase", letterSpacing: 1, fontSize: 9 }}>No entry: {empty.length}</div>
+                      <div style={{ lineHeight: 1.5 }}>{empty.map(b => b.name).join(" · ")}</div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
         </div>
       )}
     </Card>
@@ -2377,6 +2444,8 @@ function MonthlyBusinessChart({ entries, branches = [], filterYear }) {
   const byMo = new Array(12).fill(0);
   const byMoCash = new Array(12).fill(0);
   const byMoNonCash = new Array(12).fill(0);
+  const byMoOnline = new Array(12).fill(0);
+  const byMoMat = new Array(12).fill(0);
   // `${branchId}|${mIdx}` → sale on that month for that branch
   const byMoBranch = new Map();
   entries.forEach(e => {
@@ -2386,6 +2455,8 @@ function MonthlyBusinessChart({ entries, branches = [], filterYear }) {
     const matSale = (e.staff_billing || []).reduce((s, sb) => s + (sb.material || 0), 0);
     const sale = (e.online || 0) + (e.cash || 0) + matSale;
     byMoCash[mIdx] += (e.cash || 0);
+    byMoOnline[mIdx] += (e.online || 0);
+    byMoMat[mIdx] += matSale;
     byMoNonCash[mIdx] += (e.online || 0) + matSale;
     byMo[mIdx] += sale;
     if (e.branch_id) {
@@ -2501,10 +2572,9 @@ function MonthlyBusinessChart({ entries, branches = [], filterYear }) {
               return (
                 <g key={i}
                   onMouseEnter={() => hasValue && setHover({
-                    i, v, cash: byMoCash[i], nonCash: byMoNonCash[i],
+                    i, v, cash: byMoCash[i], online: byMoOnline[i], mat: byMoMat[i], nonCash: byMoNonCash[i],
                     byBranch: branches
                       .map(b => ({ id: b.id, name: (b.name || "").replace("V-CUT ", ""), v: byMoBranch.get(`${b.id}|${i}`) || 0 }))
-                      .filter(x => x.v > 0)
                       .sort((a, b) => b.v - a.v),
                   })}
                   onMouseLeave={() => setHover(null)}
@@ -2571,30 +2641,85 @@ function MonthlyBusinessChart({ entries, branches = [], filterYear }) {
             })()}
           </svg>
 
-          {hover && (
-            <div style={{
-              position: "absolute",
-              left: Math.min(LEFT + hover.i * (BAR_W + GAP) + BAR_W + 10, W - 240),
-              top: 4, pointerEvents: "none",
-              background: "var(--bg4)", border: "1px solid rgba(var(--accent-rgb),0.35)", borderRadius: 8,
-              padding: "10px 14px", boxShadow: "0 6px 20px rgba(0,0,0,0.5)", fontSize: 11, zIndex: 3, minWidth: 220, maxWidth: 260,
-            }}>
-              <div style={{ fontSize: 9, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, fontWeight: 700 }}>{MONTHS_SHORT[hover.i]} {filterYear}</div>
-              <div style={{ fontSize: 15, fontWeight: 800, color: "var(--green)", marginTop: 2 }}>{INR(hover.v)}</div>
-              <div style={{ borderTop: "1px dashed var(--border2)", margin: "6px 0" }} />
-              <div style={{ fontSize: 9, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, fontWeight: 700, marginBottom: 4 }}>Branch-wise</div>
-              {(hover.byBranch && hover.byBranch.length > 0) ? (
-                hover.byBranch.map(b => (
-                  <div key={b.id} style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 10.5, padding: "2px 0" }}>
-                    <span style={{ color: "var(--text2)", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{b.name}</span>
-                    <span style={{ color: "var(--accent)", fontWeight: 700 }}>{INR(b.v)}</span>
+          {hover && (() => {
+            const TIP_W = 320;
+            const barCenter = LEFT + hover.i * (BAR_W + GAP) + BAR_W / 2;
+            const preferRight = barCenter + BAR_W / 2 + 10 + TIP_W <= W;
+            const left = preferRight
+              ? Math.min(barCenter + BAR_W / 2 + 10, W - TIP_W - 4)
+              : Math.max(4, barCenter - BAR_W / 2 - 10 - TIP_W);
+            const filled = (hover.byBranch || []).filter(b => b.v > 0);
+            const empty = (hover.byBranch || []).filter(b => b.v === 0);
+            return (
+              <div style={{
+                position: "absolute",
+                left, top: 4, pointerEvents: "none",
+                width: TIP_W,
+                background: "linear-gradient(160deg, rgba(18,22,30,0.98), rgba(12,14,20,0.98))",
+                border: "1px solid rgba(var(--accent-rgb),0.45)",
+                borderRadius: 12,
+                padding: "14px 16px",
+                boxShadow: "0 12px 40px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.04)",
+                fontSize: 12, zIndex: 5,
+              }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 8 }}>
+                  <div>
+                    <div style={{ fontSize: 10, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.2, fontWeight: 700 }}>{filterYear}</div>
+                    <div style={{ fontSize: 16, fontWeight: 800, color: "var(--text)", fontFamily: "var(--font-headline, var(--font-outfit))" }}>{MONTHS_SHORT[hover.i]}</div>
                   </div>
-                ))
-              ) : (
-                <div style={{ fontSize: 10, color: "var(--text3)", fontStyle: "italic" }}>No branch-level records</div>
-              )}
-            </div>
-          )}
+                  <div style={{ textAlign: "right" }}>
+                    <div style={{ fontSize: 9, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.2, fontWeight: 700 }}>Total</div>
+                    <div style={{ fontSize: 18, fontWeight: 900, color: "var(--green)", fontFamily: "var(--font-headline, var(--font-outfit))" }}>{INR(hover.v)}</div>
+                  </div>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, marginBottom: 10 }}>
+                  <div style={{ padding: "6px 8px", borderRadius: 8, background: "rgba(96,165,250,0.10)", border: "1px solid rgba(96,165,250,0.3)" }}>
+                    <div style={{ fontSize: 8.5, color: "var(--blue, #60a5fa)", textTransform: "uppercase", letterSpacing: 1, fontWeight: 800 }}>Online</div>
+                    <div style={{ fontSize: 11.5, fontWeight: 800, color: "var(--blue, #60a5fa)" }}>{INR(hover.online || 0)}</div>
+                  </div>
+                  <div style={{ padding: "6px 8px", borderRadius: 8, background: "rgba(192,132,252,0.10)", border: "1px solid rgba(192,132,252,0.3)" }}>
+                    <div style={{ fontSize: 8.5, color: "#c084fc", textTransform: "uppercase", letterSpacing: 1, fontWeight: 800 }}>Cash</div>
+                    <div style={{ fontSize: 11.5, fontWeight: 800, color: "#c084fc" }}>{INR(hover.cash || 0)}</div>
+                  </div>
+                  <div style={{ padding: "6px 8px", borderRadius: 8, background: "rgba(251,146,60,0.10)", border: "1px solid rgba(251,146,60,0.3)" }}>
+                    <div style={{ fontSize: 8.5, color: "var(--orange)", textTransform: "uppercase", letterSpacing: 1, fontWeight: 800 }}>Material</div>
+                    <div style={{ fontSize: 11.5, fontWeight: 800, color: "var(--orange)" }}>{INR(hover.mat || 0)}</div>
+                  </div>
+                </div>
+                <div style={{ fontSize: 9, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.2, fontWeight: 700, marginBottom: 6 }}>
+                  Branch-wise ({filled.length}/{(hover.byBranch || []).length} reported)
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 260, overflowY: "auto" }}>
+                  {filled.length === 0 && (
+                    <div style={{ fontSize: 11, color: "var(--text3)", fontStyle: "italic" }}>No branch-level records for this month.</div>
+                  )}
+                  {filled.map(b => {
+                    const pct = hover.v > 0 ? Math.round((b.v / hover.v) * 100) : 0;
+                    return (
+                      <div key={b.id} style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10, fontSize: 11.5 }}>
+                          <span style={{ color: "var(--text)", fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{b.name}</span>
+                          <span style={{ display: "flex", alignItems: "baseline", gap: 6, flexShrink: 0 }}>
+                            <span style={{ fontSize: 9.5, color: "var(--text3)", fontWeight: 700 }}>{pct}%</span>
+                            <span style={{ color: "var(--accent)", fontWeight: 800 }}>{INR(b.v)}</span>
+                          </span>
+                        </div>
+                        <div style={{ height: 3, background: "rgba(255,255,255,0.06)", borderRadius: 2, overflow: "hidden" }}>
+                          <div style={{ height: "100%", width: `${pct}%`, background: "linear-gradient(90deg, var(--blue, #60a5fa), var(--accent))", borderRadius: 2 }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {empty.length > 0 && (
+                    <div style={{ marginTop: 6, paddingTop: 6, borderTop: "1px dashed rgba(255,255,255,0.08)", fontSize: 10, color: "var(--text3)" }}>
+                      <div style={{ fontWeight: 700, marginBottom: 2, color: "var(--red)", textTransform: "uppercase", letterSpacing: 1, fontSize: 9 }}>No entry: {empty.length}</div>
+                      <div style={{ lineHeight: 1.5 }}>{empty.map(b => b.name).join(" · ")}</div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
         </div>
       )}
     </Card>
