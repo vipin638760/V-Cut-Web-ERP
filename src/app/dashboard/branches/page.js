@@ -3173,12 +3173,18 @@ function SummaryView({ summaryTab, setSummaryTab, branchData, branches, entries,
       </div>
 
       {summaryTab === "summary" ? (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 16 }}>
+        // `auto-fit minmax(360px, …)` collapses to a single column below ~720px
+        // so the Income and Expenses tables each get full width on phones/tablets
+        // instead of squeezing into the fixed 1fr 2fr split.
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))", gap: 16 }}>
           {/* INCOME TABLE */}
-          <Card style={{ padding: 0, overflow: "hidden" }}>
+          <Card style={{ padding: 0, overflow: "hidden", minWidth: 0 }}>
             <div style={{ padding: "12px 16px", background: "linear-gradient(135deg, rgba(74,222,128,0.18), rgba(74,222,128,0.04))", borderBottom: "1px solid rgba(74,222,128,0.25)", fontWeight: 800, color: "var(--green)", fontSize: 13, letterSpacing: 1.5, textAlign: "center" }}>INCOME</div>
             <div style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+              {/* minWidth matches ~5 columns of readable text so the table
+                  horizontally scrolls within its card when the viewport narrows
+                  past that — same pattern the Expenses table already uses. */}
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, minWidth: 440 }}>
                 <thead>
                   <tr style={{ background: "var(--bg4)" }}>
                     <TH style={{ width: 40 }}>SL</TH>
