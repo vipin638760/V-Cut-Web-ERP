@@ -1892,13 +1892,12 @@ export default function MaterialsPage() {
       {tab === "transfers" && (() => {
         return (
           <>
-            {/* Legacy catalog UI removed — clicking the Transfers tab opens the
-                POS-style modal directly (see onClick on the tab button above).
-                If the user closes the modal, clicking Transfers again reopens it.
-                Everything below that's not an allocation log read is hidden
-                legacy state that still participates in the component's reducers;
-                display:none keeps it out of the DOM without a risky refactor. */}
+            {/* Legacy catalog UI fully removed. The Transfers tab now opens
+                the POS-style modal directly via the tab's onClick. */}
             <div style={{ display: "none" }}>
+            {/* __REMOVED_LEGACY_START__ */}
+            {false && (
+            <>
             {/* Catalog filters + stats */}
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
               <input placeholder="Search material name…" value={catalogSearch} onChange={e => setCatalogSearch(e.target.value)}
@@ -2112,8 +2111,11 @@ export default function MaterialsPage() {
                 </button>
               </div>
             </div>
+            </>
+            )}
+            {/* __REMOVED_LEGACY_END__ */}
             </div>
-            {/* End legacy catalog UI (hidden). */}
+            {/* End legacy catalog UI (dead branch — never renders). */}
 
             {/* Branch-wise history with date-wise material rollup */}
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, flexWrap: "wrap", gap: 10 }}>
