@@ -7,6 +7,13 @@ import { INR } from "@/lib/calculations";
 import { Icon, IconBtn, Card, TH, TD, Modal, BranchSelect, SearchSelect, useConfirm, useToast } from "@/components/ui";
 import VLoader from "@/components/VLoader";
 
+// ExcelJS is lazy-loaded — ~200KB, only needed when the user hits Export.
+let _excelJSPromise = null;
+const loadExcelJS = () => {
+  if (!_excelJSPromise) _excelJSPromise = import("exceljs").then(m => m.default || m);
+  return _excelJSPromise;
+};
+
 export default function DailyExpensesPage() {
   const { confirm, ConfirmDialog } = useConfirm();
   const { toast, ToastContainer } = useToast();
@@ -198,6 +205,186 @@ export default function DailyExpensesPage() {
     setShowForm(true);
   };
 
+  // Excel export — respects the current filters (branch, type, search, date range).
+  // Sheets:
+  //   • All Expenses — flat list
+  //   • By Category — type rollups grouped under their category
+  //   • By Branch — type rollups grouped per branch
+  //   • One sheet per category (e.g. "Fixed", "Operations") — full detail rows for that group
+  const [exporting, setExporting] = useState(false);
+  const exportToExcel = async () => {
+    if (filtered.length === 0) return;
+    setExporting(true);
+    try {
+      const ExcelJS = await loadExcelJS();
+      const wb = new ExcelJS.Workbook();
+
+      const typeCategory = new Map(expenseTypes.map(t => [t.name, (t.category || "other").toLowerCase()]));
+      const catOf = (e) => typeCategory.get(e.expense_type) || "other";
+      const rangeLabel = `${dateFrom} → ${dateTo}`;
+
+      const hdrFill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF065F46" } };
+      const hdrFont = { bold: true, color: { argb: "FFFFFFFF" }, size: 11 };
+      const totalFont = { bold: true, size: 12 };
+      const totalBorder = { top: { style: "double" } };
+
+      const writeHeader = (ws, headers) => {
+        const row = ws.addRow(headers);
+        row.eachCell(cell => { cell.font = hdrFont; cell.fill = hdrFill; cell.alignment = { horizontal: "center" }; });
+        ws.columns = headers.map(() => ({ width: 16 }));
+      };
+
+      const writeTotalsRow = (ws, label, sumColLetters, lastDataRow) => {
+        const cells = [label, ...Array(sumColLetters.length).fill(null)];
+        const row = ws.addRow(cells);
+        sumColLetters.forEach((col, i) => {
+          const c = row.getCell(i + 2);
+          c.value = { formula: `SUM(${col}2:${col}${lastDataRow})` };
+          c.numFmt = "#,##0";
+        });
+        row.eachCell(c => { c.font = totalFont; c.border = totalBorder; });
+      };
+
+      // ── 1. All Expenses (flat) ──
+      const flatWs = wb.addWorksheet("All Expenses");
+      writeHeader(flatWs, ["Date","Branch","Category","Type","Amount","Note","By"]);
+      const sortedFlat = [...filtered].sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+      sortedFlat.forEach(e => {
+        const branchName = e.branch_name || branchesById.get(e.branch_id)?.name || "?";
+        const r = flatWs.addRow([e.date, branchName, catOf(e), e.expense_type, Number(e.amount) || 0, e.note || "", e.created_by || ""]);
+        r.getCell(5).numFmt = "#,##0";
+      });
+      if (sortedFlat.length > 0) writeTotalsRow(flatWs, "TOTAL", ["E"], sortedFlat.length + 1);
+
+      // ── 2. By Category — collapse per (category, type) ──
+      const byCat = new Map(); // category → Map(type → { amt, count })
+      filtered.forEach(e => {
+        const cat = catOf(e);
+        if (!byCat.has(cat)) byCat.set(cat, new Map());
+        const typeMap = byCat.get(cat);
+        const prev = typeMap.get(e.expense_type) || { amt: 0, count: 0 };
+        typeMap.set(e.expense_type, { amt: prev.amt + (Number(e.amount) || 0), count: prev.count + 1 });
+      });
+      const catWs = wb.addWorksheet("By Category");
+      writeHeader(catWs, ["Category","Type","Entries","Amount"]);
+      let catGrand = 0;
+      let lastCatRow = 1;
+      [...byCat.keys()].sort().forEach(cat => {
+        const typeMap = byCat.get(cat);
+        let catSubtotal = 0;
+        [...typeMap.entries()].sort((a, b) => b[1].amt - a[1].amt).forEach(([type, v]) => {
+          const r = catWs.addRow([cat, type, v.count, v.amt]);
+          r.getCell(4).numFmt = "#,##0";
+          catSubtotal += v.amt;
+          lastCatRow += 1;
+        });
+        catGrand += catSubtotal;
+        // Subtotal row per category
+        const sub = catWs.addRow([`${cat.toUpperCase()} SUBTOTAL`, "", "", catSubtotal]);
+        sub.eachCell(c => { c.font = { bold: true, color: { argb: "FF22D3EE" } }; });
+        sub.getCell(4).numFmt = "#,##0";
+        lastCatRow += 1;
+        catWs.addRow([]);
+        lastCatRow += 1;
+      });
+      if (catGrand > 0) {
+        const g = catWs.addRow(["GRAND TOTAL", "", "", catGrand]);
+        g.eachCell(c => { c.font = totalFont; c.border = totalBorder; });
+        g.getCell(4).numFmt = "#,##0";
+      }
+
+      // ── 3. By Branch — same idea, branch × type rollup ──
+      const byBranch = new Map();
+      filtered.forEach(e => {
+        const bn = e.branch_name || branchesById.get(e.branch_id)?.name || "?";
+        if (!byBranch.has(bn)) byBranch.set(bn, new Map());
+        const typeMap = byBranch.get(bn);
+        const prev = typeMap.get(e.expense_type) || { amt: 0, count: 0 };
+        typeMap.set(e.expense_type, { amt: prev.amt + (Number(e.amount) || 0), count: prev.count + 1 });
+      });
+      const brWs = wb.addWorksheet("By Branch");
+      writeHeader(brWs, ["Branch","Type","Entries","Amount"]);
+      let brGrand = 0;
+      [...byBranch.keys()].sort().forEach(bn => {
+        const typeMap = byBranch.get(bn);
+        let brSubtotal = 0;
+        [...typeMap.entries()].sort((a, b) => b[1].amt - a[1].amt).forEach(([type, v]) => {
+          const r = brWs.addRow([bn, type, v.count, v.amt]);
+          r.getCell(4).numFmt = "#,##0";
+          brSubtotal += v.amt;
+        });
+        brGrand += brSubtotal;
+        const sub = brWs.addRow([`${bn} SUBTOTAL`, "", "", brSubtotal]);
+        sub.eachCell(c => { c.font = { bold: true, color: { argb: "FF22D3EE" } }; });
+        sub.getCell(4).numFmt = "#,##0";
+        brWs.addRow([]);
+      });
+      if (brGrand > 0) {
+        const g = brWs.addRow(["GRAND TOTAL", "", "", brGrand]);
+        g.eachCell(c => { c.font = totalFont; c.border = totalBorder; });
+        g.getCell(4).numFmt = "#,##0";
+      }
+
+      // ── 4. One sheet per category with the full detail rows for that group ──
+      [...byCat.keys()].sort().forEach(cat => {
+        const safeName = cat.slice(0, 31).replace(/[\\\/\*\[\]\?:]/g, "_") || "other";
+        const ws = wb.addWorksheet(safeName.charAt(0).toUpperCase() + safeName.slice(1));
+        writeHeader(ws, ["Date","Branch","Type","Amount","Note","By"]);
+        const rows = filtered
+          .filter(e => catOf(e) === cat)
+          .sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+        rows.forEach(e => {
+          const bn = e.branch_name || branchesById.get(e.branch_id)?.name || "?";
+          const r = ws.addRow([e.date, bn, e.expense_type, Number(e.amount) || 0, e.note || "", e.created_by || ""]);
+          r.getCell(4).numFmt = "#,##0";
+        });
+        if (rows.length > 0) writeTotalsRow(ws, "TOTAL", ["D"], rows.length + 1);
+      });
+
+      // ── Summary title sheet up front ──
+      const summary = wb.addWorksheet("Summary", { properties: { tabColor: { argb: "FF22D3EE" } } });
+      wb.worksheets.unshift(wb.worksheets.pop()); // move the new sheet to front
+      summary.getColumn(1).width = 30;
+      summary.getColumn(2).width = 24;
+      summary.getCell("A1").value = "V-CUT SALON — DAILY EXPENSES EXPORT";
+      summary.getCell("A1").font = { bold: true, size: 14, color: { argb: "FF065F46" } };
+      summary.getCell("A3").value = "Date Range"; summary.getCell("B3").value = rangeLabel;
+      summary.getCell("A4").value = "Branch Filter"; summary.getCell("B4").value = branchFilter ? (branchesById.get(branchFilter)?.name || branchFilter) : "All";
+      summary.getCell("A5").value = "Type Filter"; summary.getCell("B5").value = typeFilter || "All";
+      summary.getCell("A6").value = "Search"; summary.getCell("B6").value = searchText || "—";
+      summary.getCell("A8").value = "Entries"; summary.getCell("B8").value = filtered.length;
+      summary.getCell("A9").value = "Total Amount"; summary.getCell("B9").value = totalAmount;
+      summary.getCell("B9").numFmt = "#,##0";
+      summary.getCell("A11").value = "Sheet Guide"; summary.getCell("A11").font = { bold: true };
+      [
+        ["All Expenses", "Flat list, sorted newest-first with grand total."],
+        ["By Category", "Type rollup per category with per-category subtotals."],
+        ["By Branch", "Type rollup per branch with per-branch subtotals."],
+        ...[...byCat.keys()].sort().map(c => [c.charAt(0).toUpperCase() + c.slice(1), `Full detail rows for the ${c} category.`]),
+      ].forEach(([k, v], i) => {
+        summary.getCell(`A${12 + i}`).value = `  • ${k}`;
+        summary.getCell(`B${12 + i}`).value = v;
+      });
+
+      const now = new Date();
+      const ts = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}_${String(now.getHours()).padStart(2, "0")}${String(now.getMinutes()).padStart(2, "0")}`;
+      const safeUser = (currentUser?.name || "user").replace(/[^a-zA-Z0-9]/g, "_");
+      const fileName = `${safeUser}_daily_expenses_${dateFrom}_to_${dateTo}_${ts}.xlsx`;
+      const buf = await wb.xlsx.writeBuffer();
+      const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = fileName;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+      toast({ title: "Exported", message: `${filtered.length} expenses saved as ${fileName}.`, type: "success" });
+    } catch (err) {
+      confirm({ title: "Export Error", message: err.message || "Unknown error", confirmText: "OK", type: "danger", onConfirm: () => {} });
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const addNewType = async () => {
     const name = newTypeName.trim();
     if (!name) return;
@@ -223,8 +410,13 @@ export default function DailyExpensesPage() {
           <div style={{ fontSize: 11, fontWeight: 800, color: "var(--accent)", textTransform: "uppercase", letterSpacing: 2 }}>Operations</div>
           <div style={{ fontSize: 24, fontWeight: 800, color: "var(--gold)", letterSpacing: 1 }}>Daily Expenses</div>
         </div>
-        {canEdit && (
-          <div style={{ display: "flex", gap: 8 }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button onClick={exportToExcel} disabled={exporting || filtered.length === 0}
+            title={filtered.length === 0 ? "No rows to export" : "Download the current view as a multi-sheet Excel workbook"}
+            style={{ padding: "10px 16px", borderRadius: 10, background: filtered.length === 0 ? "var(--bg4)" : "var(--bg3)", border: `1px solid ${filtered.length === 0 ? "var(--border)" : "rgba(74,222,128,0.4)"}`, color: filtered.length === 0 ? "var(--text3)" : "var(--green)", fontWeight: 800, fontSize: 11, cursor: (exporting || filtered.length === 0) ? "not-allowed" : "pointer", textTransform: "uppercase", letterSpacing: 0.5, display: "inline-flex", alignItems: "center", gap: 6, opacity: (exporting || filtered.length === 0) ? 0.55 : 1 }}>
+            <Icon name="save" size={12} /> {exporting ? "Exporting…" : "Export"}
+          </button>
+          {canEdit && (<>
             <button onClick={() => setShowNewType(true)}
               style={{ padding: "10px 16px", borderRadius: 10, background: "var(--bg3)", border: "1px solid var(--border2)", color: "var(--accent)", fontWeight: 800, fontSize: 11, cursor: "pointer", textTransform: "uppercase", letterSpacing: 0.5, display: "inline-flex", alignItems: "center", gap: 6 }}>
               <Icon name="settings" size={12} /> Manage Types
@@ -233,8 +425,8 @@ export default function DailyExpensesPage() {
               style={{ padding: "10px 18px", borderRadius: 10, background: "linear-gradient(135deg,var(--accent),var(--gold2))", color: "#000", border: "none", fontWeight: 800, fontSize: 11, cursor: "pointer", textTransform: "uppercase", letterSpacing: 0.5, display: "inline-flex", alignItems: "center", gap: 6 }}>
               <Icon name="plus" size={14} /> Add Expense
             </button>
-          </div>
-        )}
+          </>)}
+        </div>
       </div>
 
       {/* Filters */}
