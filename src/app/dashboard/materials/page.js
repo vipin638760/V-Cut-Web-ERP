@@ -2608,7 +2608,6 @@ export default function MaterialsPage() {
                     onChange={(v) => setTransferModal(t => ({ ...t, branch_id: v }))}
                     branches={branches}
                     placeholder="Select branch..."
-                    allowEmpty={false}
                     minWidth={0}
                   />
                 </div>
