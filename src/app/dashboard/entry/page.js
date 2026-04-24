@@ -748,8 +748,10 @@ export default function EntryPage() {
     if (visibleEntries.length === 0) return;
     const ExcelJS = await loadExcelJS();
     const wb = new ExcelJS.Workbook();
+
+    // Summary sheet — one row per entry with totals.
     const ws = wb.addWorksheet("Entries");
-    const headers = ["Date","Branch","Online","Cash","GST","Mat Sale","Total Billing","Incentive","Tips","Staff T.Inc","Other Out","Petrol","Cash in Hand"];
+    const headers = ["Date","Branch","Online","Cash","GST","Mat Sale","Total Billing","Incentive","Tips","Staff T.Inc","Loan Billing","Shared Svc ₹","Other Out","Petrol","Mat Expense","Cash in Hand"];
     const hdrRow = ws.addRow(headers);
     hdrRow.eachCell(cell => {
       cell.font = { bold: true, color: { argb: "FFFFFFFF" }, size: 11 };
@@ -762,18 +764,78 @@ export default function EntryPage() {
       const b = branchesById.get(e.branch_id);
       const agg = sumStaffBilling(e.staff_billing);
       const cih = e.cash_in_hand !== undefined ? e.cash_in_hand : computeCashInHand(e, { branch: b, staffList: staff });
-      const row = ws.addRow([e.date, b?.name||"?", e.online||0, e.cash||0, e.total_gst||0, agg.material, agg.billing, agg.incentive, agg.tips, agg.staffTotalInc, e.others||0, e.petrol||0, cih]);
+      const loanBilling = (e.staff_billing || []).filter(sb => sb.loan_flag).reduce((s, sb) => s + (Number(sb.billing) || 0), 0);
+      const sharedTotal = (e.shared_services || []).reduce((s, ss) => s + (Number(ss.amount) || 0), 0);
+      const row = ws.addRow([e.date, b?.name||"?", e.online||0, e.cash||0, e.total_gst||0, agg.material, agg.billing, agg.incentive, agg.tips, agg.staffTotalInc, loanBilling, sharedTotal, e.others||0, e.petrol||0, e.mat_expense||0, cih]);
       row.eachCell((cell, colNum) => { if (colNum >= 3) cell.numFmt = "#,##0"; });
     });
 
     // Totals row
     const lastRow = visibleEntries.length + 1;
-    const totRow = ws.addRow(["TOTAL", "", ...Array(11).fill(0)]);
-    for (let c = 3; c <= 13; c++) {
-      totRow.getCell(c).value = { formula: `SUM(${String.fromCharCode(64+c)}2:${String.fromCharCode(64+c)}${lastRow})` };
+    const totRow = ws.addRow(["TOTAL", "", ...Array(headers.length - 2).fill(0)]);
+    for (let c = 3; c <= headers.length; c++) {
+      const colLetter = c <= 26 ? String.fromCharCode(64 + c) : `A${String.fromCharCode(64 + c - 26)}`;
+      totRow.getCell(c).value = { formula: `SUM(${colLetter}2:${colLetter}${lastRow})` };
       totRow.getCell(c).numFmt = "#,##0";
     }
     totRow.eachCell(cell => { cell.font = { bold: true, size: 12 }; cell.border = { top: { style: "double" } }; });
+
+    // Detail sheet — one row per staff_billing record so loan_flag / per-staff
+    // contributions are all in one auditable place.
+    const detailWs = wb.addWorksheet("Staff Detail");
+    const detHdrs = ["Date","Branch","Staff","Home Branch","Loan?","Billing","Mat Sale","Incentive","Mat Inc","Tips","Staff T.Inc","Staff T.Sale"];
+    const detHdr = detailWs.addRow(detHdrs);
+    detHdr.eachCell(cell => {
+      cell.font = { bold: true, color: { argb: "FFFFFFFF" }, size: 10 };
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF065F46" } };
+      cell.alignment = { horizontal: "center" };
+    });
+    detailWs.columns = detHdrs.map(() => ({ width: 14 }));
+    visibleEntries.forEach(e => {
+      const b = branchesById.get(e.branch_id);
+      (e.staff_billing || []).forEach(sb => {
+        const homeBranch = branchesById.get(sb.home_branch_id || "")?.name || (sb.loan_flag ? "—" : (b?.name || "?"));
+        const r = detailWs.addRow([
+          e.date,
+          b?.name || "?",
+          sb.staff_name || staff.find(s => s.id === sb.staff_id)?.name || "—",
+          homeBranch,
+          sb.loan_flag ? "LOAN" : "",
+          Number(sb.billing) || 0,
+          Number(sb.material) || 0,
+          Number(sb.incentive) || 0,
+          Number(sb.mat_incentive) || 0,
+          Number(sb.tips) || 0,
+          Number(sb.staff_total_inc) || 0,
+          (Number(sb.billing) || 0) + (Number(sb.material) || 0) + (Number(sb.tips) || 0),
+        ]);
+        r.eachCell((cell, colNum) => { if (colNum >= 6) cell.numFmt = "#,##0"; });
+        if (sb.loan_flag) r.getCell(5).font = { color: { argb: "FFFB923C" }, bold: true };
+      });
+    });
+
+    // Shared Services sheet — only written if any entry has shared_services.
+    const anyShared = visibleEntries.some(e => (e.shared_services || []).length > 0);
+    if (anyShared) {
+      const shWs = wb.addWorksheet("Shared Services");
+      const shHdrs = ["Date","Branch","Service","Amount","Sale Staff","Incentive Staff"];
+      const shHdr = shWs.addRow(shHdrs);
+      shHdr.eachCell(cell => {
+        cell.font = { bold: true, color: { argb: "FFFFFFFF" }, size: 10 };
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF065F46" } };
+        cell.alignment = { horizontal: "center" };
+      });
+      shWs.columns = [{ width: 12 }, { width: 18 }, { width: 26 }, { width: 12 }, { width: 20 }, { width: 40 }];
+      visibleEntries.forEach(e => {
+        const b = branchesById.get(e.branch_id);
+        (e.shared_services || []).forEach(ss => {
+          const saleName = staff.find(s => s.id === ss.sale_staff_id)?.name || "—";
+          const incNames = (ss.incentive_staff_ids || []).map(id => staff.find(s => s.id === id)?.name || "—").join(", ");
+          const r = shWs.addRow([e.date, b?.name || "?", ss.service_name, Number(ss.amount) || 0, saleName, incNames]);
+          r.getCell(4).numFmt = "#,##0";
+        });
+      });
+    }
 
     const now = new Date();
     const ts = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}_${String(now.getHours()).padStart(2,'0')}${String(now.getMinutes()).padStart(2,'0')}`;
@@ -782,7 +844,7 @@ export default function EntryPage() {
 
     const buf = await wb.xlsx.writeBuffer();
     const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
-    await saveFileWithPicker(blob, fileName, "Exported", `${visibleEntries.length} records saved.`);
+    await saveFileWithPicker(blob, fileName, "Exported", `${visibleEntries.length} entries saved (Summary + Staff Detail${anyShared ? " + Shared Services" : ""}).`);
   };
 
   const downloadTemplate = async () => {
@@ -929,17 +991,71 @@ export default function EntryPage() {
         cH.value = { formula: `B${r}+C${r}+F${r}` }; cH.numFmt = numFmt; cH.fill = calcStyle.fill; cH.font = calcStyle.font;
       }
 
-      // Totals row
-      const totRow = extraStart + 3;
+      // ── Loan / Borrowed Staff divider + 3 rows (uses full-staff dropdown so
+      // anyone from another branch can be typed in; parser tags loan_flag). ──
+      const loanHdrRow = extraStart + 3;
+      ws.mergeCells(`A${loanHdrRow}:H${loanHdrRow}`);
+      const loanHdr = ws.getCell(`A${loanHdrRow}`);
+      loanHdr.value = "LOAN / BORROWED STAFF (from other branches)";
+      loanHdr.font = { bold: true, color: { argb: "FFFB923C" }, italic: true, size: 10 };
+      loanHdr.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFF7ED" } };
+
+      const loanStart = loanHdrRow + 1;
+      for (let x = 0; x < 3; x++) {
+        const r = loanStart + x;
+        const cA = ws.getCell(`A${r}`), cB = ws.getCell(`B${r}`), cC = ws.getCell(`C${r}`);
+        const cD = ws.getCell(`D${r}`), cE = ws.getCell(`E${r}`), cF = ws.getCell(`F${r}`);
+        const cG = ws.getCell(`G${r}`), cH = ws.getCell(`H${r}`);
+        cA.dataValidation = staffDropdownValidation; unlock(cA);
+        cB.numFmt = numFmt; unlock(cB);
+        cC.numFmt = numFmt; unlock(cC);
+        cD.value = { formula: `ROUND(C${r}*5/100,0)` }; cD.numFmt = numFmt; cD.fill = calcOrangeStyle.fill; cD.font = calcOrangeStyle.font;
+        cE.value = { formula: `ROUND(B${r}*${incPct}/100,0)` }; cE.numFmt = numFmt; cE.fill = calcRedStyle.fill; cE.font = calcRedStyle.font;
+        cF.numFmt = numFmt; unlock(cF);
+        cG.value = { formula: `E${r}+D${r}+F${r}` }; cG.numFmt = numFmt; cG.fill = calcStyle.fill; cG.font = calcStyle.font;
+        cH.value = { formula: `B${r}+C${r}+F${r}` }; cH.numFmt = numFmt; cH.fill = calcStyle.fill; cH.font = calcStyle.font;
+      }
+
+      // Totals row — sums home-branch rows + extra + loan rows (all in the same range).
+      const totRow = loanStart + 3;
       ws.getCell(`A${totRow}`).value = "TOTALS";
       ws.getCell(`A${totRow}`).font = { bold: true, color: { argb: "FF22D3EE" } };
       const totFont = { bold: true, color: { argb: "FF22D3EE" } };
       const totBorder = { top: { style: "double", color: { argb: "FF22D3EE" } } };
       ["B","C","D","E","F","G","H"].forEach(col => {
         const c = ws.getCell(`${col}${totRow}`);
-        c.value = { formula: `SUM(${col}${staffStartRow}:${col}${totRow - 1})` };
+        // Excludes the loanHdrRow since it's a merged text cell
+        c.value = { formula: `SUM(${col}${staffStartRow}:${col}${totRow - 1})-IFERROR(${col}${loanHdrRow},0)` };
         c.numFmt = numFmt; c.font = totFont; c.border = totBorder;
       });
+
+      // ── Shared Services (multi-staff billing split) — separate section. ──
+      const sharedHdrRow = totRow + 2;
+      ws.mergeCells(`A${sharedHdrRow}:F${sharedHdrRow}`);
+      const sharedHdr = ws.getCell(`A${sharedHdrRow}`);
+      sharedHdr.value = "SHARED SERVICES (split billing across multiple staff)";
+      sharedHdr.font = sectionStyle.font; sharedHdr.fill = sectionStyle.fill;
+
+      const sharedColsRow = sharedHdrRow + 1;
+      const sharedCols = ["Service Name", "Amount (₹)", "Sale Staff", "Incentive Staff 1", "Incentive Staff 2", "Incentive Staff 3"];
+      sharedCols.forEach((h, i) => {
+        const cell = ws.getRow(sharedColsRow).getCell(i + 1);
+        cell.value = h;
+        cell.font = hdrStyle.font; cell.fill = hdrStyle.fill; cell.alignment = hdrStyle.alignment;
+      });
+      const sharedStart = sharedColsRow + 1;
+      for (let x = 0; x < 3; x++) {
+        const r = sharedStart + x;
+        const cA = ws.getCell(`A${r}`), cB = ws.getCell(`B${r}`);
+        const cC = ws.getCell(`C${r}`), cD = ws.getCell(`D${r}`);
+        const cE = ws.getCell(`E${r}`), cF = ws.getCell(`F${r}`);
+        unlock(cA);
+        cB.numFmt = numFmt; unlock(cB);
+        cC.dataValidation = staffDropdownValidation; unlock(cC);
+        cD.dataValidation = staffDropdownValidation; unlock(cD);
+        cE.dataValidation = staffDropdownValidation; unlock(cE);
+        cF.dataValidation = staffDropdownValidation; unlock(cF);
+      }
 
       // Online Income = Total Staff Billing - Cash (auto: what's left after cash is online)
       ws.getCell(`C${dataRow}`).value = { formula: `MAX(0,B${totRow}-D${dataRow})` };
@@ -964,7 +1080,13 @@ export default function EntryPage() {
       "4. Green/Red/Orange columns are AUTO-CALCULATED — do NOT edit them.",
       "5. Branch name, GST %, and staff names are pre-filled and locked.",
       "6. Use the dropdown in extra staff rows to add more employees.",
-      "7. Save the file and upload it back using the Upload button.",
+      "7. LOAN / BORROWED STAFF section (orange header) — pick any staff from the",
+      "   dropdown; anyone whose home branch isn't this sheet's branch will be",
+      "   recorded with loan_flag = true (same as clicking '+ Loan Resource' in the form).",
+      "8. SHARED SERVICES section — enter service name + amount, pick the Sale Staff",
+      "   and up to three Incentive Staff to split the incentive across.",
+      "9. Other Expenses + Petrol on the header row cover daily incidental expenses.",
+      "10. Save the file and upload it back using the Upload button.",
       "",
       "BRANCHES:", ...branches.map(b => `  • ${b.name}`),
       "",
@@ -1134,20 +1256,69 @@ export default function EntryPage() {
             const petrol = Number(ws.getCell("I4").value) || 0;
             // Skip blank sheets (closed shop — no date entered)
             if (!date) return;
-            // Read staff rows (row 8+, until TOTALS or empty)
+            // Resolve the sheet's branch so loan-staff detection can compare home_branch_id.
+            const sheetBranch = branches.find(b => b.name.toLowerCase() === branchName.toLowerCase() || b.name.toLowerCase().endsWith(ws.name.toLowerCase()));
+            // Walk staff rows (row 8+) including the Loan/Borrowed section until we hit TOTALS.
+            // Anyone whose staff.branch_id differs from the sheet's branch is tagged loan_flag=true.
             const staffBilling = [];
-            for (let r = 8; r <= 30; r++) {
-              const name = String(ws.getCell(`A${r}`).value || "").trim();
-              if (!name || name === "TOTALS") break;
+            const sharedServices = [];
+            let totalsRow = -1;
+            for (let r = 8; r <= 50; r++) {
+              const cellVal = String(ws.getCell(`A${r}`).value || "").trim();
+              if (cellVal === "TOTALS") { totalsRow = r; break; }
+              // Loan section header is a merged informational row — skip.
+              if (/^LOAN\s*\//i.test(cellVal)) continue;
+              if (!cellVal) continue;
+              const name = cellVal;
               const billing = Number(ws.getCell(`B${r}`).value) || 0;
               const material = Number(ws.getCell(`C${r}`).value) || 0;
               const tips = Number(ws.getCell(`F${r}`).value) || 0;
-              // Skip staff on holiday (all zeros / blank)
               if (billing === 0 && material === 0 && tips === 0) continue;
               const s = staff.find(x => x.name.toLowerCase() === name.toLowerCase());
-              if (s) staffBilling.push({ staff_id: s.id, staff_name: name, billing, material, tips, incentive: Math.round(billing * 0.1), mat_incentive: Math.round(material * 0.05), staff_total_inc: Math.round(billing * 0.1) + Math.round(material * 0.05) + tips });
+              if (!s) continue;
+              const isLoan = sheetBranch && s.branch_id && s.branch_id !== sheetBranch.id;
+              staffBilling.push({
+                staff_id: s.id,
+                staff_name: name,
+                billing,
+                material,
+                tips,
+                incentive: Math.round(billing * 0.1),
+                mat_incentive: Math.round(material * 0.05),
+                staff_total_inc: Math.round(billing * 0.1) + Math.round(material * 0.05) + tips,
+                ...(isLoan ? { loan_flag: true, home_branch_id: s.branch_id } : { home_branch_id: sheetBranch?.id || s.branch_id, loan_flag: false }),
+              });
             }
-            dataRows.push({ rowNum: sheetId, date, branch: branchName, online, cash, matExp, others, petrol, staffBilling, _isTemplate: true });
+            // SHARED SERVICES section lives ~2 rows below TOTALS — header row, cols row, then 3 data rows.
+            if (totalsRow > 0) {
+              const sharedHdrRow = totalsRow + 2;
+              const sharedHdrVal = String(ws.getCell(`A${sharedHdrRow}`).value || "");
+              if (/SHARED\s+SERVICES/i.test(sharedHdrVal)) {
+                const dataStart = sharedHdrRow + 2; // skip label + columns
+                for (let r = dataStart; r < dataStart + 8; r++) {
+                  const svcName = String(ws.getCell(`A${r}`).value || "").trim();
+                  const amt = Number(ws.getCell(`B${r}`).value) || 0;
+                  const saleStaffName = String(ws.getCell(`C${r}`).value || "").trim();
+                  if (!svcName || !amt || !saleStaffName) continue;
+                  const saleStaff = staff.find(x => x.name.toLowerCase() === saleStaffName.toLowerCase());
+                  if (!saleStaff) continue;
+                  const incStaffIds = ["D", "E", "F"].map(col => {
+                    const n = String(ws.getCell(`${col}${r}`).value || "").trim();
+                    return staff.find(x => x.name.toLowerCase() === n.toLowerCase())?.id;
+                  }).filter(Boolean);
+                  // Sale staff always gets incentive too (matches the form default).
+                  if (!incStaffIds.includes(saleStaff.id)) incStaffIds.unshift(saleStaff.id);
+                  sharedServices.push({
+                    id: `ss-${sheetId}-${r}`,
+                    service_name: svcName,
+                    amount: amt,
+                    sale_staff_id: saleStaff.id,
+                    incentive_staff_ids: incStaffIds,
+                  });
+                }
+              }
+            }
+            dataRows.push({ rowNum: sheetId, date, branch: branchName, online, cash, matExp, others, petrol, staffBilling, sharedServices, _isTemplate: true });
           } else {
             // Flat format (single sheet) — one row per staff, group by date+branch
             const hdrs = [];
@@ -1231,7 +1402,7 @@ export default function EntryPage() {
           if (!branch) errors.push(`Branch "${branchName}" not found`);
           const duplicate = entries.find(ex => ex.date === date && ex.branch_id === branch?.id);
           if (duplicate) errors.push("Duplicate: entry exists for this date & branch");
-          return { row: r.rowNum, date, branchName, branch, online: r.online, cash: r.cash, gst: 0, matSale: 0, billing: r.online + r.cash, incentive: 0, tips: 0, others: r.others, petrol: r.petrol, matExp: r.matExp, staffBilling: r.staffBilling, errors, valid: errors.length === 0 };
+          return { row: r.rowNum, date, branchName, branch, online: r.online, cash: r.cash, gst: 0, matSale: 0, billing: r.online + r.cash, incentive: 0, tips: 0, others: r.others, petrol: r.petrol, matExp: r.matExp, staffBilling: r.staffBilling, sharedServices: r.sharedServices || [], errors, valid: errors.length === 0 };
         }
         // Flat CSV/single-sheet format
         let rawDate = getVal(r, "date");
@@ -1288,6 +1459,7 @@ export default function EntryPage() {
           global_gst_pct: gstR,
           cash_in_hand: cih,
           staff_billing: r.staffBilling || [],
+          shared_services: r.sharedServices || [],
           uploaded: true, uploaded_at: new Date().toISOString(),
         });
       }
