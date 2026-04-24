@@ -1608,23 +1608,75 @@ export default function EntryPage() {
 
           {selBranch && (
             <>
-              {/* Unattributed banner — how much of (Online + Cash) isn't
-                  covered by any staff_billing row. Mirrors the dashboard's
-                  "Unattributed service pay" reconciliation so a gap on the
-                  admin view is obvious here at source. */}
+              {/* Unattributed + DB drift banner.
+                  Top line: form-live gap (Online + Cash − Σ staff_billing).
+                  Bottom line (only when editing): what the DB currently stores
+                  vs what the form would save — with a one-click "Sync to form"
+                  that rewrites just cash / cash_in_hand so the dashboard's
+                  reconciliation reflects the current staff_billing rows
+                  without having to wade through a full Update Entry. */}
               {(() => {
                 const cashOnline = Number(onlineInc || 0) + Number(totalCash || 0);
                 const unatt = Math.max(0, Math.round(cashOnline - totalBilling));
-                if (unatt === 0) return null;
+                const dbEntry = editId ? entries.find(e => e.id === editId) : null;
+                const dbCash = Number(dbEntry?.cash || 0);
+                const dbBillingSum = (dbEntry?.staff_billing || []).reduce((s, sb) => s + (Number(sb.billing) || 0), 0);
+                const dbUnatt = dbEntry ? Math.max(0, Math.round((Number(dbEntry.online) || 0) + dbCash - dbBillingSum)) : 0;
+                const drift = dbEntry ? Math.round(dbCash - totalCash) : 0;
+                const driftPresent = dbEntry && drift !== 0;
+                if (unatt === 0 && !driftPresent) return null;
+
+                const syncToForm = async () => {
+                  if (!dbEntry) return;
+                  const nowISO = new Date().toISOString();
+                  const activity = Array.isArray(dbEntry.activity_log) ? [...dbEntry.activity_log] : [];
+                  activity.push({
+                    action: "Sync cash to form",
+                    user: currentUser?.name || currentUser?.id || "admin",
+                    time: nowISO,
+                    note: `cash ${INR(dbCash)} → ${INR(totalCash)} · cash_in_hand ${INR(Number(dbEntry.cash_in_hand) || 0)} → ${INR(cashInHand)}`,
+                  });
+                  try {
+                    await updateDoc(doc(db, "entries", dbEntry.id), {
+                      cash: totalCash,
+                      cash_in_hand: cashInHand,
+                      activity_log: activity,
+                      updated_at: nowISO,
+                    });
+                    toast({ title: "Synced", message: `DB cash rewritten to match form (${INR(dbCash)} → ${INR(totalCash)}).`, type: "success" });
+                  } catch (err) {
+                    confirm({ title: "Sync Failed", message: err.message || "Unknown error", confirmText: "OK", type: "danger", onConfirm: () => {} });
+                  }
+                };
+
                 return (
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "10px 14px", marginBottom: 12, borderRadius: 10, background: "rgba(251,146,60,0.08)", border: "1px solid rgba(251,146,60,0.4)", color: "var(--orange)", fontSize: 12 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                      <span style={{ fontSize: 11, fontWeight: 900, textTransform: "uppercase", letterSpacing: 1.2, padding: "2px 8px", borderRadius: 999, background: "rgba(251,146,60,0.15)", border: "1px solid rgba(251,146,60,0.35)" }}>Unattributed</span>
-                      <span><strong>{INR(unatt)}</strong> of (Online {INR(Number(onlineInc) || 0)} + Cash {INR(totalCash)}) is not in any staff billing row.</span>
-                    </div>
-                    <span style={{ fontSize: 10, color: "var(--text3)", fontWeight: 600 }}>
-                      Staff billing sum: {INR(totalBilling)}
-                    </span>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "10px 14px", marginBottom: 12, borderRadius: 10, background: "rgba(251,146,60,0.08)", border: "1px solid rgba(251,146,60,0.4)", color: "var(--orange)", fontSize: 12 }}>
+                    {unatt > 0 && (
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                          <span style={{ fontSize: 11, fontWeight: 900, textTransform: "uppercase", letterSpacing: 1.2, padding: "2px 8px", borderRadius: 999, background: "rgba(251,146,60,0.15)", border: "1px solid rgba(251,146,60,0.35)" }}>Unattributed</span>
+                          <span><strong>{INR(unatt)}</strong> of (Online {INR(Number(onlineInc) || 0)} + Cash {INR(totalCash)}) is not in any staff billing row.</span>
+                        </div>
+                        <span style={{ fontSize: 10, color: "var(--text3)", fontWeight: 600 }}>
+                          Staff billing sum: {INR(totalBilling)}
+                        </span>
+                      </div>
+                    )}
+                    {driftPresent && (
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", paddingTop: unatt > 0 ? 8 : 0, borderTop: unatt > 0 ? "1px dashed rgba(251,146,60,0.3)" : "none" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                          <span style={{ fontSize: 11, fontWeight: 900, textTransform: "uppercase", letterSpacing: 1.2, padding: "2px 8px", borderRadius: 999, background: "rgba(248,113,113,0.18)", border: "1px solid rgba(248,113,113,0.4)", color: "var(--red)" }}>DB Drift</span>
+                          <span style={{ color: "var(--text2)" }}>
+                            Saved <strong style={{ color: "var(--red)" }}>cash {INR(dbCash)}</strong> · form derives <strong style={{ color: "var(--green)" }}>{INR(totalCash)}</strong>
+                            {dbUnatt !== unatt && <span style={{ marginLeft: 8, fontSize: 10, color: "var(--text3)" }}>(dashboard reports {INR(dbUnatt)} unattributed)</span>}
+                          </span>
+                        </div>
+                        <button type="button" onClick={syncToForm}
+                          style={{ padding: "6px 14px", borderRadius: 8, background: "linear-gradient(135deg, #22d3ee, #a5b4fc)", color: "#000", border: "none", fontWeight: 800, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.8, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 }}>
+                          <Icon name="save" size={12} /> Sync DB → Form ({drift > 0 ? `-${INR(drift)}` : `+${INR(-drift)}`})
+                        </button>
+                      </div>
+                    )}
                   </div>
                 );
               })()}
