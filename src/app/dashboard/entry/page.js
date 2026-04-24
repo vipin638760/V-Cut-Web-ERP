@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState, useRef, useMemo, startTransition } from "react";
-import { collection, onSnapshot, query, orderBy, where, addDoc, deleteDoc, doc, updateDoc, getDocs } from "firebase/firestore";
+import { collection, onSnapshot, query, orderBy, where, addDoc, deleteDoc, doc, updateDoc, getDoc, getDocs } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
 import { INR, computeCashInHand } from "@/lib/calculations";
@@ -240,6 +240,31 @@ export default function EntryPage() {
   useEffect(() => {
     if (!editId) setGstPct(globalGst);
   }, [globalGst, editId]);
+
+  // Deep-link from the Dashboard reconciliation drill-down:
+  // /dashboard/entry?edit=<id>&year=<yyyy>&month=<m>. Using a direct getDoc
+  // so this works even when the target entry's date sits outside the
+  // onSnapshot query's filter window — otherwise the snapshot-based handler
+  // below would skip the row and the page would open "empty".
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const editId = params.get("edit");
+    const yr = params.get("year");
+    const mo = params.get("month");
+    if (!editId) return;
+    if (yr) setFilterYear(Number(yr));
+    if (mo) setFilterMonth(Number(mo));
+    if (!db) return;
+    (async () => {
+      try {
+        const snap = await getDoc(doc(db, "entries", editId));
+        if (snap.exists()) handleEdit({ id: snap.id, ...snap.data() });
+      } catch { /* snapshot handler will retry once the filter resubscribes */ }
+      // Clean the URL so a manual refresh doesn't re-trigger the edit.
+      window.history.replaceState({}, "", window.location.pathname);
+    })();
+  }, []);
 
   // Entries subscription — scoped to the current filter period so we read far less data.
   // Re-subscribes when the user switches month/year.

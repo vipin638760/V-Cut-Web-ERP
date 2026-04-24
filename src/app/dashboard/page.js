@@ -1568,12 +1568,27 @@ function TopPerformersSection({ staffData, branchesById, brTypeFilter, staffView
                   hint="online + cash left over after summing every staff_billing[].billing row — tips, walk-ins without a staff split, rounding"
                   color="var(--orange)"
                   rows={recon.unattributedRows}
-                  onRowClick={(r) => router.push(`/dashboard/entry?edit=${r.id}`)} />
+                  onRowClick={(r) => {
+                    // Pass year+month too so the entry page can widen its
+                    // onSnapshot scope to include the target entry when the
+                    // dashboard's period doesn't match the entry page's default.
+                    const [yr, mo] = (r.date || "").split("-");
+                    const qs = new URLSearchParams({ edit: r.id });
+                    if (yr) qs.set("year", yr);
+                    if (mo) qs.set("month", String(Number(mo)));
+                    router.push(`/dashboard/entry?${qs.toString()}`);
+                  }} />
                 <ReconRow label="Orphaned billing" value={recon.orphaned}
                   hint="staff_billing rows whose staff_id no longer matches any staff record"
                   color="var(--red)"
                   rows={recon.orphanedRows}
-                  onRowClick={(r) => router.push(`/dashboard/entry?edit=${r.id}`)} />
+                  onRowClick={(r) => {
+                    const [yr, mo] = (r.date || "").split("-");
+                    const qs = new URLSearchParams({ edit: r.id });
+                    if (yr) qs.set("year", yr);
+                    if (mo) qs.set("month", String(Number(mo)));
+                    router.push(`/dashboard/entry?${qs.toString()}`);
+                  }} />
                 {recon.filteredOut > 0 && (
                   <ReconRow label={`Filtered out (${brTypeFilter})`} value={recon.filteredOut} hint="Real staff hidden by the Mens / Unisex filter" color="var(--text3)" />
                 )}
