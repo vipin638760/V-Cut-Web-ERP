@@ -4,7 +4,7 @@ import { collection, onSnapshot, query, orderBy, where, addDoc, deleteDoc, doc, 
 import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
 import { INR, computeCashInHand } from "@/lib/calculations";
-import { Icon, IconBtn, Card, PeriodWidget, TH, TD, Modal, BranchSelect, SearchSelect, useConfirm, useToast, useSort } from "@/components/ui";
+import { Icon, IconBtn, Card, PeriodWidget, TH, TD, Modal, BranchSelect, SearchSelect, ToggleGroup, useConfirm, useToast, useSort } from "@/components/ui";
 import { staffStatusForMonth, effectiveBranchOnDate } from "@/lib/calculations";
 import VLoader from "@/components/VLoader";
 
@@ -67,6 +67,10 @@ export default function EntryPage() {
 
   // Period filter state
   const [filterMode, setFilterMode] = useState("month");
+  // Page-level view toggle: Record (form) vs Recent (filterable listing).
+  // Editing an entry auto-flips back to Record so the user can scroll to the
+  // form without an extra tab click.
+  const [pageView, setPageView] = useState("record"); // 'record' | 'recent'
   const [filterYear, setFilterYear] = useState(NOW.getFullYear());
   const [filterMonth, setFilterMonth] = useState(NOW.getMonth() + 1);
   const filterPrefix = filterYear + "-" + String(filterMonth).padStart(2, "0");
@@ -123,6 +127,7 @@ export default function EntryPage() {
   // (Turbopack/SWC production minifier does not reliably hoist `function` declarations,
   // which caused a "Cannot access 'eB' before initialization" TDZ error on the live site.)
   const handleEdit = (e) => {
+    setPageView("record");
     setEditId(e.id);
     setSelBranch(e.branch_id);
     setSelDate(e.date);
@@ -1475,13 +1480,21 @@ export default function EntryPage() {
   return (
     <div>
       {/* Header */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20, flexWrap: "wrap", gap: 12 }}>
         <div style={{ fontSize: 24, fontWeight: 800, color: "var(--gold)", letterSpacing: 1 }}>Data Entry</div>
+        <ToggleGroup
+          options={[["record", "Record Entry"], ["recent", "Recent Entries"]]}
+          value={pageView}
+          onChange={setPageView}
+        />
       </div>
 
-      <PeriodWidget filterMode={filterMode} setFilterMode={setFilterMode} filterYear={filterYear} setFilterYear={setFilterYear} filterMonth={filterMonth} setFilterMonth={setFilterMonth} />
+      {pageView === "recent" && (
+        <PeriodWidget filterMode={filterMode} setFilterMode={setFilterMode} filterYear={filterYear} setFilterYear={setFilterYear} filterMonth={filterMonth} setFilterMonth={setFilterMonth} />
+      )}
 
       {/* Entry Form */}
+      {pageView === "record" && (
       <div style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 12, padding: 20, marginBottom: 16, boxShadow: "inset 0 2px 10px rgba(0,0,0,.2)" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, paddingBottom: 10, borderBottom: "1px solid var(--border)", gap: 10, flexWrap: "wrap" }}>
           <div style={{ fontSize: 12, fontWeight: 700, color: "var(--gold)", textTransform: "uppercase", letterSpacing: 1 }}>Daily Sales Entry</div>
@@ -1965,8 +1978,11 @@ export default function EntryPage() {
           )}
         </form>
       </div>
+      )}
 
       {/* Recent Entries Table */}
+      {pageView === "recent" && (
+      <>
       <div style={{ margin: "20px 0 12px", display: "flex", flexDirection: "column", gap: 10 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
           <div style={{ fontSize: 16, fontWeight: 800, color: "var(--gold)", letterSpacing: 1 }}>
@@ -2160,6 +2176,8 @@ export default function EntryPage() {
           </tbody>
         </table>
       </Card>
+      </>
+      )}
 
       {/* Audit Log Modal */}
       {logView && (
