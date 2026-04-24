@@ -122,10 +122,18 @@ export default function PLReportPage() {
 
     const vOther = periodEnts.reduce((s, e) => s + (e.others || 0) + (e.petrol || 0), 0);
 
-    // Fixed — branch-master fields only (matches Dashboard; water / maid / dust
-    // are branch-level but excluded from Operating Cost, so they're excluded here too).
-    const mf = getMonthlyFixed(bid, month);
-    const fixedCost = mf.shop_rent + mf.room_rent + mf.shop_elec + mf.room_elec + mf.wifi;
+    // Fixed — reads directly off the branch master (shop_rent, room_rent,
+    // shop_elec, room_elec, wifi) so the figure reconciles with the
+    // Dashboard's Operating Cost card exactly. Monthly_expenses overrides
+    // are intentionally *not* consulted here — Dashboard doesn't respect
+    // them either, and supporting them in one place but not the other was
+    // producing small mismatches (rent bumps, ad-hoc electricity spikes)
+    // that made the two pages disagree without any visible reason.
+    const fixedCost = (Number(b.shop_rent) || 0)
+      + (Number(b.room_rent) || 0)
+      + (Number(b.shop_elec) || 0)
+      + (Number(b.room_elec) || 0)
+      + (Number(b.wifi) || 0);
 
     // Salary
     const activeStaff = staff.filter(s => s.branch_id === bid && staffStatusForMonth(s, month).status !== "inactive");
