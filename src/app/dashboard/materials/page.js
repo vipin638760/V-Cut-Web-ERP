@@ -1892,21 +1892,12 @@ export default function MaterialsPage() {
       {tab === "transfers" && (() => {
         return (
           <>
-            {/* Prominent call-to-action: open the POS-style transfer form. */}
-            <Card style={{ marginBottom: 16, padding: 20, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, flexWrap: "wrap", background: "linear-gradient(135deg, rgba(34,211,238,0.08), rgba(250,204,21,0.04))", border: "1px solid rgba(34,211,238,0.25)" }}>
-              <div>
-                <div style={{ fontSize: 12, color: "var(--accent)", fontWeight: 800, textTransform: "uppercase", letterSpacing: 1.5, marginBottom: 4 }}>New Material Transfer</div>
-                <div style={{ fontSize: 13, color: "var(--text2)", lineHeight: 1.5 }}>
-                  Search the master catalog, pick materials (stock-aware), set operation cost %, preview the slip, then confirm.
-                </div>
-              </div>
-              <button onClick={openTransferModal}
-                style={{ padding: "14px 28px", borderRadius: 12, background: "linear-gradient(135deg,var(--accent),var(--gold2))", color: "#000", border: "none", cursor: "pointer", fontWeight: 900, fontSize: 13, textTransform: "uppercase", letterSpacing: 1, display: "inline-flex", alignItems: "center", gap: 8, boxShadow: "0 4px 18px rgba(34,211,238,0.3)" }}>
-                <Icon name="plus" size={16} /> Start Transfer →
-              </button>
-            </Card>
-
-            {/* Hidden — kept only so legacy refs compile. Real flow is the modal above. */}
+            {/* Legacy catalog UI removed — clicking the Transfers tab opens the
+                POS-style modal directly (see onClick on the tab button above).
+                If the user closes the modal, clicking Transfers again reopens it.
+                Everything below that's not an allocation log read is hidden
+                legacy state that still participates in the component's reducers;
+                display:none keeps it out of the DOM without a risky refactor. */}
             <div style={{ display: "none" }}>
             {/* Catalog filters + stats */}
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
