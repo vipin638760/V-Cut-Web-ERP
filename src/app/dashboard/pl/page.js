@@ -22,6 +22,7 @@ export default function PLReportPage() {
   const [monthlyExpenses, setMonthlyExpenses] = useState([]);
   const [costCenters, setCostCenters] = useState([]);
   const [salaryHistory, setSalaryHistory] = useState([]);
+  const [materialAllocations, setMaterialAllocations] = useState([]);
   const [globalSettings, setGlobalSettings] = useState({});
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState(null);
@@ -44,6 +45,7 @@ export default function PLReportPage() {
       onSnapshot(collection(db, "monthly_expenses"), s => setMonthlyExpenses(s.docs.map(d => ({ ...d.data(), id: d.id })))),
       onSnapshot(collection(db, "cost_centers"), s => setCostCenters(s.docs.map(d => ({ ...d.data(), id: d.id })))),
       onSnapshot(collection(db, "salary_history"), s => setSalaryHistory(s.docs.map(d => ({ ...d.data(), id: d.id })))),
+      onSnapshot(collection(db, "material_allocations"), s => setMaterialAllocations(s.docs.map(d => ({ ...d.data(), id: d.id })))),
       onSnapshot(collection(db, "settings"), s => {
         const data = {}; s.docs.forEach(d => data[d.id] = d.data());
         setGlobalSettings(data.global || {});
@@ -84,55 +86,94 @@ export default function PLReportPage() {
     return months;
   };
 
-  // Helper: Core Calculation Engine (Legacy Port)
+  // Per-branch per-month stats — mirrors the Dashboard's Operating Cost formula
+  // so the two pages agree on a single "expense" number. Differences from the
+  // previous (legacy) formula:
+  //  - Material expense now respects mat_use_allocations / mat_use_lumpsum
+  //    flags (was hardcoded lumpsum).
+  //  - Fixed cost is branch-master only: shop_rent + room_rent + shop_elec +
+  //    room_elec + wifi (dropped water / maid / dust / petrol double-counts).
+  //  - Tips are no longer counted as an expense (they're tip-flow only).
+  //  - Per-branch transactions and cost_centers are excluded — they now live
+  //    in the "Shared Expenses" table below the main P&L grid.
+  //  - GST estimate (online × gst_pct) is added to match Dashboard exactly.
   const calculateBranchStats = (bid, month) => {
     const b = branches.find(x => x.id === bid);
     if (!b) return null;
 
     const periodEnts = entries.filter(e => e.branch_id === bid && e.date && e.date.startsWith(month));
-    const periodTxns = transactions.filter(t => t.branch_id === bid && ((t.date && t.date.startsWith(month)) || (t.month === month)));
-    
-    // Income
-    const entInc = periodEnts.reduce((s, e) => s + (e.online || 0) + (e.cash || 0), 0);
-    const txnInc = periodTxns.filter(t => t.cat === "income").reduce((s, t) => s + (t.amount || 0), 0);
-    const sharedInc = transactions.filter(t => t.branch_id === "all" && t.cat === "income" && ((t.date && t.date.startsWith(month)) || (t.month === month))).reduce((s, t) => s + (t.amount || 0), 0) / Math.max(branches.length, 1);
-    const totalIncome = entInc + txnInc + sharedInc;
 
-    // Direct Expenses
+    // Income — raw online + cash. Material sale stays inside staff_billing and
+    // is counted as income via iMatS (matches Dashboard's `income` field).
+    const iOnline = periodEnts.reduce((s, e) => s + (e.online || 0), 0);
+    const iCash   = periodEnts.reduce((s, e) => s + (e.cash || 0), 0);
+    const iMatS   = periodEnts.reduce((s, e) => s + (e.staff_billing || []).reduce((ss, sb) => ss + (sb.material || 0), 0), 0);
+    const totalIncome = iOnline + iCash + iMatS;
+
+    // Variable — incentive + material cost (flag-aware) + other day-level costs.
     const incentives = periodEnts.reduce((s, e) => s + (e.staff_billing || []).reduce((ss, sb) => ss + (sb.incentive || 0) + (sb.mat_incentive || 0), 0), 0);
-    const matExp = periodEnts.reduce((s, e) => s + (e.mat_expense || 0), 0);
-    
-    // Fixed Expenses
-    const mf = getMonthlyFixed(bid, month);
-    const fixedCost = mf.shop_rent + mf.room_rent + mf.shop_elec + mf.room_elec + mf.wifi + mf.water + (mf.petrol || 0) + (mf.maid || 0) + (mf.dust || 0);
 
-    // Staff Salaries
+    const matUseAllocations = globalSettings?.mat_use_allocations !== false;
+    const matUseLumpsum = globalSettings?.mat_use_lumpsum === true;
+    const allocsTotal = (arr) => arr.reduce((s, a) => s + (Number(a.total) || (a.items || []).reduce((ss, it) => ss + (Number(it.line_total) || (Number(it.qty) * Number(it.price_at_transfer)) || 0), 0)), 0);
+    const vMatAlloc = allocsTotal(materialAllocations.filter(a => a.branch_id === bid && (a.date || (a.transferred_at || "").slice(0, 10)).startsWith(month)));
+    const vMatLump = periodEnts.reduce((s, e) => s + (Number(e.mat_expense) || 0), 0);
+    const matExp = (matUseAllocations ? vMatAlloc : 0) + (matUseLumpsum ? vMatLump : 0);
+
+    const vOther = periodEnts.reduce((s, e) => s + (e.others || 0) + (e.petrol || 0), 0);
+
+    // Fixed — branch-master fields only (matches Dashboard; water / maid / dust
+    // are branch-level but excluded from Operating Cost, so they're excluded here too).
+    const mf = getMonthlyFixed(bid, month);
+    const fixedCost = mf.shop_rent + mf.room_rent + mf.shop_elec + mf.room_elec + mf.wifi;
+
+    // Salary
     const activeStaff = staff.filter(s => s.branch_id === bid && staffStatusForMonth(s, month).status !== "inactive");
     const salaries = activeStaff.reduce((s, st) => s + proRataSalary(st, month, branches, salaryHistory, staff, globalSettings), 0);
 
-    // Misc & Petrol from entries
-    const miscEnt = periodEnts.reduce((s, e) => s + (e.tips || 0) + (e.others || 0) + (e.petrol || 0), 0);
-    
-    // Transactions
-    const txnExp = periodTxns.filter(t => t.cat !== "income").reduce((s, t) => s + (t.amount || 0), 0);
-    const sharedExp = transactions.filter(t => t.branch_id === "all" && t.cat !== "income" && ((t.date && t.date.startsWith(month)) || (t.month === month))).reduce((s, t) => s + (t.amount || 0), 0) / Math.max(branches.length, 1);
+    // GST estimate — mirrors Dashboard's totalGst.
+    const gstPct = globalSettings?.gst_pct || 0;
+    const totalGst = (iOnline * gstPct) / 100;
 
-    // Cost Centers
-    const ccTotal = costCenters.reduce((s, cc) => s + (cc.monthly_cost || 0), 0) / Math.max(branches.length, 1);
-
-    const totalExpense = incentives + matExp + fixedCost + salaries + miscEnt + txnExp + sharedExp + ccTotal;
+    const totalExpense = incentives + matExp + vOther + fixedCost + salaries + totalGst;
 
     return {
       income: totalIncome,
       salary: salaries,
-      incentives: incentives,
+      incentives,
       fixed: fixedCost,
-      txns: txnExp + sharedExp,
-      misc: miscEnt + matExp,
-      cc: ccTotal,
+      txns: vOther,   // kept for column compatibility; now means Other + Petrol from entries
+      misc: matExp,   // material cost (flag-aware)
+      cc: totalGst,   // GST estimate
       expense: totalExpense,
-      pl: totalIncome - totalExpense
+      pl: totalIncome - totalExpense,
     };
+  };
+
+  // Shared expenses — `transactions` docs tagged with branch_id === "all" and
+  // cost_centers entries (head office rent, office electricity, etc). Rendered
+  // in a separate table so the admin can see them without them distorting
+  // per-branch P&L.
+  const getSharedExpensesForMonth = (month) => {
+    const txnRows = transactions
+      .filter(t => t.branch_id === "all" && t.cat !== "income" && ((t.date && t.date.startsWith(month)) || (t.month === month)))
+      .map(t => ({
+        id: t.id,
+        source: "transaction",
+        label: t.type || t.desc || "Shared Expense",
+        amount: Number(t.amount) || 0,
+        date: t.date || `${month}-01`,
+        note: t.desc || "",
+      }));
+    const ccRows = costCenters.map(cc => ({
+      id: `cc-${cc.id}-${month}`,
+      source: "cost_center",
+      label: cc.name || "Cost Center",
+      amount: Number(cc.monthly_cost) || 0,
+      date: `${month}-01`,
+      note: cc.desc || "",
+    }));
+    return [...txnRows, ...ccRows].sort((a, b) => b.amount - a.amount);
   };
 
   if (loading) return <VLoader fullscreen label="GENESTATING P&L REPORT" />;
@@ -283,11 +324,76 @@ export default function PLReportPage() {
         </table>
       </div>
 
+      {/* Shared / Head-Office Expenses — not part of per-branch P&L above.
+          These are business-wide costs (HO rent, office electricity, cost centers)
+          so admin can see them side-by-side without distorting the branch columns. */}
+      {(() => {
+        const sharedByMonth = targetMonths.map(mon => ({
+          month: mon,
+          rows: getSharedExpensesForMonth(mon),
+        }));
+        const totalShared = sharedByMonth.reduce((s, m) => s + m.rows.reduce((ss, r) => ss + r.amount, 0), 0);
+        const flat = sharedByMonth.flatMap(m => m.rows.map(r => ({ ...r, _month: m.month })));
+        if (flat.length === 0) return null;
+        return (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 10 }}>
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 800, color: "#d7a6ff", textTransform: "uppercase", letterSpacing: 2 }}>Head Office</div>
+                <div style={{ fontSize: 20, fontWeight: 800, color: "var(--gold)", letterSpacing: 0.5, fontFamily: "var(--font-headline, var(--font-outfit))", marginTop: 2 }}>
+                  Shared Expenses <span style={{ fontSize: 12, color: "var(--text3)", fontWeight: 600, marginLeft: 6 }}>· {flat.length} line{flat.length === 1 ? "" : "s"}</span>
+                </div>
+              </div>
+              <div style={{ textAlign: "right" }}>
+                <div style={{ fontSize: 10, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.2 }}>Total</div>
+                <div style={{ fontSize: 20, fontWeight: 800, color: "var(--red)", fontFamily: "var(--font-headline, var(--font-outfit))" }}>{formatINR(totalShared)}</div>
+              </div>
+            </div>
+
+            <Card style={{ padding: 0, overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 13 }}>
+                <thead>
+                  <tr style={{ background: "var(--bg4)" }}>
+                    <TH>Source</TH>
+                    <TH>Month</TH>
+                    <TH>Description</TH>
+                    <TH>Note</TH>
+                    <TH right>Amount</TH>
+                  </tr>
+                </thead>
+                <tbody>
+                  {flat.map(r => (
+                    <tr key={r.id} style={{ borderBottom: "1px solid var(--border)" }}>
+                      <TD>
+                        <Pill label={r.source === "cost_center" ? "Cost Center" : "Transaction"} color={r.source === "cost_center" ? "purple" : "blue"} />
+                      </TD>
+                      <TD style={{ color: "var(--text3)", fontSize: 11, fontWeight: 700, letterSpacing: 0.5 }}>{r._month}</TD>
+                      <TD style={{ fontWeight: 600 }}>{r.label}</TD>
+                      <TD style={{ color: "var(--text3)", fontSize: 11 }}>{r.note || "—"}</TD>
+                      <TD right style={{ fontWeight: 800, color: "var(--red)", fontFamily: "var(--font-headline, var(--font-outfit))" }}>{formatINR(r.amount)}</TD>
+                    </tr>
+                  ))}
+                  <tr style={{ background: "var(--bg3)", borderTop: "2px solid var(--border2)", fontWeight: 800 }}>
+                    <TD style={{ color: "var(--gold)" }}>TOTAL</TD>
+                    <TD></TD><TD></TD><TD></TD>
+                    <TD right style={{ color: "var(--red)", fontSize: 15 }}>{formatINR(totalShared)}</TD>
+                  </tr>
+                </tbody>
+              </table>
+            </Card>
+            <div style={{ fontSize: 11, color: "var(--text3)", lineHeight: 1.5, fontStyle: "italic" }}>
+              Shared costs are informational only — they&apos;re not added into the per-branch Total Expenses above.
+              Toggle, split, or absorb them via Master Setup → Transactions / Cost Centers.
+            </div>
+          </div>
+        );
+      })()}
+
       <div style={{ padding: "12px 20px", background: "rgba(255,255,255,0.03)", borderRadius: 12, border: "1px dashed var(--border)", fontSize: 11, color: "var(--text3)", lineHeight: 1.6 }}>
         <strong style={{ color: "var(--gold)" }}>AUDIT NOTES:</strong><br/>
-        • Network shared costs (Cost Centers & "All Branch" transactions) are divided across active branches.<br/>
-        • Salary is calculated pro-rata based on join/exit dates and approved leaves.<br/>
-        • Fixed costs are calculated from monthly bills, falling back to branch-level defaults where records are missing.
+        • Per-branch Total Expenses now mirrors the Dashboard&apos;s <strong>Operating Cost</strong>: Incentives + Material (flag-aware) + Other + Fixed + Salary + GST.<br/>
+        • Shared costs — head-office rent, office electricity, cost centers, &quot;All branch&quot; transactions — are listed below in their own table and <strong>excluded</strong> from per-branch P&amp;L.<br/>
+        • Salary is pro-rata based on join/exit dates and approved leaves; fixed costs read branch-master fields (shop / room rent, electricity, Wi-Fi).
       </div>
     </div>
   );
