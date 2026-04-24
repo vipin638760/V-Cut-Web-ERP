@@ -27,6 +27,7 @@ const NAV = {
     { id: "leaves",    l: "Leave Management",      icon: "checkCircle" },
     { id: "payroll",   l: "Payroll",               icon: "wallet" },
     { id: "taskpedia", l: "Taskpedia",             icon: "checkCircle" },
+    { id: "contacts",  l: "Contact Directory",     icon: "users" },
     { id: "users",     l: "Master Setup",          icon: "settings" },
   ],
   accountant: [
@@ -45,6 +46,7 @@ const NAV = {
     { id: "expenses",  l: "Operational Expenses",  icon: "trending" },
     { id: "leaves",    l: "Leave Management",      icon: "checkCircle" },
     { id: "taskpedia", l: "Taskpedia",             icon: "checkCircle" },
+    { id: "contacts",  l: "Contact Directory",     icon: "users" },
   ],
   employee: [
     { id: "dashboard",      l: "Dashboard",        icon: "home" },

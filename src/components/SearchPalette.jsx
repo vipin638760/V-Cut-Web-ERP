@@ -30,6 +30,7 @@ export default function SearchPalette({ isOpen, onClose, context, userRole }) {
       { id: "leaves",                label: "Leave Management",       cat: "Navigation", icon: "checkCircle", path: "/dashboard/leaves",               roles: ["admin", "accountant"] },
       { id: "payroll",               label: "Payroll",                cat: "Navigation", icon: "wallet",      path: "/dashboard/payroll",              roles: ["admin"] },
       { id: "taskpedia",             label: "Taskpedia",              cat: "Navigation", icon: "checkCircle", path: "/dashboard/taskpedia",            roles: ["admin", "accountant", "employee"] },
+      { id: "contacts",              label: "Contact Directory",      cat: "Navigation", icon: "users",       path: "/dashboard/contacts",             roles: ["admin", "accountant"] },
       { id: "users",                 label: "Master Setup",           cat: "Navigation", icon: "settings",    path: "/dashboard/users",                roles: ["admin"] },
       { id: "day-working",           label: "Day Working",            cat: "Navigation", icon: "edit",        path: "/dashboard/day-working",          roles: ["employee"] },
       { id: "my-payroll",            label: "My Payroll",             cat: "Navigation", icon: "wallet",      path: "/dashboard/my-payroll",           roles: ["employee"] },
