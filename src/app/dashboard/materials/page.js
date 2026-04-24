@@ -1616,9 +1616,9 @@ export default function MaterialsPage() {
           <button key={k} onClick={() => {
             setTab(k);
             if (k === "add" && addRows.length === 0) setAddRowsPrompt({ count: addNumRows || 10 });
-            // Open the POS-style form automatically when landing on Transfers,
-            // unless one is already open (e.g. user is mid-transfer and toggled tabs).
-            if (k === "transfers" && !transferModal) openTransferModal();
+            // Transfers tab no longer auto-opens the transfer modal — that was
+            // intrusive. User gets the history view by default, and clicks the
+            // "Transfer Goods" button on that tab to start a new transfer.
           }}
             style={{ flex: 1, padding: "10px 14px", fontSize: 12, fontWeight: 800, border: "none", borderRadius: 8, cursor: "pointer", textTransform: "uppercase", letterSpacing: 0.5,
               background: tab === k ? "linear-gradient(135deg,var(--accent),var(--gold2))" : "transparent",
@@ -2223,6 +2223,11 @@ export default function MaterialsPage() {
                     </button>
                   ))}
                 </div>
+                <button onClick={openTransferModal}
+                  title="Start a new material transfer"
+                  style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "7px 16px", borderRadius: 10, background: "linear-gradient(135deg,var(--accent),var(--gold2))", color: "#000", border: "none", fontWeight: 800, fontSize: 12, cursor: "pointer", textTransform: "uppercase", letterSpacing: 0.5, boxShadow: "0 4px 14px rgba(34,211,238,0.25)" }}>
+                  <Icon name="plus" size={14} /> Transfer Goods
+                </button>
               </div>
             </div>
 
