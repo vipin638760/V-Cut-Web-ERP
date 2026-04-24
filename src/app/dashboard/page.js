@@ -1763,7 +1763,7 @@ function DailyMaterialChart({ entries, allocations, branches = [], filterYear, f
   // Neither source on? Render a clean disabled state.
   if (!useAllocations && !useLumpsum) {
     return (
-      <Card style={{ padding: 18, marginBottom: 24 }}>
+      <Card style={{ padding: 18, marginBottom: 24, overflow: "visible" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12, marginBottom: 6 }}>
           <div>
             <div style={{ fontSize: 11, fontWeight: 800, color: "#d7a6ff", textTransform: "uppercase", letterSpacing: 2 }}>Material Consumption</div>
@@ -1778,7 +1778,7 @@ function DailyMaterialChart({ entries, allocations, branches = [], filterYear, f
   }
 
   return (
-    <Card style={{ padding: 18, marginBottom: 24 }}>
+    <Card style={{ padding: 18, marginBottom: 24, overflow: "visible" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12, marginBottom: 14 }}>
         <div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -2111,7 +2111,7 @@ function DailyBusinessChart({ entries, branches = [], filterYear, filterMonth })
   };
 
   return (
-    <Card style={{ padding: 18, marginBottom: 24 }}>
+    <Card style={{ padding: 18, marginBottom: 24, overflow: "visible" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12, marginBottom: 14 }}>
         <div>
           <div style={{ fontSize: 11, fontWeight: 800, color: "var(--accent)", textTransform: "uppercase", letterSpacing: 2 }}>Daily Business</div>
@@ -2492,7 +2492,7 @@ function MonthlyBusinessChart({ entries, branches = [], filterYear }) {
   const MONTHS_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
   return (
-    <Card style={{ padding: 18, marginBottom: 24 }}>
+    <Card style={{ padding: 18, marginBottom: 24, overflow: "visible" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12, marginBottom: 14 }}>
         <div>
           <div style={{ fontSize: 11, fontWeight: 800, color: "var(--accent)", textTransform: "uppercase", letterSpacing: 2 }}>Monthly Business</div>
