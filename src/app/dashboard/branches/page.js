@@ -301,43 +301,109 @@ function BranchStaffSalesChart({ periodEntries, branchStaff, allStaff, filterMod
               </div>
             )}
           </div>
-          {/* Per-staff stats grid — total · avg · highest (with date) · lowest. Computed over days the staff actually had sales. */}
-          <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid var(--border)" }}>
-            <div style={{ fontSize: 10, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 }}>Per-staff statistics</div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 8 }}>
-              {activeStaffIds.map((sid, i) => {
-                const st = staffStats[sid];
-                return (
-                  <div key={sid} style={{ background: "var(--bg3)", border: "1px solid var(--border)", borderRadius: 8, padding: "10px 12px", borderLeft: `3px solid ${colorAt(i)}` }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6, gap: 8 }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
-                        <div style={{ width: 10, height: 10, borderRadius: 2, background: colorAt(i), flexShrink: 0 }} />
-                        <span style={{ color: "var(--text2)", fontWeight: 700, fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{staffById[sid]?.name || "Unknown"}</span>
+          {/* Per-staff stats grid — elegant cards with rank, big total,
+              avg / highest / lowest triad, and short humanised dates. */}
+          {(() => {
+            // Format a stat bucket key (YYYY-MM-DD in month mode, YYYY-MM in year)
+            // into the tight "17 Apr" / "Apr" that the cards show underneath the
+            // highest / lowest amounts. Keeps the visual weight away from dates.
+            const MONTHS_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+            const fmtKey = (k) => {
+              if (!k) return "—";
+              const parts = k.split("-");
+              if (parts.length === 3) {
+                const mi = Number(parts[1]) - 1;
+                return `${Number(parts[2])} ${MONTHS_SHORT[mi] || ""}`.trim();
+              }
+              if (parts.length === 2) return MONTHS_SHORT[Number(parts[1]) - 1] || k;
+              return k;
+            };
+            // Rank for the medal / #N pill — ranked by total so the top earners
+            // get the visual nod regardless of the natural card order.
+            const ranked = [...activeStaffIds].sort((a, b) => staffStats[b].total - staffStats[a].total);
+            const rankBySid = new Map(ranked.map((sid, i) => [sid, i + 1]));
+            const MEDAL = { 1: "🥇", 2: "🥈", 3: "🥉" };
+
+            return (
+              <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid var(--border)" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                  <div style={{ fontSize: 10, fontWeight: 800, color: "var(--accent)", textTransform: "uppercase", letterSpacing: 1.5 }}>Per-staff statistics</div>
+                  <div style={{ fontSize: 10, color: "var(--text3)", fontWeight: 600 }}>{activeStaffIds.length} active · ranked by period total</div>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 10 }}>
+                  {activeStaffIds.map((sid, i) => {
+                    const st = staffStats[sid];
+                    const color = colorAt(i);
+                    const rank = rankBySid.get(sid) || 0;
+                    const medal = MEDAL[rank];
+                    // Normalize highest against itself as the 100% reference so
+                    // the mini AVG bar visually grades the staff member's
+                    // consistency (avg / highest).
+                    const avgPct = st.high > 0 ? Math.min(100, Math.round((st.avg / st.high) * 100)) : 0;
+                    const name = staffById[sid]?.name || "Unknown";
+                    return (
+                      <div key={sid} style={{
+                        position: "relative",
+                        background: `linear-gradient(145deg, rgba(255,255,255,0.02), rgba(255,255,255,0)), var(--bg3)`,
+                        border: `1px solid ${color}2E`,
+                        borderRadius: 12,
+                        padding: "14px 16px 12px",
+                        boxShadow: `0 1px 2px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.04)`,
+                        overflow: "hidden",
+                      }}>
+                        {/* Top accent strip — carries the staff color without the
+                            heavy 3px left border used previously. */}
+                        <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3, background: `linear-gradient(90deg, ${color}, ${color}55 70%, transparent)` }} />
+
+                        {/* Header: rank + name, period total on the right. */}
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, marginBottom: 12 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0, flex: 1 }}>
+                            <div style={{
+                              width: 26, height: 26, borderRadius: 8,
+                              background: medal ? `${color}22` : "var(--bg4)",
+                              border: `1px solid ${medal ? color + "55" : "var(--border)"}`,
+                              display: "flex", alignItems: "center", justifyContent: "center",
+                              fontSize: medal ? 14 : 10, fontWeight: 800,
+                              color: medal ? color : "var(--text3)", flexShrink: 0,
+                            }}>{medal || `#${rank}`}</div>
+                            <div style={{ minWidth: 0 }}>
+                              <div style={{ color: "var(--text)", fontWeight: 800, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", letterSpacing: 0.2 }}>{name}</div>
+                              <div style={{ color: "var(--text3)", fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Period Total</div>
+                            </div>
+                          </div>
+                          <div style={{ textAlign: "right", flexShrink: 0 }}>
+                            <div style={{ color: "var(--green)", fontWeight: 900, fontSize: 16, fontFamily: "var(--font-headline, var(--font-outfit))", lineHeight: 1.1 }}>{INR(st.total)}</div>
+                            <div style={{ fontSize: 9, color: "var(--text3)", fontWeight: 600, marginTop: 2 }}>{st.activeCount} {isMonth ? (st.activeCount === 1 ? "day" : "days") : (st.activeCount === 1 ? "mo" : "mos")}</div>
+                          </div>
+                        </div>
+
+                        {/* Stat row: AVG with consistency bar · HIGHEST · LOWEST */}
+                        <div style={{ display: "grid", gridTemplateColumns: "1.1fr 1fr 1fr", gap: 10 }}>
+                          <div style={{ display: "flex", flexDirection: "column", gap: 2, paddingRight: 8, borderRight: "1px solid rgba(255,255,255,0.05)" }}>
+                            <div style={{ color: "var(--text3)", fontSize: 8.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: 1 }}>Avg</div>
+                            <div style={{ color: "var(--blue, #60a5fa)", fontWeight: 800, fontSize: 12.5 }}>{INR(st.avg)}</div>
+                            <div style={{ height: 2.5, background: "rgba(255,255,255,0.05)", borderRadius: 2, overflow: "hidden", marginTop: 2 }}>
+                              <div style={{ height: "100%", width: `${avgPct}%`, background: "linear-gradient(90deg, var(--blue, #60a5fa), var(--accent))", borderRadius: 2 }} />
+                            </div>
+                          </div>
+                          <div style={{ display: "flex", flexDirection: "column", gap: 2, paddingRight: 8, borderRight: "1px solid rgba(255,255,255,0.05)" }}>
+                            <div style={{ color: "var(--text3)", fontSize: 8.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: 1 }}>High</div>
+                            <div style={{ color: "var(--green)", fontWeight: 800, fontSize: 12.5 }}>{INR(st.high)}</div>
+                            <div style={{ color: "var(--text3)", fontSize: 9, fontWeight: 600 }}>{fmtKey(st.highKey)}</div>
+                          </div>
+                          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                            <div style={{ color: "var(--text3)", fontSize: 8.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: 1 }}>Low</div>
+                            <div style={{ color: "var(--orange, #fb923c)", fontWeight: 800, fontSize: 12.5 }}>{INR(st.low)}</div>
+                            <div style={{ color: "var(--text3)", fontSize: 9, fontWeight: 600 }}>{fmtKey(st.lowKey)}</div>
+                          </div>
+                        </div>
                       </div>
-                      <span style={{ color: "var(--green)", fontWeight: 800, fontSize: 11 }}>{INR(st.total)}</span>
-                    </div>
-                    <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 4, fontSize: 10 }}>
-                      <div>
-                        <div style={{ color: "var(--text3)", fontSize: 8, fontWeight: 700, textTransform: "uppercase" }}>Avg</div>
-                        <div style={{ color: "var(--blue, #60a5fa)", fontWeight: 700 }}>{INR(st.avg)}</div>
-                        <div style={{ color: "var(--text3)", fontSize: 8 }}>{st.activeCount} {isMonth ? "days" : "mo"}</div>
-                      </div>
-                      <div>
-                        <div style={{ color: "var(--text3)", fontSize: 8, fontWeight: 700, textTransform: "uppercase" }}>Highest</div>
-                        <div style={{ color: "var(--green)", fontWeight: 700 }}>{INR(st.high)}</div>
-                        <div style={{ color: "var(--text3)", fontSize: 8 }}>{st.highKey || "—"}</div>
-                      </div>
-                      <div>
-                        <div style={{ color: "var(--text3)", fontSize: 8, fontWeight: 700, textTransform: "uppercase" }}>Lowest</div>
-                        <div style={{ color: "var(--orange, #fb923c)", fontWeight: 700 }}>{INR(st.low)}</div>
-                        <div style={{ color: "var(--text3)", fontSize: 8 }}>{st.lowKey || "—"}</div>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })()}
         </>
       )}
     </Card>
