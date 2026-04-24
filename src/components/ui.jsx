@@ -393,8 +393,16 @@ export function useConfirm() {
   const handleConfirm = async () => {
     if (busy) return;
     setBusy(true);
-    try { await state?.onConfirm?.(); } catch { /* handler has its own error handling */ }
-    close();
+    // Capture the dialog we started with; if the handler itself opens a new
+    // confirm (e.g. reporting an error via `confirm({ type: "danger", ... })`),
+    // that new dialog will become `state` and we must NOT close it.
+    // Why: accountant's Materials delete was failing silently because the
+    // Firestore rule rejection surfaced via a nested confirm that `close()`
+    // instantly wiped on the way out — so the user only saw "nothing happened".
+    const startedWith = state;
+    try { await state?.onConfirm?.(); } catch { /* handler reports errors itself */ }
+    setState(prev => (prev === startedWith ? null : prev));
+    setBusy(false);
   };
 
   const ConfirmDialog = state ? (
