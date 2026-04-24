@@ -15,6 +15,44 @@ export const MASK = '•••••';
 // joined Apr 22 but salary computed as 0 because effectiveStart > effectiveEnd).
 export const parseLocalDate = (ymd) => (ymd ? new Date(ymd + "T00:00") : null);
 
+// Canonical Cash-in-Hand formula. Mirrors the Daily Entry form so the listing,
+// the Excel export, P&L rollups, and the Recalculate job all agree.
+// Formula: cash + tipsInCash − tipsPaidCash − incentivesTaken − others − petrol
+// - `others` and `petrol` come out of the branch drawer on the day and are
+//   subtracted here. (Legacy entries stored petrol separately; new ones keep
+//   petrol at 0 and track it in `daily_expenses` instead, so this is a no-op
+//   for new data.)
+// - `incentivesTaken` only counts staff billing rows where `incentive_taken`
+//   is not explicitly false. For unisex branches this defaults to hairdresser
+//   roles only; for mens it defaults to everyone. Entries from before that
+//   flag existed fall back to "taken".
+// Pass in `branch` (optional) so the unisex-vs-mens default can be resolved;
+// if you skip it, the default is "taken" which matches the form's default.
+export function computeCashInHand(entry, { branch = null, staffList = [] } = {}) {
+  if (!entry) return 0;
+  const cash = Number(entry.cash) || 0;
+  const sb = entry.staff_billing || [];
+  const isUnisex = ((branch?.type) || "").toLowerCase() === "unisex";
+  let tipsInCash = 0, tipsPaidCash = 0, takenInc = 0;
+  for (const r of sb) {
+    const tips = Number(r.tips) || 0;
+    if ((r.tip_in || "online") === "cash") tipsInCash += tips;
+    if ((r.tip_paid || "cash") === "cash") tipsPaidCash += tips;
+    let taken;
+    if (r.incentive_taken !== undefined) {
+      taken = r.incentive_taken !== false;
+    } else {
+      const staffRec = staffList.find(x => x.id === r.staff_id);
+      const role = (staffRec?.role || "").toLowerCase();
+      taken = isUnisex ? (role.includes("hairdresser") || role.includes("hair dresser")) : true;
+    }
+    if (taken) takenInc += (Number(r.incentive) || 0) + (Number(r.mat_incentive) || 0);
+  }
+  const others = Number(entry.others) || 0;
+  const petrol = Number(entry.petrol) || 0;
+  return cash + tipsInCash - tipsPaidCash - takenInc - others - petrol;
+}
+
 /** Get staff salary for a given month from salary_history or fallback to base */
 export function getStaffSalaryForMonth(staffId, monthStr, salaryHistory, staffList) {
   const s = staffList?.find(x => x.id === staffId);

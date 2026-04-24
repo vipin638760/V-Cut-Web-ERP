@@ -3,7 +3,7 @@ import { useEffect, useState, useRef, useMemo, startTransition } from "react";
 import { collection, onSnapshot, query, orderBy, where, addDoc, deleteDoc, doc, updateDoc, getDocs } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
-import { INR } from "@/lib/calculations";
+import { INR, computeCashInHand } from "@/lib/calculations";
 import { Icon, IconBtn, Card, PeriodWidget, TH, TD, Modal, BranchSelect, SearchSelect, useConfirm, useToast, useSort } from "@/components/ui";
 import { staffStatusForMonth, effectiveBranchOnDate } from "@/lib/calculations";
 import VLoader from "@/components/VLoader";
@@ -761,7 +761,7 @@ export default function EntryPage() {
     visibleEntries.forEach(e => {
       const b = branchesById.get(e.branch_id);
       const agg = sumStaffBilling(e.staff_billing);
-      const cih = e.cash_in_hand !== undefined ? e.cash_in_hand : (e.cash||0) - agg.incentive - agg.tips;
+      const cih = e.cash_in_hand !== undefined ? e.cash_in_hand : computeCashInHand(e, { branch: b, staffList: staff });
       const row = ws.addRow([e.date, b?.name||"?", e.online||0, e.cash||0, e.total_gst||0, agg.material, agg.billing, agg.incentive, agg.tips, agg.staffTotalInc, e.others||0, e.petrol||0, cih]);
       row.eachCell((cell, colNum) => { if (colNum >= 3) cell.numFmt = "#,##0"; });
     });
@@ -1941,7 +1941,7 @@ export default function EntryPage() {
                 staffTInc:  r => r.agg.staffTotalInc,
                 staffTSale: r => r.agg.billing + r.agg.material + r.agg.tips,
                 otherOut:   r => (Number(r.e.others) || 0) + (Number(r.e.petrol) || 0),
-                cih:        r => r.e.cash_in_hand !== undefined ? r.e.cash_in_hand : (Number(r.e.cash) || 0) - r.agg.incentive - r.agg.tips,
+                cih:        r => r.e.cash_in_hand !== undefined ? r.e.cash_in_hand : computeCashInHand(r.e, { branch: r.b, staffList: staff }),
                 diff:       r => r.e.cash_diff == null ? Number.NEGATIVE_INFINITY : r.e.cash_diff,
               }
             ).map(({ e, b, agg }) => {
@@ -1952,7 +1952,7 @@ export default function EntryPage() {
               const staffTotalIncE = agg.staffTotalInc;
               const staffTotalSaleE = totalBillingE + totalMatE + totalTipsE;
               const totalOthE = (e.others || 0) + (e.petrol || 0);
-              const cih = e.cash_in_hand !== undefined ? e.cash_in_hand : (e.cash || 0) - totalIncE - totalTipsE;
+              const cih = e.cash_in_hand !== undefined ? e.cash_in_hand : computeCashInHand(e, { branch: b, staffList: staff });
               return (
                 <tr key={e.id}>
                   <TD style={{ fontWeight: 600, whiteSpace: "nowrap" }}>{e.date}</TD>

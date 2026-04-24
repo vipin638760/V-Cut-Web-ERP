@@ -802,28 +802,50 @@ export default function BranchesPage() {
             details.push(`expenses: ${INR(Number(entry.others) || 0)} → ${INR(dailyExp)}`);
           }
 
-          if (changed && changes.staff_billing) {
-            const totalBilling = changes.staff_billing.reduce((s, sb) => s + (Number(sb.billing) || 0), 0);
-            const totalMatSale = changes.staff_billing.reduce((s, sb) => s + (Number(sb.material) || 0), 0);
+          // Recompute cash-in-hand against the canonical form formula.
+          // Mirrors computeCashInHand in lib/calculations.js; kept inline
+          // here because we already have `changes.*` in scope and want to
+          // log the delta against the stored value.
+          {
+            const sbForCih = changes.staff_billing || entry.staff_billing || [];
+            const totalBilling = sbForCih.reduce((s, sb) => s + (Number(sb.billing) || 0), 0);
+            const totalMatSale = sbForCih.reduce((s, sb) => s + (Number(sb.material) || 0), 0);
             const totalSales = totalBilling + totalMatSale;
             const online = Number(entry.online) || 0;
-            const cash = Math.max(0, totalSales - online);
-            const takenInc = changes.staff_billing.reduce((s, sb) => {
+            // Prefer cash stored on the entry; fall back to derived.
+            const cashFromEntry = entry.cash !== undefined ? Number(entry.cash) || 0 : Math.max(0, totalSales - online);
+            const takenInc = sbForCih.reduce((s, sb) => {
               if (sb.incentive_taken === false) return s;
-              return s + (Number(sb.incentive) || 0) + (Number(sb.mat_incentive) || 0);
+              const isUnisex = (branch?.type || "").toLowerCase() === "unisex";
+              let taken = true;
+              if (sb.incentive_taken !== undefined) {
+                taken = sb.incentive_taken !== false;
+              } else {
+                const staffRec = staff.find(x => x.id === sb.staff_id);
+                const role = (staffRec?.role || "").toLowerCase();
+                taken = isUnisex ? (role.includes("hairdresser") || role.includes("hair dresser")) : true;
+              }
+              return taken ? s + (Number(sb.incentive) || 0) + (Number(sb.mat_incentive) || 0) : s;
             }, 0);
-            const tipsPaidCash = changes.staff_billing.reduce((s, sb) => {
+            const tipsPaidCash = sbForCih.reduce((s, sb) => {
               const t = Number(sb.tips) || 0;
               return (sb.tip_paid || "cash") === "cash" ? s + t : s;
             }, 0);
-            const tipsInCash = changes.staff_billing.reduce((s, sb) => {
+            const tipsInCash = sbForCih.reduce((s, sb) => {
               const t = Number(sb.tips) || 0;
               return (sb.tip_in || "online") === "cash" ? s + t : s;
             }, 0);
-            // Daily expenses (entry.others / entry.petrol) are paid by the
-            // head-office cashier, not from the branch drawer, so they belong
-            // in P&L but must NOT be subtracted from cash_in_hand here.
-            changes.cash_in_hand = cash + tipsInCash - tipsPaidCash - takenInc;
+            const effectiveOthers = changes.others !== undefined ? Number(changes.others) || 0 : Number(entry.others) || 0;
+            const effectivePetrol = Number(entry.petrol) || 0;
+            const newCih = Math.round(cashFromEntry + tipsInCash - tipsPaidCash - takenInc - effectiveOthers - effectivePetrol);
+            const prevCih = entry.cash_in_hand;
+            if (prevCih === undefined || Math.round(prevCih) !== newCih) {
+              changes.cash_in_hand = newCih;
+              changed = true;
+              details.push(prevCih === undefined
+                ? `cash-in-hand: — → ${INR(newCih)}`
+                : `cash-in-hand: ${INR(prevCih)} → ${INR(newCih)}`);
+            }
           }
 
           const prefix = isMulti ? `${branchName} ${entry.date}` : entry.date;
