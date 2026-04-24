@@ -3,7 +3,7 @@ import { useEffect, useState, useRef } from "react";
 import { collection, onSnapshot, query, orderBy, where, getDocs, deleteDoc, doc, addDoc, updateDoc, writeBatch } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
-import { INR, branchIncomeInPeriod, makeFilterPrefix, periodLabel, proRataSalary, staffLeavesInMonth, staffStatusForMonth, parseLocalDate, MASK } from "@/lib/calculations";
+import { INR, branchIncomeInPeriod, makeFilterPrefix, periodLabel, proRataSalary, staffLeavesInMonth, staffStatusForMonth, parseLocalDate, MASK, effectiveCashInHand } from "@/lib/calculations";
 import { Icon, IconBtn, Pill, Card, PeriodWidget, ToggleGroup, TH, TD, Modal, SearchSelect, useConfirm, useToast, useSort } from "@/components/ui";
 import { useRouter } from "next/navigation";
 import VLoader from "@/components/VLoader";
@@ -2044,7 +2044,7 @@ export default function BranchesPage() {
           const rows = filterMode === "month"
             ? [...periodEntries]
                 .sort((a, b) => a.date.localeCompare(b.date))
-                .map(e => ({ label: e.date, cash: e.cash || 0, online: e.online || 0, cih: e.cash_in_hand || 0 }))
+                .map(e => ({ label: e.date, cash: e.cash || 0, online: e.online || 0, cih: effectiveCashInHand(e) }))
             : Array.from({ length: endMonth }, (_, idx) => {
                 const m = idx + 1;
                 const monthPrefix = `${filterYear}-${String(m).padStart(2, '0')}`;
@@ -2053,7 +2053,7 @@ export default function BranchesPage() {
                   label: new Date(filterYear, m - 1).toLocaleString('default', { month: 'short' }),
                   cash: mEntries.reduce((s, e) => s + (e.cash || 0), 0),
                   online: mEntries.reduce((s, e) => s + (e.online || 0), 0),
-                  cih: mEntries.reduce((s, e) => s + (e.cash_in_hand || 0), 0),
+                  cih: mEntries.reduce((s, e) => s + effectiveCashInHand(e), 0),
                 };
               }).filter(r => r.cash || r.online || r.cih);
           const totals = rows.reduce((acc, r) => ({ cash: acc.cash + r.cash, online: acc.online + r.online, cih: acc.cih + r.cih }), { cash: 0, online: 0, cih: 0 });
@@ -2567,7 +2567,7 @@ export default function BranchesPage() {
         <Card>
           <table className="pill-table" style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12.5 }}>
             <thead><tr>
-              <TH>Date</TH><TH right>Online</TH><TH right>Cash</TH><TH right>GST</TH><TH right>Billing</TH><TH right>Incentive</TH><TH right>Staff T.Inc</TH><TH right>Staff T.Sale</TH><TH right>Cash in Hand</TH>
+              <TH>Date</TH><TH right>Online</TH><TH right>Cash</TH><TH right>GST</TH><TH right>Billing</TH><TH right>Incentive</TH><TH right>Staff T.Inc</TH><TH right>Staff T.Sale</TH><TH right>Expected CIH</TH><TH right>Actual CIH</TH>
               {canEdit && <TH sticky> </TH>}
             </tr></thead>
             <tbody>
@@ -2579,6 +2579,7 @@ export default function BranchesPage() {
                 const staffTIncE = (e.staff_billing || []).reduce((s, sb) => s + (sb.staff_total_inc || 0), 0);
                 const staffTSaleE = totalBillingE + totalMatE + totalTipsE;
                 const cih = e.cash_in_hand !== undefined ? e.cash_in_hand : (e.cash || 0) - totalIncE - totalTipsE - (e.others || 0);
+                const actualCih = e.actual_cash == null ? null : Number(e.actual_cash) || 0;
                 return (
                   <tr key={e.id}>
                     <TD style={{ fontWeight: 600 }}>{e.date}</TD>
@@ -2589,7 +2590,8 @@ export default function BranchesPage() {
                     <TD right style={{ color: "var(--red)" }}>{INR(totalIncE)}</TD>
                     <TD right style={{ color: "var(--gold)", fontWeight: 700 }}>{INR(staffTIncE)}</TD>
                     <TD right style={{ color: "var(--text2)", fontWeight: 700 }}>{INR(staffTSaleE)}</TD>
-                    <TD right style={{ fontWeight: 700, color: cih >= 0 ? "var(--green)" : "var(--red)" }}>{INR(cih)}</TD>
+                    <TD right style={{ fontWeight: 700, color: cih >= 0 ? "var(--green)" : "var(--red)" }} title="Expected cash-in-hand">{INR(cih)}</TD>
+                    <TD right style={{ fontWeight: 700, color: actualCih == null ? "var(--text3)" : actualCih >= 0 ? "var(--green)" : "var(--red)" }} title={actualCih == null ? "Actual cash not recorded" : "Physically counted cash"}>{actualCih == null ? "—" : INR(actualCih)}</TD>
                     {canEdit && <TD sticky><div style={{ display: "flex", gap: 6 }}>
                       <IconBtn name="log" title="View log" variant="secondary" onClick={() => setLogView(e)} />
                       <IconBtn name="edit" title="Edit" variant="secondary" onClick={() => router.push(`/dashboard/entry?edit=${e.id}`)} />
@@ -3181,10 +3183,12 @@ function SummaryView({ summaryTab, setSummaryTab, branchData, branches, entries,
           <Card style={{ padding: 0, overflow: "hidden", minWidth: 0 }}>
             <div style={{ padding: "12px 16px", background: "linear-gradient(135deg, rgba(74,222,128,0.18), rgba(74,222,128,0.04))", borderBottom: "1px solid rgba(74,222,128,0.25)", fontWeight: 800, color: "var(--green)", fontSize: 13, letterSpacing: 1.5, textAlign: "center" }}>INCOME</div>
             <div style={{ overflowX: "auto" }}>
-              {/* minWidth matches ~5 columns of readable text so the table
-                  horizontally scrolls within its card when the viewport narrows
-                  past that — same pattern the Expenses table already uses. */}
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, minWidth: 440 }}>
+              {/* minWidth forces the table wider than any narrow card so the
+                  overflow-x wrapper's scrollbar always triggers when there's
+                  not enough room — same pattern the Expenses table uses at
+                  1100px. 560 gives each of the 5 columns ~110px of breathing
+                  room so values like ₹1,15,880 never clip. */}
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, minWidth: 560 }}>
                 <thead>
                   <tr style={{ background: "var(--bg4)" }}>
                     <TH style={{ width: 40 }}>SL</TH>
@@ -3222,7 +3226,10 @@ function SummaryView({ summaryTab, setSummaryTab, branchData, branches, entries,
           </Card>
 
           {/* EXPENSES TABLE */}
-          <Card style={{ padding: 0, overflow: "hidden" }}>
+          {/* minWidth: 0 lets this grid child actually shrink below its content
+              width so the overflow-x wrapper underneath can scroll instead of
+              pushing the whole page. */}
+          <Card style={{ padding: 0, overflow: "hidden", minWidth: 0 }}>
             <div style={{ padding: "12px 16px", background: "linear-gradient(135deg, rgba(248,113,113,0.2), rgba(248,113,113,0.05))", borderBottom: "1px solid rgba(248,113,113,0.25)", fontWeight: 800, color: "var(--red)", fontSize: 13, letterSpacing: 1.5, textAlign: "center" }}>EXPENSES</div>
             <div style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11, minWidth: 1100 }}>

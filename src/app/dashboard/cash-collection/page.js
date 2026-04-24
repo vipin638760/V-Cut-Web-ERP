@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { collection, onSnapshot, query, orderBy, addDoc, deleteDoc, doc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
-import { INR, makeFilterPrefix, periodLabel } from "@/lib/calculations";
+import { INR, makeFilterPrefix, periodLabel, effectiveCashInHand } from "@/lib/calculations";
 import { Card, PeriodWidget, TH, TD, Modal, ToggleGroup, Icon, IconBtn, useConfirm, useToast } from "@/components/ui";
 import VLoader from "@/components/VLoader";
 
@@ -121,14 +121,14 @@ export default function CashCollectionPage() {
     const bEntries = entries.filter(e => e.branch_id === b.id && inPeriod(e.date));
     const cash = bEntries.reduce((s, e) => s + (e.cash || 0), 0);
     const online = bEntries.reduce((s, e) => s + (e.online || 0), 0);
-    const cih = bEntries.reduce((s, e) => s + (e.cash_in_hand || 0), 0);
+    const cih = bEntries.reduce((s, e) => s + effectiveCashInHand(e), 0);
 
     // Opening Balance = everything the branch was holding *before* the period started.
     // It's the net of historical CIH minus historical collections. So when the weekly
     // range spans a month boundary, cash that accrued earlier still gets collected here.
     const priorCih = entries
       .filter(e => e.branch_id === b.id && beforePeriod(e.date))
-      .reduce((s, e) => s + (e.cash_in_hand || 0), 0);
+      .reduce((s, e) => s + effectiveCashInHand(e), 0);
     const priorCollected = collections
       .filter(c => c.branch_id === b.id && beforePeriod(c.collected_on))
       .reduce((s, c) => s + (Number(c.amount) || 0), 0);
@@ -136,7 +136,7 @@ export default function CashCollectionPage() {
 
     // Collections for this branch scoped to the same period as the entries.
     const bCollections = collections.filter(c => c.branch_id === b.id && inPeriod(c.collected_on));
-    const fifoEntries = bEntries.map(e => ({ date: e.date, cih: e.cash_in_hand || 0 }));
+    const fifoEntries = bEntries.map(e => ({ date: e.date, cih: effectiveCashInHand(e) }));
     const fifo = fifoConsume(fifoEntries, bCollections);
     const collectedInPeriod = bCollections.reduce((s, c) => s + (Number(c.amount) || 0), 0);
     const totalCash = openingBalance + cih; // physical cash the branch should be holding across the window
@@ -396,7 +396,7 @@ export default function CashCollectionPage() {
       // Daily rows — one per entry date in range
       return [...bEntries]
         .sort((a, b) => a.date.localeCompare(b.date))
-        .map(e => ({ label: e.date, cash: e.cash || 0, online: e.online || 0, cih: e.cash_in_hand || 0 }));
+        .map(e => ({ label: e.date, cash: e.cash || 0, online: e.online || 0, cih: effectiveCashInHand(e) }));
     }
     const months = [];
     const currentYear = NOW.getFullYear();
@@ -410,7 +410,7 @@ export default function CashCollectionPage() {
         label: new Date(filterYear, m - 1).toLocaleString('default', { month: 'short' }),
         cash: mEntries.reduce((s, e) => s + (e.cash || 0), 0),
         online: mEntries.reduce((s, e) => s + (e.online || 0), 0),
-        cih: mEntries.reduce((s, e) => s + (e.cash_in_hand || 0), 0),
+        cih: mEntries.reduce((s, e) => s + effectiveCashInHand(e), 0),
       });
     }
     return months;

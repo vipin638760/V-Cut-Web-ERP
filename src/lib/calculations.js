@@ -53,6 +53,18 @@ export function computeCashInHand(entry, { branch = null, staffList = [] } = {})
   return cash + tipsInCash - tipsPaidCash - takenInc - others - petrol;
 }
 
+// Physically-present cash-in-hand. Prefers the counted `actual_cash` when the
+// accountant recorded it on reconciliation, otherwise falls back to the
+// theoretical expected `cash_in_hand`. Use this for anything that models real
+// money (collections, outstanding, cashflow), not theoretical totals.
+export function effectiveCashInHand(entry) {
+  if (!entry) return 0;
+  if (entry.actual_cash !== null && entry.actual_cash !== undefined && entry.actual_cash !== "") {
+    return Number(entry.actual_cash) || 0;
+  }
+  return Number(entry.cash_in_hand) || 0;
+}
+
 /** Get staff salary for a given month from salary_history or fallback to base */
 export function getStaffSalaryForMonth(staffId, monthStr, salaryHistory, staffList) {
   const s = staffList?.find(x => x.id === staffId);
