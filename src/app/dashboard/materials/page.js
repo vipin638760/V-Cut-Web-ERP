@@ -1379,7 +1379,10 @@ export default function MaterialsPage() {
 </body>
 </html>`;
     const w = window.open("", "_blank", "width=900,height=800");
-    if (!w) return;
+    if (!w) {
+      toast({ title: "Pop-up blocked", message: "Allow pop-ups for this site and try again — the preview window was blocked by the browser.", type: "warning" });
+      return;
+    }
     w.document.open();
     w.document.write(html);
     w.document.close();
@@ -2431,7 +2434,14 @@ export default function MaterialsPage() {
           const updateItem = (idx, patch) => setTransferModal(t => ({ ...t, items: t.items.map((x, i) => i === idx ? { ...x, ...patch } : x) }));
           const removeItem = (idx) => setTransferModal(t => ({ ...t, items: t.items.filter((_, i) => i !== idx) }));
 
-          const canConfirm = !!transferModal.branch_id && transferModal.items.some(i => i.material_id && Number(i.qty) > 0);
+          const hasBranch = !!transferModal.branch_id;
+          const hasDate = !!transferModal.date;
+          const hasItems = transferModal.items.some(i => i.material_id && Number(i.qty) > 0);
+          const canConfirm = hasBranch && hasDate && hasItems;
+          const blockReason = !hasBranch ? "Pick a destination branch"
+            : !hasDate ? "Set the transfer date"
+            : !hasItems ? "Add at least one material with qty > 0"
+            : null;
 
           return (
             <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }}>
@@ -2607,16 +2617,23 @@ export default function MaterialsPage() {
               </div>
 
               {/* Footer actions */}
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: "1px solid var(--border)", paddingTop: 12 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, borderTop: "1px solid var(--border)", paddingTop: 12, flexWrap: "wrap" }}>
                 <button onClick={() => openTransferSlip({ autoPrint: false })} disabled={!canConfirm}
+                  title={blockReason || "Open printable transfer slip"}
                   style={{ padding: "10px 18px", borderRadius: 10, background: "var(--bg4)", color: canConfirm ? "var(--accent)" : "var(--text3)", border: "1px solid var(--border2)", fontWeight: 700, fontSize: 12, cursor: canConfirm ? "pointer" : "not-allowed", display: "inline-flex", alignItems: "center", gap: 6 }}>
                   <Icon name="save" size={13} /> Preview / Print Slip
                 </button>
-                <div style={{ display: "flex", gap: 10 }}>
+                <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                  {blockReason && (
+                    <span style={{ fontSize: 10.5, fontWeight: 700, color: "var(--red)", background: "rgba(248,113,113,0.12)", border: "1px solid rgba(248,113,113,0.3)", padding: "4px 10px", borderRadius: 6 }}>
+                      ⚠ {blockReason}
+                    </span>
+                  )}
                   <button onClick={() => setTransferModal(null)}
                     style={{ padding: "10px 18px", borderRadius: 10, background: "var(--bg4)", color: "var(--text2)", border: "1px solid var(--border2)", fontWeight: 600, fontSize: 12, cursor: "pointer" }}>Cancel</button>
                   <button onClick={commitTransfer} disabled={!canConfirm}
-                    style={{ padding: "10px 22px", borderRadius: 10, background: "linear-gradient(135deg,var(--accent),var(--gold2))", color: "#000", border: "none", fontWeight: 800, fontSize: 12, cursor: canConfirm ? "pointer" : "not-allowed", opacity: canConfirm ? 1 : 0.5 }}>
+                    title={blockReason || "Save this transfer"}
+                    style={{ padding: "10px 22px", borderRadius: 10, background: canConfirm ? "linear-gradient(135deg,var(--accent),var(--gold2))" : "var(--bg4)", color: canConfirm ? "#000" : "var(--text3)", border: "none", fontWeight: 800, fontSize: 12, cursor: canConfirm ? "pointer" : "not-allowed", opacity: canConfirm ? 1 : 0.6 }}>
                     Confirm Transfer
                   </button>
                 </div>
