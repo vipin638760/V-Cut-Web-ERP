@@ -923,6 +923,20 @@ export default function BranchesPage() {
                 ? `cash-in-hand: — → ${INR(newCih)}`
                 : `cash-in-hand: ${INR(prevCih)} → ${INR(newCih)}`);
             }
+
+            // Re-derive cash_diff against whatever actual_cash is on file so a
+            // re-run keeps Def/Exc in sync with the freshly computed expected.
+            const actualStored = entry.actual_cash;
+            const newCashDiff = (actualStored === null || actualStored === undefined || actualStored === "")
+              ? null
+              : Math.round((Number(actualStored) || 0) - newCih);
+            const prevCashDiff = entry.cash_diff === undefined ? null : entry.cash_diff;
+            if (prevCashDiff !== newCashDiff) {
+              changes.cash_diff = newCashDiff;
+              changed = true;
+              const fmt = v => v === null ? "—" : (v > 0 ? `▲ ${INR(v)}` : v < 0 ? `▼ ${INR(Math.abs(v))}` : "✓ Match");
+              details.push(`def/exc: ${fmt(prevCashDiff)} → ${fmt(newCashDiff)}`);
+            }
           }
 
           const prefix = isMulti ? `${branchName} ${entry.date}` : entry.date;
@@ -1643,6 +1657,7 @@ export default function BranchesPage() {
             gst: 0, estExpense,
             leaves: dLeaves,
             pl: -estExpense,
+            expectedCih: 0, actualCih: null, cashDiff: null,
             isFuture: true,
           });
           continue;
@@ -1663,6 +1678,12 @@ export default function BranchesPage() {
         const dIncome = dOnline + dCash + dMatInc;
         const dExpenses = dIncExp + dMatExp + dOtherExp + dFixedFees + dSalaryShare + dGst;
 
+        const dExpectedCih = dEntries.reduce((s, e) => s + (Number(e.cash_in_hand) || 0), 0);
+        const dActualRecorded = dEntries.some(e => e.actual_cash != null);
+        const dActualCih = dActualRecorded ? dEntries.reduce((s, e) => s + (Number(e.actual_cash) || 0), 0) : null;
+        const dDiffRecorded = dEntries.some(e => e.cash_diff != null);
+        const dCashDiff = dDiffRecorded ? dEntries.reduce((s, e) => s + (Number(e.cash_diff) || 0), 0) : null;
+
         breakdownStats.push({
           label, date: dayPrefix,
           income: dIncome,
@@ -1677,6 +1698,7 @@ export default function BranchesPage() {
           estExpense: 0,
           leaves: dLeaves,
           pl: dIncome - dExpenses,
+          expectedCih: dExpectedCih, actualCih: dActualCih, cashDiff: dCashDiff,
           isFuture: false,
         });
       }
@@ -1702,7 +1724,13 @@ export default function BranchesPage() {
 
         const mIncome = mOnline + mCash + mMatInc;
         const mExpenses = mIncExp + mMatExp + mOtherExp + mFixed + mActualSalary;
-        
+
+        const mExpectedCih = mEntries.reduce((s, e) => s + (Number(e.cash_in_hand) || 0), 0);
+        const mActualRecorded = mEntries.some(e => e.actual_cash != null);
+        const mActualCih = mActualRecorded ? mEntries.reduce((s, e) => s + (Number(e.actual_cash) || 0), 0) : null;
+        const mDiffRecorded = mEntries.some(e => e.cash_diff != null);
+        const mCashDiff = mDiffRecorded ? mEntries.reduce((s, e) => s + (Number(e.cash_diff) || 0), 0) : null;
+
         breakdownStats.push({
           label: new Date(filterYear, m - 1).toLocaleString('default', { month: 'short' }),
           monthPrefix,
@@ -1721,6 +1749,7 @@ export default function BranchesPage() {
           estExpense: 0,
           leaves: mLeaves,
           pl: mIncome - mExpenses,
+          expectedCih: mExpectedCih, actualCih: mActualCih, cashDiff: mCashDiff,
           isFuture: false,
         });
       }
@@ -2361,6 +2390,9 @@ export default function BranchesPage() {
                   <TH right title={`GST extraction @ ${gstPct}% on online income`}>GST ({gstPct}%)</TH>
                   <TH right title="Projected fixed cost + salary share for future days not yet entered">Est. Expense</TH>
                   <TH right>{filterMode === "month" ? "Leave Entry" : "Leaves"}</TH>
+                  <TH right title="Expected cash in drawer per the formula">Expected CIH</TH>
+                  <TH right title="Physically counted cash">Actual CIH</TH>
+                  <TH right title="Actual − Expected. Positive = excess, negative = deficit.">Def / Exc</TH>
                   <TH right>Net P&L</TH>
                 </tr></thead>
                 <tbody>
@@ -2469,6 +2501,12 @@ export default function BranchesPage() {
                       <TD right style={{ color: "var(--red)" }}>{(m.gst || 0) > 0 ? INR(m.gst) : "—"}</TD>
                       <TD right style={{ color: "var(--orange)" }}>{(m.estExpense || 0) > 0 ? INR(m.estExpense) : "—"}</TD>
                       <TD right style={{ fontWeight: 600, color: "var(--text3)" }}>{m.leaves}</TD>
+                      <TD right style={{ fontWeight: 700, color: (m.expectedCih || 0) >= 0 ? "var(--green)" : "var(--red)" }}>{m.isFuture || (m.expectedCih || 0) === 0 ? "—" : INR(m.expectedCih)}</TD>
+                      <TD right style={{ fontWeight: 700, color: m.actualCih == null ? "var(--text3)" : m.actualCih >= 0 ? "var(--green)" : "var(--red)" }}>{m.actualCih == null ? "—" : INR(m.actualCih)}</TD>
+                      <TD right style={{ fontWeight: 700, whiteSpace: "nowrap", color: m.cashDiff == null ? "var(--text3)" : m.cashDiff === 0 ? "var(--green)" : m.cashDiff > 0 ? "var(--green)" : "var(--red)" }}
+                        title={m.cashDiff == null ? "Actual cash not recorded" : m.cashDiff === 0 ? "Match" : m.cashDiff > 0 ? `Excess ${INR(m.cashDiff)}` : `Deficit ${INR(Math.abs(m.cashDiff))}`}>
+                        {m.cashDiff == null ? "—" : m.cashDiff === 0 ? "✓ Match" : m.cashDiff > 0 ? `▲ ${INR(m.cashDiff)}` : `▼ ${INR(Math.abs(m.cashDiff))}`}
+                      </TD>
                       <TD right style={{ fontWeight: 700, color: m.pl >= 0 ? "var(--green)" : "var(--red)" }}>{isAdmin ? (INR(m.pl)) : "•••••"}</TD>
                     </tr>
                   ))}
@@ -2489,6 +2527,20 @@ export default function BranchesPage() {
                       <TD right style={{ fontWeight: 800, color: "var(--red)" }}>{INR(breakdownStats.reduce((s, m) => s + (m.gst || 0), 0))}</TD>
                       <TD right style={{ fontWeight: 800, color: "var(--orange)" }}>{INR(breakdownStats.reduce((s, m) => s + (m.estExpense || 0), 0))}</TD>
                       <TD right style={{ fontWeight: 800, color: "var(--text2)" }}>{breakdownStats.reduce((s, m) => s + m.leaves, 0)}</TD>
+                      {(() => {
+                        const totExp = breakdownStats.reduce((s, m) => s + (m.expectedCih || 0), 0);
+                        const anyActual = breakdownStats.some(m => m.actualCih != null);
+                        const totAct = anyActual ? breakdownStats.reduce((s, m) => s + (m.actualCih || 0), 0) : null;
+                        const anyDiff = breakdownStats.some(m => m.cashDiff != null);
+                        const totDiff = anyDiff ? breakdownStats.reduce((s, m) => s + (m.cashDiff || 0), 0) : null;
+                        return <>
+                          <TD right style={{ fontWeight: 800, color: totExp >= 0 ? "var(--green)" : "var(--red)" }}>{INR(totExp)}</TD>
+                          <TD right style={{ fontWeight: 800, color: totAct == null ? "var(--text3)" : totAct >= 0 ? "var(--green)" : "var(--red)" }}>{totAct == null ? "—" : INR(totAct)}</TD>
+                          <TD right style={{ fontWeight: 800, whiteSpace: "nowrap", color: totDiff == null ? "var(--text3)" : totDiff === 0 ? "var(--green)" : totDiff > 0 ? "var(--green)" : "var(--red)" }}>
+                            {totDiff == null ? "—" : totDiff === 0 ? "✓ Match" : totDiff > 0 ? `▲ ${INR(totDiff)}` : `▼ ${INR(Math.abs(totDiff))}`}
+                          </TD>
+                        </>;
+                      })()}
                       <TD right style={{ fontWeight: 800, color: breakdownStats.reduce((s, m) => s + m.pl, 0) >= 0 ? "var(--green)" : "var(--red)" }}>
                         {isAdmin ? INR(breakdownStats.reduce((s, m) => s + m.pl, 0)) : "•••••"}
                       </TD>
