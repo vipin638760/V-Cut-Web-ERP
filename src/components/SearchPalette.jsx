@@ -14,7 +14,7 @@ export default function SearchPalette({ isOpen, onClose, context, userRole }) {
   const registry = useCallback(() => {
     const ALL = [
       { id: "dashboard",             label: "Dashboard",              cat: "Navigation", icon: "home",        path: "/dashboard",                      roles: ["admin", "accountant", "employee"] },
-      { id: "branches",              label: "Branch Details",         cat: "Navigation", icon: "grid",        path: "/dashboard/branches",             roles: ["admin", "accountant"] },
+      { id: "branches",              label: "Branch Performance",     cat: "Navigation", icon: "grid",        path: "/dashboard/branches",             roles: ["admin", "accountant"] },
       { id: "cash-collection",       label: "Cash Collection",        cat: "Navigation", icon: "wallet",      path: "/dashboard/cash-collection",      roles: ["admin", "accountant"] },
       { id: "incentive-calculator",  label: "Incentive Calculator",   cat: "Navigation", icon: "trending",    path: "/dashboard/incentive-calculator", roles: ["admin", "accountant"] },
       { id: "entry",                 label: "Daily Business Entry",   cat: "Navigation", icon: "edit",        path: "/dashboard/entry",                roles: ["admin", "accountant"] },

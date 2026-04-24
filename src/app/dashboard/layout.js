@@ -11,7 +11,7 @@ import { db } from "@/lib/firebase";
 const NAV = {
   admin: [
     { id: "dashboard", l: "Dashboard",             icon: "home" },
-    { id: "branches",  l: "Branch Details",        icon: "grid" },
+    { id: "branches",  l: "Branch Performance",    icon: "grid" },
     { id: "cash-collection", l: "Cash Collection", icon: "wallet" },
     { id: "incentive-calculator", l: "Incentive Calculator", icon: "trending" },
     { id: "entry",     l: "Daily Business Entry",  icon: "edit" },
@@ -31,7 +31,7 @@ const NAV = {
   ],
   accountant: [
     { id: "dashboard", l: "Dashboard",             icon: "home" },
-    { id: "branches",  l: "Branch Details",        icon: "grid" },
+    { id: "branches",  l: "Branch Performance",    icon: "grid" },
     { id: "cash-collection", l: "Cash Collection", icon: "wallet" },
     { id: "incentive-calculator", l: "Incentive Calculator", icon: "trending" },
     { id: "entry",     l: "Daily Business Entry",  icon: "edit" },

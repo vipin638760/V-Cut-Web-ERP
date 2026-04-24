@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
-import { collection, onSnapshot, query, orderBy, addDoc, doc, writeBatch, deleteDoc, increment } from "firebase/firestore";
+import { collection, onSnapshot, query, orderBy, addDoc, doc, writeBatch, deleteDoc, updateDoc, increment } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
 import { INR } from "@/lib/calculations";

@@ -1111,6 +1111,7 @@ export default function DashboardPage() {
         <DailyMaterialChart
           entries={entries}
           allocations={materialAllocations}
+          branches={branches}
           filterYear={filterYear}
           filterMonth={filterMonth}
           useAllocations={matUseAllocations}
@@ -1657,7 +1658,7 @@ function MiniKPI({ label, value, sub, color }) {
 // from the material_allocations collection; `mat_use_lumpsum` pulls from
 // entry.mat_expense (the lumpsum number typed into Daily Entry). If both are
 // on, the stack shows them as two colours so the mix is visible.
-function DailyMaterialChart({ entries, allocations, filterYear, filterMonth, useAllocations, useLumpsum }) {
+function DailyMaterialChart({ entries, allocations, branches = [], filterYear, filterMonth, useAllocations, useLumpsum }) {
   const [hover, setHover] = useState(null);
   const prefix = `${filterYear}-${String(filterMonth).padStart(2, "0")}`;
   const daysInMonth = new Date(filterYear, filterMonth, 0).getDate();
@@ -1666,6 +1667,15 @@ function DailyMaterialChart({ entries, allocations, filterYear, filterMonth, use
 
   const byDayAlloc = new Array(daysInMonth).fill(0);
   const byDayLump = new Array(daysInMonth).fill(0);
+  // Branch-level rollups so we can show "who consumed the most".
+  const byBranch = new Map(); // id -> { name, alloc, lump, total }
+
+  const bumpBranch = (id, key, amt) => {
+    const row = byBranch.get(id) || { name: branches.find(b => b.id === id)?.name || "—", alloc: 0, lump: 0, total: 0 };
+    row[key] += amt;
+    row.total += amt;
+    byBranch.set(id, row);
+  };
 
   if (useAllocations) {
     allocations.forEach(a => {
@@ -1675,6 +1685,7 @@ function DailyMaterialChart({ entries, allocations, filterYear, filterMonth, use
       if (dIdx < 0 || dIdx >= daysInMonth) return;
       const total = Number(a.total) || (a.items || []).reduce((s, it) => s + (Number(it.line_total) || (Number(it.qty) * Number(it.price_at_transfer)) || 0), 0);
       byDayAlloc[dIdx] += total;
+      if (a.branch_id) bumpBranch(a.branch_id, "alloc", total);
     });
   }
   if (useLumpsum) {
@@ -1682,9 +1693,15 @@ function DailyMaterialChart({ entries, allocations, filterYear, filterMonth, use
       if (!e.date || !e.date.startsWith(prefix)) return;
       const dIdx = Number(e.date.slice(8, 10)) - 1;
       if (dIdx < 0 || dIdx >= daysInMonth) return;
-      byDayLump[dIdx] += Number(e.mat_expense) || 0;
+      const amt = Number(e.mat_expense) || 0;
+      if (amt <= 0) return;
+      byDayLump[dIdx] += amt;
+      if (e.branch_id) bumpBranch(e.branch_id, "lump", amt);
     });
   }
+  const branchRows = Array.from(byBranch.values())
+    .filter(r => r.total > 0)
+    .sort((a, b) => b.total - a.total);
 
   const byDay = byDayAlloc.map((v, i) => v + byDayLump[i]);
   const max = Math.max(1, ...byDay);
@@ -1924,6 +1941,53 @@ function DailyMaterialChart({ entries, allocations, filterYear, filterMonth, use
               )}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Per-branch consumption leaderboard — shows who burned the most
+          material in this window, using the same source(s) as the chart. */}
+      {branchRows.length > 0 && (
+        <div style={{ marginTop: 16, paddingTop: 14, borderTop: "1px solid var(--border)" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10, flexWrap: "wrap", gap: 6 }}>
+            <span style={{ fontSize: 10, fontWeight: 800, color: "#d7a6ff", textTransform: "uppercase", letterSpacing: 1.4 }}>
+              Branch consumption · {monthLabel}
+            </span>
+            <span style={{ fontSize: 10, color: "var(--text3)", fontWeight: 600 }}>
+              {branchRows.length} branch{branchRows.length === 1 ? "" : "es"} · heaviest first
+            </span>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {branchRows.map((r, i) => {
+              const pct = branchRows[0].total > 0 ? (r.total / branchRows[0].total) * 100 : 0;
+              const shareOfTotal = total > 0 ? (r.total / total) * 100 : 0;
+              const name = r.name.replace("V-CUT ", "");
+              const rankColor = i === 0 ? "#d7a6ff" : i === 1 ? "var(--accent)" : i === 2 ? "#ffb877" : "var(--text2)";
+              return (
+                <div key={r.name + i} style={{ display: "grid", gridTemplateColumns: "22px minmax(120px, 170px) 1fr auto", alignItems: "center", gap: 10 }}>
+                  <div style={{ width: 20, height: 20, borderRadius: 6, background: i < 3 ? "rgba(192,132,252,0.12)" : "var(--bg4)", border: `1px solid ${i < 3 ? "rgba(192,132,252,0.35)" : "var(--border)"}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 900, color: rankColor }}>
+                    {i + 1}
+                  </div>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.name}>
+                    {name}
+                  </div>
+                  <div style={{ position: "relative", height: 18, background: "rgba(255,255,255,0.025)", borderRadius: 5, overflow: "hidden", display: "flex" }}>
+                    {useAllocations && r.alloc > 0 && (
+                      <div style={{ width: `${pct * (r.alloc / r.total)}%`, height: "100%", background: "linear-gradient(90deg, rgba(215,166,255,0.85), rgba(139,92,246,0.4))" }} />
+                    )}
+                    {useLumpsum && r.lump > 0 && (
+                      <div style={{ width: `${pct * (r.lump / r.total)}%`, height: "100%", background: "linear-gradient(90deg, rgba(93,232,255,0.7), rgba(8,145,168,0.35))" }} />
+                    )}
+                    <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", paddingLeft: 8, fontSize: 10, color: "var(--text3)", fontWeight: 600, pointerEvents: "none" }}>
+                      {shareOfTotal >= 1 ? `${shareOfTotal.toFixed(1)}% of total` : ""}
+                    </div>
+                  </div>
+                  <div style={{ fontSize: 12.5, fontWeight: 800, color: rankColor, fontFamily: "var(--font-headline, var(--font-outfit))", minWidth: 80, textAlign: "right" }}>
+                    {INR(r.total)}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
     </Card>
