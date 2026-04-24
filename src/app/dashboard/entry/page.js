@@ -756,7 +756,7 @@ export default function EntryPage() {
 
     // Summary sheet — one row per entry with totals.
     const ws = wb.addWorksheet("Entries");
-    const headers = ["Date","Branch","Online","Cash","GST","Mat Sale","Total Billing","Incentive","Tips","Staff T.Inc","Loan Billing","Shared Svc ₹","Other Out","Petrol","Mat Expense","Cash in Hand"];
+    const headers = ["Date","Branch","Online","Cash","GST","Mat Sale","Total Billing","Incentive","Tips","Staff T.Inc","Loan Billing","Shared Svc ₹","Other Out","Petrol","Mat Expense","Expected Cash in Hand","Actual Cash in Hand"];
     const hdrRow = ws.addRow(headers);
     hdrRow.eachCell(cell => {
       cell.font = { bold: true, color: { argb: "FFFFFFFF" }, size: 11 };
@@ -769,9 +769,10 @@ export default function EntryPage() {
       const b = branchesById.get(e.branch_id);
       const agg = sumStaffBilling(e.staff_billing);
       const cih = e.cash_in_hand !== undefined ? e.cash_in_hand : computeCashInHand(e, { branch: b, staffList: staff });
+      const actualCih = e.actual_cash == null ? "" : Number(e.actual_cash) || 0;
       const loanBilling = (e.staff_billing || []).filter(sb => sb.loan_flag).reduce((s, sb) => s + (Number(sb.billing) || 0), 0);
       const sharedTotal = (e.shared_services || []).reduce((s, ss) => s + (Number(ss.amount) || 0), 0);
-      const row = ws.addRow([e.date, b?.name||"?", e.online||0, e.cash||0, e.total_gst||0, agg.material, agg.billing, agg.incentive, agg.tips, agg.staffTotalInc, loanBilling, sharedTotal, e.others||0, e.petrol||0, e.mat_expense||0, cih]);
+      const row = ws.addRow([e.date, b?.name||"?", e.online||0, e.cash||0, e.total_gst||0, agg.material, agg.billing, agg.incentive, agg.tips, agg.staffTotalInc, loanBilling, sharedTotal, e.others||0, e.petrol||0, e.mat_expense||0, cih, actualCih]);
       row.eachCell((cell, colNum) => { if (colNum >= 3) cell.numFmt = "#,##0"; });
     });
 
@@ -2039,8 +2040,10 @@ export default function EntryPage() {
         </div>
 
         {/* Filter bar — labelled groups, full-width card, uniform button
-            sizes so all controls read as siblings. */}
-        <Card style={{ padding: "14px 18px" }}>
+            sizes so all controls read as siblings. Overflow kept visible so
+            the branch-picker popover doesn't get clipped by Card's default
+            overflow-x:auto (which CSS promotes to overflow-y:auto). */}
+        <Card style={{ padding: "14px 18px", overflow: "visible" }}>
           <div style={{ display: "flex", alignItems: "stretch", gap: 20, flexWrap: "wrap", rowGap: 14 }}>
             {/* Scope switcher */}
             <div style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 260 }}>
@@ -2232,7 +2235,8 @@ export default function EntryPage() {
               <TH right sort={sort} sortKey="staffTInc">Staff T.Inc</TH>
               <TH right sort={sort} sortKey="staffTSale">Staff T.Sale</TH>
               <TH right sort={sort} sortKey="otherOut">Other Out</TH>
-              <TH right sort={sort} sortKey="cih">Cash in Hand</TH>
+              <TH right sort={sort} sortKey="expectedCih">Expected Cash in Hand</TH>
+              <TH right sort={sort} sortKey="actualCih">Actual Cash in Hand</TH>
               <TH right sort={sort} sortKey="diff">Def / Exc</TH>
               <TH right sticky style={{ minWidth: 130 }}>Actions</TH>
             </tr>
@@ -2257,7 +2261,8 @@ export default function EntryPage() {
                 staffTInc:  r => r.agg.staffTotalInc,
                 staffTSale: r => r.agg.billing + r.agg.material + r.agg.tips,
                 otherOut:   r => (Number(r.e.others) || 0) + (Number(r.e.petrol) || 0),
-                cih:        r => r.e.cash_in_hand !== undefined ? r.e.cash_in_hand : computeCashInHand(r.e, { branch: r.b, staffList: staff }),
+                expectedCih: r => r.e.cash_in_hand !== undefined ? r.e.cash_in_hand : computeCashInHand(r.e, { branch: r.b, staffList: staff }),
+                actualCih:   r => r.e.actual_cash == null ? Number.NEGATIVE_INFINITY : Number(r.e.actual_cash) || 0,
                 diff:       r => r.e.cash_diff == null ? Number.NEGATIVE_INFINITY : r.e.cash_diff,
               }
             ).map(({ e, b, agg }) => {
@@ -2268,7 +2273,8 @@ export default function EntryPage() {
               const staffTotalIncE = agg.staffTotalInc;
               const staffTotalSaleE = totalBillingE + totalMatE + totalTipsE;
               const totalOthE = (e.others || 0) + (e.petrol || 0);
-              const cih = e.cash_in_hand !== undefined ? e.cash_in_hand : computeCashInHand(e, { branch: b, staffList: staff });
+              const expectedCih = e.cash_in_hand !== undefined ? e.cash_in_hand : computeCashInHand(e, { branch: b, staffList: staff });
+              const actualCih = e.actual_cash == null ? null : Number(e.actual_cash) || 0;
               return (
                 <tr key={e.id}>
                   <TD style={{ fontWeight: 600, whiteSpace: "nowrap" }}>{e.date}</TD>
@@ -2283,7 +2289,10 @@ export default function EntryPage() {
                   <TD right style={{ color: "var(--gold)", fontWeight: 700 }}>{INR(staffTotalIncE)}</TD>
                   <TD right style={{ color: "var(--text2)", fontWeight: 700 }}>{INR(staffTotalSaleE)}</TD>
                   <TD right style={{ color: "var(--red)" }}>{INR(totalOthE)}</TD>
-                  <TD right style={{ fontWeight: 700, color: cih >= 0 ? "var(--green)" : "var(--red)" }}>{INR(cih)}</TD>
+                  <TD right style={{ fontWeight: 700, color: expectedCih >= 0 ? "var(--green)" : "var(--red)" }} title="Expected cash-in-hand from the formula">{INR(expectedCih)}</TD>
+                  <TD right style={{ fontWeight: 700, color: actualCih == null ? "var(--text3)" : actualCih >= 0 ? "var(--green)" : "var(--red)" }} title={actualCih == null ? "Actual cash not recorded" : "Physically counted cash"}>
+                    {actualCih == null ? "—" : INR(actualCih)}
+                  </TD>
                   <TD right style={{ fontWeight: 700, color: e.cash_diff == null ? "var(--text3)" : e.cash_diff === 0 ? "var(--green)" : e.cash_diff > 0 ? "var(--green)" : "var(--red)", whiteSpace: "nowrap" }}
                     title={e.cash_diff == null ? "Actual cash not recorded" : e.cash_diff === 0 ? "Match" : e.cash_diff > 0 ? `Excess ${INR(e.cash_diff)}` : `Deficit ${INR(Math.abs(e.cash_diff))}`}>
                     {e.cash_diff == null ? "—" : e.cash_diff === 0 ? "✓ Match" : e.cash_diff > 0 ? `▲ ${INR(e.cash_diff)}` : `▼ ${INR(Math.abs(e.cash_diff))}`}
@@ -2299,7 +2308,7 @@ export default function EntryPage() {
               );
             })}
             {filteredEntries.length === 0 && (
-              <tr><td colSpan={15} style={{ textAlign: "center", padding: 24, color: "var(--text3)" }}>No entries for this period</td></tr>
+              <tr><td colSpan={16} style={{ textAlign: "center", padding: 24, color: "var(--text3)" }}>No entries for this period</td></tr>
             )}
           </tbody>
         </table>
