@@ -2076,41 +2076,92 @@ export default function EntryPage() {
                         style={{ color: "var(--red)", fontWeight: 800, cursor: "pointer" }}>×</span>
                     )}
                   </button>
-                {showBranchPicker && (
-                  <div style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, width: 260, background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 10, boxShadow: "0 10px 30px rgba(0,0,0,0.4)", zIndex: 100, overflow: "hidden" }}>
-                    <div style={{ padding: 8, borderBottom: "1px solid var(--border)" }}>
-                      <input type="text" autoFocus placeholder="Search branch…" value={recentBranchSearch}
-                        onChange={e => setRecentBranchSearch(e.target.value)}
-                        style={{ width: "100%", padding: "7px 10px", background: "var(--bg4)", border: "1px solid var(--border2)", borderRadius: 7, color: "var(--text)", fontSize: 12, outline: "none" }} />
-                    </div>
-                    <div style={{ maxHeight: 240, overflowY: "auto" }}>
-                      {branches
-                        .filter(b => {
-                          const q = recentBranchSearch.trim().toLowerCase();
-                          if (!q) return true;
-                          return (b.name || "").toLowerCase().includes(q);
-                        })
-                        .map(b => {
+                {showBranchPicker && (() => {
+                  const q = recentBranchSearch.trim().toLowerCase();
+                  const filteredBranches = branches.filter(b => !q || (b.name || "").toLowerCase().includes(q));
+                  const allFilteredSelected = filteredBranches.length > 0 && filteredBranches.every(b => recentBranchIds.includes(b.id));
+                  const toggleAllFiltered = () => {
+                    if (allFilteredSelected) {
+                      const filteredIds = new Set(filteredBranches.map(b => b.id));
+                      setRecentBranchIds(prev => prev.filter(id => !filteredIds.has(id)));
+                    } else {
+                      setRecentBranchIds(prev => Array.from(new Set([...prev, ...filteredBranches.map(b => b.id)])));
+                    }
+                  };
+                  return (
+                    <div style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, width: 320, background: "var(--bg2)", border: "1px solid rgba(var(--accent-rgb),0.3)", borderRadius: 12, boxShadow: "0 20px 50px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.03)", zIndex: 100, overflow: "hidden" }}>
+                      {/* Header: title + selection state */}
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", borderBottom: "1px solid var(--border2)", background: "linear-gradient(90deg, rgba(var(--accent-rgb),0.08), transparent)" }}>
+                        <div>
+                          <div style={{ fontSize: 11, fontWeight: 800, color: "var(--accent)", textTransform: "uppercase", letterSpacing: 1.2 }}>Filter by Branch</div>
+                          <div style={{ fontSize: 10, color: "var(--text3)", fontWeight: 600, marginTop: 2 }}>
+                            {recentBranchIds.length > 0 ? `${recentBranchIds.length} of ${branches.length} selected` : `All ${branches.length} visible by default`}
+                          </div>
+                        </div>
+                        {recentBranchIds.length > 0 && (
+                          <button onClick={() => setRecentBranchIds([])}
+                            style={{ padding: "4px 10px", borderRadius: 6, background: "transparent", border: "1px solid rgba(248,113,113,0.3)", color: "var(--red)", fontSize: 9.5, fontWeight: 800, cursor: "pointer", textTransform: "uppercase", letterSpacing: 0.8 }}>Clear</button>
+                        )}
+                      </div>
+
+                      {/* Search */}
+                      <div style={{ padding: "10px 12px 8px", borderBottom: "1px solid var(--border)" }}>
+                        <div style={{ position: "relative" }}>
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "var(--text3)" }}>
+                            <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                          </svg>
+                          <input type="text" autoFocus placeholder="Search branch name…" value={recentBranchSearch}
+                            onChange={e => setRecentBranchSearch(e.target.value)}
+                            style={{ width: "100%", padding: "8px 10px 8px 30px", background: "var(--bg4)", border: "1px solid var(--border2)", borderRadius: 8, color: "var(--text)", fontSize: 12.5, fontWeight: 600, outline: "none", boxSizing: "border-box" }} />
+                        </div>
+                      </div>
+
+                      {/* Select all (filtered) toggle */}
+                      {filteredBranches.length > 0 && (
+                        <label style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 14px", cursor: "pointer", borderBottom: "1px solid var(--border)", background: "var(--bg3)", userSelect: "none" }}>
+                          <input type="checkbox" checked={allFilteredSelected}
+                            ref={el => { if (el) el.indeterminate = !allFilteredSelected && filteredBranches.some(b => recentBranchIds.includes(b.id)); }}
+                            onChange={toggleAllFiltered}
+                            style={{ accentColor: "var(--accent)", cursor: "pointer", width: 14, height: 14 }} />
+                          <span style={{ fontSize: 11, color: "var(--accent)", fontWeight: 800, textTransform: "uppercase", letterSpacing: 0.8 }}>
+                            {allFilteredSelected ? "Unselect" : "Select"} {q ? `matching (${filteredBranches.length})` : `all (${filteredBranches.length})`}
+                          </span>
+                        </label>
+                      )}
+
+                      {/* Branch list */}
+                      <div style={{ maxHeight: 280, overflowY: "auto" }}>
+                        {filteredBranches.length === 0 ? (
+                          <div style={{ padding: 20, textAlign: "center", color: "var(--text3)", fontSize: 11, fontStyle: "italic" }}>
+                            No branches match &ldquo;{recentBranchSearch}&rdquo;
+                          </div>
+                        ) : filteredBranches.map(b => {
                           const checked = recentBranchIds.includes(b.id);
                           return (
                             <label key={b.id}
-                              style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 12px", cursor: "pointer", borderBottom: "1px solid var(--border)", background: checked ? "rgba(var(--accent-rgb),0.08)" : "transparent" }}>
+                              style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 14px", cursor: "pointer", borderBottom: "1px solid var(--border)", background: checked ? "rgba(var(--accent-rgb),0.1)" : "transparent", transition: "background .12s", userSelect: "none" }}
+                              onMouseEnter={e => { if (!checked) e.currentTarget.style.background = "rgba(255,255,255,0.03)"; }}
+                              onMouseLeave={e => { if (!checked) e.currentTarget.style.background = "transparent"; }}>
                               <input type="checkbox" checked={checked}
                                 onChange={() => setRecentBranchIds(prev => prev.includes(b.id) ? prev.filter(x => x !== b.id) : [...prev, b.id])}
-                                style={{ accentColor: "var(--accent)", cursor: "pointer" }} />
-                              <span style={{ fontSize: 12, color: "var(--text)", fontWeight: 600 }}>{b.name.replace("V-CUT ", "")}</span>
+                                style={{ accentColor: "var(--accent)", cursor: "pointer", width: 14, height: 14, flexShrink: 0 }} />
+                              <span style={{ fontSize: 12.5, color: checked ? "var(--accent)" : "var(--text)", fontWeight: checked ? 800 : 600, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{b.name.replace("V-CUT ", "")}</span>
+                              {b.type && (
+                                <span style={{ fontSize: 8.5, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5, padding: "2px 6px", borderRadius: 4, background: "var(--bg4)", border: "1px solid var(--border)" }}>{b.type}</span>
+                              )}
                             </label>
                           );
                         })}
+                      </div>
+
+                      {/* Footer actions */}
+                      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, padding: "10px 12px", borderTop: "1px solid var(--border)", background: "var(--bg3)" }}>
+                        <button onClick={() => setShowBranchPicker(false)}
+                          style={{ padding: "7px 16px", borderRadius: 8, background: "linear-gradient(135deg,var(--accent),var(--gold2))", color: "#000", border: "none", fontSize: 11, fontWeight: 800, cursor: "pointer", textTransform: "uppercase", letterSpacing: 0.8 }}>Done</button>
+                      </div>
                     </div>
-                    <div style={{ display: "flex", justifyContent: "space-between", padding: 8, borderTop: "1px solid var(--border)", background: "var(--bg3)" }}>
-                      <button onClick={() => { setRecentBranchIds(branches.map(b => b.id)); }}
-                        style={{ padding: "5px 10px", borderRadius: 6, background: "var(--bg4)", border: "1px solid var(--border)", color: "var(--text3)", fontSize: 10, fontWeight: 700, cursor: "pointer", textTransform: "uppercase", letterSpacing: 0.5 }}>Select all</button>
-                      <button onClick={() => setShowBranchPicker(false)}
-                        style={{ padding: "5px 10px", borderRadius: 6, background: "linear-gradient(135deg,var(--accent),var(--gold2))", color: "#000", border: "none", fontSize: 10, fontWeight: 800, cursor: "pointer", textTransform: "uppercase", letterSpacing: 0.5 }}>Done</button>
-                    </div>
-                  </div>
-                )}
+                  );
+                })()}
                 </div>
               </div>
             )}
