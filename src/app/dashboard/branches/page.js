@@ -2567,7 +2567,7 @@ export default function BranchesPage() {
         <Card>
           <table className="pill-table" style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12.5 }}>
             <thead><tr>
-              <TH>Date</TH><TH right>Online</TH><TH right>Cash</TH><TH right>GST</TH><TH right>Billing</TH><TH right>Incentive</TH><TH right>Staff T.Inc</TH><TH right>Staff T.Sale</TH><TH right>Expected CIH</TH><TH right>Actual CIH</TH>
+              <TH>Date</TH><TH right>Online</TH><TH right>Cash</TH><TH right>GST</TH><TH right>Billing</TH><TH right>Incentive</TH><TH right>Staff T.Inc</TH><TH right>Staff T.Sale</TH><TH right>Expected CIH</TH><TH right>Actual CIH</TH><TH right>Def / Exc</TH>
               {canEdit && <TH sticky> </TH>}
             </tr></thead>
             <tbody>
@@ -2592,6 +2592,10 @@ export default function BranchesPage() {
                     <TD right style={{ color: "var(--text2)", fontWeight: 700 }}>{INR(staffTSaleE)}</TD>
                     <TD right style={{ fontWeight: 700, color: cih >= 0 ? "var(--green)" : "var(--red)" }} title="Expected cash-in-hand">{INR(cih)}</TD>
                     <TD right style={{ fontWeight: 700, color: actualCih == null ? "var(--text3)" : actualCih >= 0 ? "var(--green)" : "var(--red)" }} title={actualCih == null ? "Actual cash not recorded" : "Physically counted cash"}>{actualCih == null ? "—" : INR(actualCih)}</TD>
+                    <TD right style={{ fontWeight: 700, color: e.cash_diff == null ? "var(--text3)" : e.cash_diff === 0 ? "var(--green)" : e.cash_diff > 0 ? "var(--green)" : "var(--red)", whiteSpace: "nowrap" }}
+                      title={e.cash_diff == null ? "Actual cash not recorded" : e.cash_diff === 0 ? "Match" : e.cash_diff > 0 ? `Excess ${INR(e.cash_diff)}` : `Deficit ${INR(Math.abs(e.cash_diff))}`}>
+                      {e.cash_diff == null ? "—" : e.cash_diff === 0 ? "✓ Match" : e.cash_diff > 0 ? `▲ ${INR(e.cash_diff)}` : `▼ ${INR(Math.abs(e.cash_diff))}`}
+                    </TD>
                     {canEdit && <TD sticky><div style={{ display: "flex", gap: 6 }}>
                       <IconBtn name="log" title="View log" variant="secondary" onClick={() => setLogView(e)} />
                       <IconBtn name="edit" title="Edit" variant="secondary" onClick={() => router.push(`/dashboard/entry?edit=${e.id}`)} />
@@ -2600,7 +2604,7 @@ export default function BranchesPage() {
                   </tr>
                 );
               })}
-              {periodEntries.length === 0 && <tr><td colSpan={7} style={{ textAlign: "center", padding: 24, color: "var(--text3)" }}>No entries for this period</td></tr>}
+              {periodEntries.length === 0 && <tr><td colSpan={canEdit ? 12 : 11} style={{ textAlign: "center", padding: 24, color: "var(--text3)" }}>No entries for this period</td></tr>}
             </tbody>
           </table>
         </Card>
@@ -3175,10 +3179,14 @@ function SummaryView({ summaryTab, setSummaryTab, branchData, branches, entries,
       </div>
 
       {summaryTab === "summary" ? (
-        // `auto-fit minmax(360px, …)` collapses to a single column below ~720px
-        // so the Income and Expenses tables each get full width on phones/tablets
-        // instead of squeezing into the fixed 1fr 2fr split.
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))", gap: 16 }}>
+        // Explicit 1:2 grid with minmax(0, …) so children can shrink below
+        // their content width — that's what lets the inner overflow-x wrappers
+        // actually trigger scroll instead of the whole card pushing past the
+        // viewport edge. A one-off <style> adds a stacking breakpoint so
+        // phones get each table full-width.
+        <>
+        <style>{`@media (max-width: 900px) { .vcut-summary-grid { grid-template-columns: minmax(0, 1fr) !important; } }`}</style>
+        <div className="vcut-summary-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 2fr)", gap: 16 }}>
           {/* INCOME TABLE */}
           <Card style={{ padding: 0, overflow: "hidden", minWidth: 0 }}>
             <div style={{ padding: "12px 16px", background: "linear-gradient(135deg, rgba(74,222,128,0.18), rgba(74,222,128,0.04))", borderBottom: "1px solid rgba(74,222,128,0.25)", fontWeight: 800, color: "var(--green)", fontSize: 13, letterSpacing: 1.5, textAlign: "center" }}>INCOME</div>
@@ -3311,6 +3319,7 @@ function SummaryView({ summaryTab, setSummaryTab, branchData, branches, entries,
             </div>
           </div>
         </div>
+        </>
       ) : (
         <DailyCashOnline
           branches={branches}
