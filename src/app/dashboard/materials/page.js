@@ -389,6 +389,33 @@ export default function MaterialsPage() {
   };
 
   const currentUser = useCurrentUser() || {};
+  // Both admins and accountants can remove transfer records. Employees cannot.
+  const canDeleteAllocation = ["admin", "accountant"].includes(currentUser?.role);
+  // Allocation view: cards grouped by branch (default) vs flat table of every transfer.
+  const [allocView, setAllocView] = useState("branches");
+
+  // Delete a full material_allocations doc. One doc = one transfer event, possibly with many
+  // items — the confirm spells out how many to avoid surprise deletes.
+  const handleDeleteAllocation = (a) => {
+    const items = (a.items || []).length;
+    const branchName = branches.find(x => x.id === a.branch_id)?.name?.replace("V-CUT ", "") || "branch";
+    const when = a.date || (a.transferred_at || "").slice(0, 10) || "—";
+    confirm({
+      title: "Delete Transfer",
+      message: `Delete the transfer of <strong>${items} item${items === 1 ? "" : "s"}</strong> to <strong>${branchName}</strong> on <strong>${when}</strong>?<br/><br/>Total: <strong>${INR(a.total || 0)}</strong><br/><br/>This only removes the allocation record — any downstream stock or daily-expense rollback has to be reconciled manually.`,
+      confirmText: "Yes, Delete",
+      cancelText: "Cancel",
+      type: "danger",
+      onConfirm: async () => {
+        try {
+          await deleteDoc(doc(db, "material_allocations", a.id));
+          toast({ title: "Deleted", message: "Transfer record removed.", type: "success" });
+        } catch (e) {
+          confirm({ title: "Error", message: e.message, confirmText: "OK", type: "danger", onConfirm: () => {} });
+        }
+      }
+    });
+  };
 
   useEffect(() => {
     if (!db) return;
@@ -1970,53 +1997,122 @@ export default function MaterialsPage() {
             </div>
 
             {/* Branch-wise history with date-wise material rollup */}
-            <div style={{ fontSize: 13, fontWeight: 800, color: "var(--gold)", marginBottom: 8, textTransform: "uppercase", letterSpacing: 1 }}>Transferred Materials by Branch</div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(320px,1fr))", gap: 12 }}>
-              {branches.map(b => {
-                const bAllocs = allocations.filter(a => a.branch_id === b.id);
-                const branchTotal = bAllocs.reduce((s, a) => s + (Number(a.total) || 0), 0);
-                return (
-                  <Card key={b.id} style={{ padding: 0 }}>
-                    <div onClick={() => setBranchDetail(branchDetail?.id === b.id ? null : b)}
-                      style={{ padding: "10px 14px", borderBottom: branchDetail?.id === b.id ? "1px solid var(--border)" : "none", background: "var(--bg4)", display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }}>
-                      <div>
-                        <div style={{ fontWeight: 800, fontSize: 13 }}>{b.name.replace("V-CUT ", "")}</div>
-                        <div style={{ fontSize: 10, color: "var(--text3)", marginTop: 2 }}>{bAllocs.length} transfer{bAllocs.length === 1 ? "" : "s"}</div>
-                      </div>
-                      <div style={{ fontSize: 14, color: "var(--green)", fontWeight: 800 }}>{INR(branchTotal)}</div>
-                    </div>
-                    {branchDetail?.id === b.id && (
-                      <div style={{ padding: 10 }}>
-                        {bAllocs.length === 0 ? (
-                          <div style={{ padding: 12, color: "var(--text3)", fontSize: 11, fontStyle: "italic", textAlign: "center" }}>No transfers yet.</div>
-                        ) : (
-                          <table style={{ width: "100%", fontSize: 11, borderCollapse: "separate", borderSpacing: 0 }}>
-                            <thead><tr style={{ background: "var(--bg3)" }}>
-                              <TH>Date</TH><TH>Material</TH><TH right>Qty</TH><TH right>Total</TH>
-                            </tr></thead>
-                            <tbody>
-                              {bAllocs.flatMap(a =>
-                                (a.items || []).map((it, i) => ({ ...it, date: a.date || (a.transferred_at || "").slice(0, 10), key: `${a.id}-${i}` }))
-                              )
-                              .sort((a, b) => (b.date || "").localeCompare(a.date || ""))
-                              .slice(0, 40)
-                              .map(row => (
-                                <tr key={row.key}>
-                                  <TD style={{ whiteSpace: "nowrap", color: "var(--text3)" }}>{row.date || "—"}</TD>
-                                  <TD style={{ fontWeight: 600 }}>{row.name}</TD>
-                                  <TD right>{row.qty} {row.unit}</TD>
-                                  <TD right style={{ fontWeight: 800, color: "var(--green)" }}>{INR(row.line_total || (row.qty * row.price_at_transfer) || 0)}</TD>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        )}
-                      </div>
-                    )}
-                  </Card>
-                );
-              })}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, flexWrap: "wrap", gap: 10 }}>
+              <div style={{ fontSize: 13, fontWeight: 800, color: "var(--gold)", textTransform: "uppercase", letterSpacing: 1 }}>
+                Transferred Materials {allocView === "branches" ? "by Branch" : "— All Transfers"}
+              </div>
+              <div style={{ display: "inline-flex", gap: 2, background: "var(--bg4)", padding: 3, borderRadius: 10 }}>
+                {[["branches", "By Branch"], ["table", "Table"]].map(([v, l]) => (
+                  <button key={v} onClick={() => setAllocView(v)}
+                    style={{ padding: "6px 14px", borderRadius: 8, fontSize: 11, fontWeight: 800, letterSpacing: 0.5, textTransform: "uppercase", border: "none", cursor: "pointer",
+                      background: allocView === v ? "linear-gradient(135deg,var(--accent),var(--gold2))" : "transparent",
+                      color: allocView === v ? "#000" : "var(--text3)" }}>
+                    {l}
+                  </button>
+                ))}
+              </div>
             </div>
+
+            {allocView === "branches" ? (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(320px,1fr))", gap: 12 }}>
+                {branches.map(b => {
+                  const bAllocs = allocations.filter(a => a.branch_id === b.id);
+                  const branchTotal = bAllocs.reduce((s, a) => s + (Number(a.total) || 0), 0);
+                  return (
+                    <Card key={b.id} style={{ padding: 0 }}>
+                      <div onClick={() => setBranchDetail(branchDetail?.id === b.id ? null : b)}
+                        style={{ padding: "10px 14px", borderBottom: branchDetail?.id === b.id ? "1px solid var(--border)" : "none", background: "var(--bg4)", display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }}>
+                        <div>
+                          <div style={{ fontWeight: 800, fontSize: 13 }}>{b.name.replace("V-CUT ", "")}</div>
+                          <div style={{ fontSize: 10, color: "var(--text3)", marginTop: 2 }}>{bAllocs.length} transfer{bAllocs.length === 1 ? "" : "s"}</div>
+                        </div>
+                        <div style={{ fontSize: 14, color: "var(--green)", fontWeight: 800 }}>{INR(branchTotal)}</div>
+                      </div>
+                      {branchDetail?.id === b.id && (
+                        <div style={{ padding: 10 }}>
+                          {bAllocs.length === 0 ? (
+                            <div style={{ padding: 12, color: "var(--text3)", fontSize: 11, fontStyle: "italic", textAlign: "center" }}>No transfers yet.</div>
+                          ) : (
+                            <table style={{ width: "100%", fontSize: 11, borderCollapse: "separate", borderSpacing: 0 }}>
+                              <thead><tr style={{ background: "var(--bg3)" }}>
+                                <TH>Date</TH><TH>Material</TH><TH right>Qty</TH><TH right>Total</TH>
+                                {canDeleteAllocation && <TH> </TH>}
+                              </tr></thead>
+                              <tbody>
+                                {bAllocs.flatMap(a =>
+                                  (a.items || []).map((it, i) => ({ ...it, alloc: a, date: a.date || (a.transferred_at || "").slice(0, 10), key: `${a.id}-${i}` }))
+                                )
+                                .sort((x, y) => (y.date || "").localeCompare(x.date || ""))
+                                .slice(0, 40)
+                                .map(row => (
+                                  <tr key={row.key}>
+                                    <TD style={{ whiteSpace: "nowrap", color: "var(--text3)" }}>{row.date || "—"}</TD>
+                                    <TD style={{ fontWeight: 600 }}>{row.name}</TD>
+                                    <TD right>{row.qty} {row.unit}</TD>
+                                    <TD right style={{ fontWeight: 800, color: "var(--green)" }}>{INR(row.line_total || (row.qty * row.price_at_transfer) || 0)}</TD>
+                                    {canDeleteAllocation && (
+                                      <TD>
+                                        <IconBtn name="del" variant="danger" title="Delete parent transfer (removes all items in this record)" onClick={() => handleDeleteAllocation(row.alloc)} />
+                                      </TD>
+                                    )}
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          )}
+                        </div>
+                      )}
+                    </Card>
+                  );
+                })}
+              </div>
+            ) : (
+              /* Flat table — every transfer across every branch, newest first. */
+              <Card style={{ padding: 0 }}>
+                {allocations.length === 0 ? (
+                  <div style={{ padding: 24, color: "var(--text3)", fontSize: 12, fontStyle: "italic", textAlign: "center" }}>No transfers yet.</div>
+                ) : (
+                  <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12.5 }}>
+                    <thead><tr>
+                      <TH>Date</TH>
+                      <TH>Branch</TH>
+                      <TH>Material</TH>
+                      <TH right>Qty</TH>
+                      <TH right>Line Total</TH>
+                      <TH right>Transfer Total</TH>
+                      {canDeleteAllocation && <TH> </TH>}
+                    </tr></thead>
+                    <tbody>
+                      {allocations
+                        .slice()
+                        .sort((x, y) => (y.date || y.transferred_at || "").localeCompare(x.date || x.transferred_at || ""))
+                        .flatMap(a => {
+                          const branchName = branches.find(x => x.id === a.branch_id)?.name?.replace("V-CUT ", "") || "—";
+                          const date = a.date || (a.transferred_at || "").slice(0, 10);
+                          return (a.items || []).map((it, i) => ({ ...it, alloc: a, branchName, date, first: i === 0, rowSpan: (a.items || []).length, key: `${a.id}-${i}` }));
+                        })
+                        .map(row => (
+                          <tr key={row.key}>
+                            <TD style={{ whiteSpace: "nowrap", color: "var(--text3)" }}>{row.date || "—"}</TD>
+                            <TD style={{ fontWeight: 600 }}>{row.branchName}</TD>
+                            <TD>{row.name}</TD>
+                            <TD right>{row.qty} {row.unit}</TD>
+                            <TD right style={{ fontWeight: 700, color: "var(--green)" }}>{INR(row.line_total || (row.qty * row.price_at_transfer) || 0)}</TD>
+                            {row.first ? (
+                              <TD right rowSpan={row.rowSpan} style={{ fontWeight: 800, color: "var(--gold)", borderLeft: "1px solid var(--border2)" }}>{INR(row.alloc.total || 0)}</TD>
+                            ) : null}
+                            {canDeleteAllocation && row.first ? (
+                              <TD rowSpan={row.rowSpan}>
+                                <IconBtn name="del" variant="danger" title="Delete this transfer (includes every item row in the same record)" onClick={() => handleDeleteAllocation(row.alloc)} />
+                              </TD>
+                            ) : (!row.first && canDeleteAllocation ? null : null)}
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                )}
+              </Card>
+            )}
           </>
         );
       })()}
