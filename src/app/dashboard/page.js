@@ -363,23 +363,42 @@ export default function DashboardPage() {
   const staffIdSet = new Set(staff.map(s => s.id));
   const visibleStaffIdSet = new Set(staffData.map(r => r.s.id));
   const periodEntries = entries.filter(e => inPeriod(e.date));
+  const branchNameOf = (bid) => (branches.find(b => b.id === bid)?.name || "").replace("V-CUT ", "") || "—";
   let reconMaterial = 0;
   let reconOnlineCash = 0;
   let reconBillingAll = 0;
   let reconBillingAttributed = 0;
   let reconBillingOrphaned = 0;        // staff_id has no matching staff doc
   let reconBillingFilteredOut = 0;     // matches a real staff but filtered out by type
+  // Per-entry contributions for the drill-down lists. Each row captures which
+  // branch × day produced the gap so the accountant can jump straight to the
+  // culprit entry instead of sweeping the whole period.
+  const unattributedRows = [];
+  const orphanedRows = [];
   periodEntries.forEach(e => {
-    reconOnlineCash += (e.online || 0) + (e.cash || 0);
+    const entryCash = (e.online || 0) + (e.cash || 0);
+    reconOnlineCash += entryCash;
+    let entryBillingAll = 0;
+    let entryOrphaned = 0;
     (e.staff_billing || []).forEach(sb => {
       const bill = Number(sb.billing) || 0;
       reconMaterial += Number(sb.material) || 0;
       reconBillingAll += bill;
+      entryBillingAll += bill;
       if (sb.staff_id && visibleStaffIdSet.has(sb.staff_id)) reconBillingAttributed += bill;
       else if (sb.staff_id && staffIdSet.has(sb.staff_id)) reconBillingFilteredOut += bill;
-      else reconBillingOrphaned += bill;
+      else { reconBillingOrphaned += bill; entryOrphaned += bill; }
     });
+    const entryUnattributed = Math.max(0, entryCash - entryBillingAll);
+    if (entryUnattributed > 0) {
+      unattributedRows.push({ id: e.id, date: e.date, branch_id: e.branch_id, branch: branchNameOf(e.branch_id), amount: entryUnattributed });
+    }
+    if (entryOrphaned > 0) {
+      orphanedRows.push({ id: e.id, date: e.date, branch_id: e.branch_id, branch: branchNameOf(e.branch_id), amount: entryOrphaned });
+    }
   });
+  unattributedRows.sort((a, b) => b.amount - a.amount);
+  orphanedRows.sort((a, b) => b.amount - a.amount);
   const reconGross = reconOnlineCash + reconMaterial;
   // Anything paid that didn't end up in any staff_billing[].billing row —
   // tips, rounding, services without a stylist split.
@@ -394,6 +413,8 @@ export default function DashboardPage() {
     unattributed: reconUnattributed,
     onlineCash: reconOnlineCash,
     billingAll: reconBillingAll,
+    unattributedRows,
+    orphanedRows,
   };
 
   if (loading) return (
@@ -1527,8 +1548,16 @@ function TopPerformersSection({ staffData, branchesById, brTypeFilter, staffView
             <div style={{ padding: "0 14px 14px", borderTop: "1px solid var(--border)" }}>
               <div style={{ marginTop: 10, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 8 }}>
                 <ReconRow label="Material sales" value={recon.material} hint="In Gross Revenue; excluded from stylist billing" color="#c084fc" />
-                <ReconRow label="Unattributed service pay" value={recon.unattributed} hint="online + cash left over after summing every staff_billing[].billing row — tips, walk-ins without a staff split, rounding" color="var(--orange)" />
-                <ReconRow label="Orphaned billing" value={recon.orphaned} hint="staff_billing rows whose staff_id no longer matches any staff record" color="var(--red)" />
+                <ReconRow label="Unattributed service pay" value={recon.unattributed}
+                  hint="online + cash left over after summing every staff_billing[].billing row — tips, walk-ins without a staff split, rounding"
+                  color="var(--orange)"
+                  rows={recon.unattributedRows}
+                  onRowClick={(r) => router.push(`/dashboard/entry?edit=${r.id}`)} />
+                <ReconRow label="Orphaned billing" value={recon.orphaned}
+                  hint="staff_billing rows whose staff_id no longer matches any staff record"
+                  color="var(--red)"
+                  rows={recon.orphanedRows}
+                  onRowClick={(r) => router.push(`/dashboard/entry?edit=${r.id}`)} />
                 {recon.filteredOut > 0 && (
                   <ReconRow label={`Filtered out (${brTypeFilter})`} value={recon.filteredOut} hint="Real staff hidden by the Mens / Unisex filter" color="var(--text3)" />
                 )}
@@ -1636,14 +1665,45 @@ function TopPerformersSection({ staffData, branchesById, brTypeFilter, staffView
   );
 }
 
-function ReconRow({ label, value, hint, color }) {
+function ReconRow({ label, value, hint, color, rows, onRowClick }) {
+  const [open, setOpen] = useState(false);
+  const hasRows = Array.isArray(rows) && rows.length > 0;
   return (
     <div style={{ padding: "8px 10px", borderRadius: 8, background: "var(--bg4)", border: "1px solid var(--border)" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
-        <span style={{ fontSize: 11, fontWeight: 700, color: "var(--text2)" }}>{label}</span>
+      <div
+        role={hasRows ? "button" : undefined}
+        tabIndex={hasRows ? 0 : undefined}
+        onClick={hasRows ? () => setOpen(v => !v) : undefined}
+        onKeyDown={hasRows ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpen(v => !v); } } : undefined}
+        style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8, cursor: hasRows ? "pointer" : "default" }}>
+        <span style={{ fontSize: 11, fontWeight: 700, color: "var(--text2)" }}>
+          {label}
+          {hasRows && <span style={{ marginLeft: 6, fontSize: 9, color: "var(--accent)", fontWeight: 800 }}>{open ? "▲" : `▼ ${rows.length}`}</span>}
+        </span>
         <span style={{ fontSize: 13, fontWeight: 800, color: color || "var(--text)" }}>{INR(value || 0)}</span>
       </div>
       {hint && <div style={{ fontSize: 10, color: "var(--text3)", marginTop: 2, lineHeight: 1.4 }}>{hint}</div>}
+      {hasRows && open && (
+        <div style={{ marginTop: 8, borderTop: "1px dashed var(--border2)", paddingTop: 8, maxHeight: 220, overflowY: "auto" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "80px 1fr auto", gap: 6, fontSize: 9.5, color: "var(--text3)", fontWeight: 800, textTransform: "uppercase", letterSpacing: 0.8, padding: "0 2px 4px", borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
+            <span>Date</span><span>Branch</span><span style={{ textAlign: "right" }}>Amount</span>
+          </div>
+          {rows.map(r => (
+            <div key={r.id}
+              role={onRowClick ? "button" : undefined}
+              tabIndex={onRowClick ? 0 : undefined}
+              onClick={onRowClick ? () => onRowClick(r) : undefined}
+              onKeyDown={onRowClick ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onRowClick(r); } } : undefined}
+              style={{ display: "grid", gridTemplateColumns: "80px 1fr auto", gap: 6, fontSize: 11, padding: "6px 2px", borderBottom: "1px solid rgba(255,255,255,0.03)", cursor: onRowClick ? "pointer" : "default", alignItems: "center" }}
+              onMouseEnter={onRowClick ? (e) => { e.currentTarget.style.background = "rgba(255,255,255,0.03)"; } : undefined}
+              onMouseLeave={onRowClick ? (e) => { e.currentTarget.style.background = "transparent"; } : undefined}>
+              <span style={{ color: "var(--text2)", fontFamily: "monospace", fontSize: 10 }}>{r.date || "—"}</span>
+              <span style={{ color: "var(--text)", fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.branch}</span>
+              <span style={{ color: color || "var(--text)", fontWeight: 800 }}>{INR(r.amount)}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
