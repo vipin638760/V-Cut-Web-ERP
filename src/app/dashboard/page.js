@@ -1002,6 +1002,44 @@ export default function DashboardPage() {
           onClick={() => router.push("/dashboard/branches?view=summary")} linkLabel="See expense breakdown" />
         <PremiumStatCard label="Net P&L" value={INR(net)} sub="Bottom line earnings" icon="pie" color={net >= 0 ? "var(--green)" : "var(--red)"} />
         <PremiumStatCard label="Service Force" value={staff.length} sub="Active stylists" icon="users" color="var(--accent)" />
+        {/* Missing Entries — branch×day pairs with no entry from period start
+            through yesterday. Today is excluded (accountant may still be entering). */}
+        {(() => {
+          const now = new Date();
+          const yStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate() - 1).padStart(2, "0")}`;
+          // Build period day list, identical to the branches page card.
+          const ds = [];
+          if (filterMode === "month") {
+            const count = new Date(filterYear, filterMonth, 0).getDate();
+            for (let d = 1; d <= count; d++) ds.push(`${filterPrefix}-${String(d).padStart(2, "0")}`);
+          } else {
+            for (let m = 1; m <= 12; m++) {
+              const pref = `${filterYear}-${String(m).padStart(2, "0")}`;
+              const count = new Date(filterYear, m, 0).getDate();
+              for (let d = 1; d <= count; d++) ds.push(`${pref}-${String(d).padStart(2, "0")}`);
+            }
+          }
+          const have = new Set(entries.filter(e => e.branch_id && e.date).map(e => `${e.branch_id}|${e.date}`));
+          let missingCount = 0, daysWithGaps = 0;
+          ds.forEach(d => {
+            if (d > yStr) return;
+            let dayGaps = 0;
+            branches.forEach(b => { if (!have.has(`${b.id}|${d}`)) dayGaps += 1; });
+            if (dayGaps > 0) { missingCount += dayGaps; daysWithGaps += 1; }
+          });
+          const complete = missingCount === 0;
+          return (
+            <PremiumStatCard
+              label="Missing Entries"
+              value={complete ? "None" : missingCount}
+              sub={complete ? `Complete through ${yStr}` : `${daysWithGaps} day${daysWithGaps === 1 ? "" : "s"} with gaps`}
+              icon="edit"
+              color={complete ? "var(--green)" : "var(--red)"}
+              onClick={() => router.push("/dashboard/branches?view=summary&tab=dailycash&expand=missing")}
+              linkLabel="See which branches owe entries"
+            />
+          );
+        })()}
       </div>
 
       {/* Month-end forecast row — projected cost + revenue gap to break even. */}
@@ -1065,6 +1103,19 @@ export default function DashboardPage() {
       {/* Daily business bar chart — month mode only */}
       {filterMode === "month" && (dashView === "all" || dashView === "shop") && (
         <DailyBusinessChart entries={entries} filterYear={filterYear} filterMonth={filterMonth} />
+      )}
+
+      {/* Daily material consumption bar chart — respects the global
+          material-source toggles so it lines up with what P&L uses. */}
+      {filterMode === "month" && (dashView === "all" || dashView === "shop") && (
+        <DailyMaterialChart
+          entries={entries}
+          allocations={materialAllocations}
+          filterYear={filterYear}
+          filterMonth={filterMonth}
+          useAllocations={matUseAllocations}
+          useLumpsum={matUseLumpsum}
+        />
       )}
 
       {/* Main Admin Grid */}
@@ -1598,6 +1649,284 @@ function MiniKPI({ label, value, sub, color }) {
       <div style={{ fontSize: 16, fontWeight: 800, color: color || "var(--text)", marginTop: 4, fontFamily: "var(--font-headline, var(--font-outfit))", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{value}</div>
       {sub && <div style={{ fontSize: 10, color: "var(--text3)", marginTop: 2 }}>{sub}</div>}
     </div>
+  );
+}
+
+// ─── Daily Material Consumption chart ───────────────────────────────────────
+// Source obeys the global settings: `mat_use_allocations` (default on) pulls
+// from the material_allocations collection; `mat_use_lumpsum` pulls from
+// entry.mat_expense (the lumpsum number typed into Daily Entry). If both are
+// on, the stack shows them as two colours so the mix is visible.
+function DailyMaterialChart({ entries, allocations, filterYear, filterMonth, useAllocations, useLumpsum }) {
+  const [hover, setHover] = useState(null);
+  const prefix = `${filterYear}-${String(filterMonth).padStart(2, "0")}`;
+  const daysInMonth = new Date(filterYear, filterMonth, 0).getDate();
+  const NOW = new Date();
+  const todayStr = `${NOW.getFullYear()}-${String(NOW.getMonth() + 1).padStart(2, "0")}-${String(NOW.getDate()).padStart(2, "0")}`;
+
+  const byDayAlloc = new Array(daysInMonth).fill(0);
+  const byDayLump = new Array(daysInMonth).fill(0);
+
+  if (useAllocations) {
+    allocations.forEach(a => {
+      const date = a.date || (a.transferred_at || "").slice(0, 10);
+      if (!date || !date.startsWith(prefix)) return;
+      const dIdx = Number(date.slice(8, 10)) - 1;
+      if (dIdx < 0 || dIdx >= daysInMonth) return;
+      const total = Number(a.total) || (a.items || []).reduce((s, it) => s + (Number(it.line_total) || (Number(it.qty) * Number(it.price_at_transfer)) || 0), 0);
+      byDayAlloc[dIdx] += total;
+    });
+  }
+  if (useLumpsum) {
+    entries.forEach(e => {
+      if (!e.date || !e.date.startsWith(prefix)) return;
+      const dIdx = Number(e.date.slice(8, 10)) - 1;
+      if (dIdx < 0 || dIdx >= daysInMonth) return;
+      byDayLump[dIdx] += Number(e.mat_expense) || 0;
+    });
+  }
+
+  const byDay = byDayAlloc.map((v, i) => v + byDayLump[i]);
+  const max = Math.max(1, ...byDay);
+  const total = byDay.reduce((s, v) => s + v, 0);
+  const totalAlloc = byDayAlloc.reduce((s, v) => s + v, 0);
+  const totalLump = byDayLump.reduce((s, v) => s + v, 0);
+  const workingDays = byDay.filter(v => v > 0).length;
+  const avg = workingDays ? Math.round(total / workingDays) : 0;
+  const bestIdx = byDay.indexOf(Math.max(...byDay));
+  const monthLabel = new Date(filterYear, filterMonth - 1, 1).toLocaleString("en-US", { month: "long", year: "numeric" });
+
+  // Chart dims — mirror the Daily Business chart for visual rhythm.
+  const H = 200;
+  const BAR_W = 22;
+  const GAP = 10;
+  const LEFT = 52;
+  const PAD_TOP = 22;
+  const PAD_BOTTOM = 38;
+  const W = LEFT + daysInMonth * (BAR_W + GAP) + 8;
+  const yTicks = 4;
+  const BAR_R = 6;
+
+  const dayOfWeek = (d) => new Date(filterYear, filterMonth - 1, d).toLocaleDateString("en-US", { weekday: "short" });
+
+  const sourceLabel = useAllocations && useLumpsum
+    ? "Allocations + Daily Entry (lumpsum)"
+    : useAllocations
+      ? "Allocations"
+      : useLumpsum
+        ? "Daily Entry (lumpsum)"
+        : "No source enabled";
+
+  // Neither source on? Render a clean disabled state.
+  if (!useAllocations && !useLumpsum) {
+    return (
+      <Card style={{ padding: 18, marginBottom: 24 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12, marginBottom: 6 }}>
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 800, color: "#d7a6ff", textTransform: "uppercase", letterSpacing: 2 }}>Material Consumption</div>
+            <div style={{ fontSize: 18, fontWeight: 800, color: "var(--gold)", fontFamily: "var(--font-headline, var(--font-outfit))", marginTop: 2 }}>{monthLabel}</div>
+          </div>
+        </div>
+        <div style={{ padding: 30, textAlign: "center", color: "var(--text3)", fontSize: 13, fontStyle: "italic" }}>
+          Both material sources are disabled in Master Setup. Turn on <strong>Allocations</strong> or <strong>Daily Entry (lumpsum)</strong> to populate this chart.
+        </div>
+      </Card>
+    );
+  }
+
+  return (
+    <Card style={{ padding: 18, marginBottom: 24 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12, marginBottom: 14 }}>
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 11, fontWeight: 800, color: "#d7a6ff", textTransform: "uppercase", letterSpacing: 2 }}>Material Consumption</span>
+            <span title={`Pulled from: ${sourceLabel}`} style={{ fontSize: 9, fontWeight: 800, padding: "2px 8px", borderRadius: 10, background: "rgba(192,132,252,0.12)", color: "#d7a6ff", border: "1px solid rgba(192,132,252,0.35)", textTransform: "uppercase", letterSpacing: 0.8 }}>
+              {sourceLabel}
+            </span>
+          </div>
+          <div style={{ fontSize: 18, fontWeight: 800, color: "var(--gold)", fontFamily: "var(--font-headline, var(--font-outfit))", marginTop: 4 }}>{monthLabel}</div>
+        </div>
+        <div style={{ display: "flex", gap: 20, alignItems: "center", flexWrap: "wrap" }}>
+          <div style={{ textAlign: "right" }}>
+            <div style={{ fontSize: 9, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, fontWeight: 700 }}>Total</div>
+            <div style={{ fontSize: 15, fontWeight: 800, color: "#d7a6ff" }}>{INR(total)}</div>
+          </div>
+          {useAllocations && useLumpsum && (
+            <div style={{ textAlign: "right" }}>
+              <div style={{ fontSize: 9, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, fontWeight: 700 }}>Alloc · Lumpsum</div>
+              <div style={{ fontSize: 13, fontWeight: 800 }}>
+                <span style={{ color: "#d7a6ff" }}>{INR(totalAlloc)}</span>
+                <span style={{ color: "var(--text3)", margin: "0 4px" }}>·</span>
+                <span style={{ color: "var(--accent)" }}>{INR(totalLump)}</span>
+              </div>
+            </div>
+          )}
+          <div style={{ textAlign: "right" }}>
+            <div style={{ fontSize: 9, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, fontWeight: 700 }}>Daily Avg</div>
+            <div style={{ fontSize: 15, fontWeight: 800, color: "var(--blue)" }}>{INR(avg)}</div>
+          </div>
+          <div style={{ textAlign: "right" }}>
+            <div style={{ fontSize: 9, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, fontWeight: 700 }}>Heaviest Day</div>
+            <div style={{ fontSize: 15, fontWeight: 800, color: "var(--orange)" }}>{byDay[bestIdx] > 0 ? `${bestIdx + 1} · ${INR(byDay[bestIdx])}` : "—"}</div>
+          </div>
+        </div>
+      </div>
+
+      {total === 0 ? (
+        <div style={{ height: H, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text3)", fontStyle: "italic", fontSize: 13 }}>
+          No material consumption recorded for {monthLabel} yet.
+        </div>
+      ) : (
+        <div style={{ position: "relative", overflowX: "auto" }}>
+          <svg width={W} height={H + PAD_TOP + PAD_BOTTOM} style={{ display: "block" }}>
+            <defs>
+              <linearGradient id="mat-purple" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#e0b3ff" />
+                <stop offset="100%" stopColor="#8b5cf6" stopOpacity="0.8" />
+              </linearGradient>
+              <linearGradient id="mat-teal" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#5de8ff" />
+                <stop offset="100%" stopColor="#0891a8" stopOpacity="0.8" />
+              </linearGradient>
+              <linearGradient id="mat-sheen" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="rgba(255,255,255,0.22)" />
+                <stop offset="60%" stopColor="rgba(255,255,255,0)" />
+              </linearGradient>
+            </defs>
+
+            {/* Y gridlines */}
+            {Array.from({ length: yTicks + 1 }, (_, i) => {
+              const frac = i / yTicks;
+              const y = PAD_TOP + (1 - frac) * H;
+              const v = Math.round(max * frac);
+              const isBaseline = i === 0;
+              return (
+                <g key={i}>
+                  <line x1={LEFT} y1={y} x2={W - 4} y2={y}
+                    stroke={isBaseline ? "rgba(255,255,255,0.14)" : "rgba(255,255,255,0.04)"}
+                    strokeDasharray={isBaseline ? undefined : "2 4"}
+                    strokeWidth={1} />
+                  {!isBaseline && (
+                    <text x={LEFT - 8} y={y + 3} fontSize={9} fill="var(--text3)" textAnchor="end" fontWeight={600}>
+                      {v >= 1000 ? `${Math.round(v / 1000)}k` : v}
+                    </text>
+                  )}
+                </g>
+              );
+            })}
+
+            {byDay.map((v, i) => {
+              const x = LEFT + i * (BAR_W + GAP);
+              const hasValue = v > 0;
+              const totalH = hasValue ? Math.max(2, (v / max) * H) : 2;
+              const allocH = hasValue ? (byDayAlloc[i] / max) * H : 0;
+              const lumpH = Math.max(0, totalH - allocH);
+              const yTop = PAD_TOP + H - totalH;
+              const yLump = PAD_TOP + H - lumpH;
+              const baselineY = PAD_TOP + H;
+              const dateStr = `${prefix}-${String(i + 1).padStart(2, "0")}`;
+              const isToday = dateStr === todayStr;
+              const isHovered = hover && hover.i === i;
+              const isBest = i === bestIdx && hasValue;
+              const dow = dayOfWeek(i + 1);
+              const isWeekend = dow === "Sat" || dow === "Sun";
+              const clipId = `mat-clip-${filterYear}-${filterMonth}-${i}`;
+              const dim = hover && hover.i !== i ? 0.35 : 1;
+              return (
+                <g key={i}
+                  onMouseEnter={() => hasValue && setHover({ i, v, alloc: byDayAlloc[i], lump: byDayLump[i], dateStr })}
+                  onMouseLeave={() => setHover(null)}
+                  style={{ cursor: hasValue ? "pointer" : "default", transition: "opacity .15s" }}
+                  opacity={dim}>
+                  <defs>
+                    <clipPath id={clipId}>
+                      <path d={`M${x},${yTop + BAR_R}
+                                Q${x},${yTop} ${x + BAR_R},${yTop}
+                                H${x + BAR_W - BAR_R}
+                                Q${x + BAR_W},${yTop} ${x + BAR_W},${yTop + BAR_R}
+                                V${baselineY}
+                                H${x}
+                                Z`} />
+                    </clipPath>
+                  </defs>
+                  {hasValue ? (
+                    <g clipPath={`url(#${clipId})`}>
+                      {allocH > 0 && (
+                        <rect x={x} y={PAD_TOP + H - allocH} width={BAR_W} height={allocH} fill="url(#mat-purple)" />
+                      )}
+                      {lumpH > 0 && (
+                        <rect x={x} y={yTop} width={BAR_W} height={lumpH} fill="url(#mat-teal)" />
+                      )}
+                      {allocH > 0 && lumpH > 0 && (
+                        <rect x={x} y={yLump - 0.5} width={BAR_W} height={1} fill="rgba(255,255,255,0.18)" />
+                      )}
+                      <rect x={x} y={yTop} width={BAR_W} height={Math.min(totalH * 0.35, 20)} fill="url(#mat-sheen)" />
+                    </g>
+                  ) : (
+                    <rect x={x} y={baselineY - 2} width={BAR_W} height={2} rx={1} fill="rgba(255,255,255,0.06)" />
+                  )}
+                  {isToday && hasValue && (
+                    <rect x={x - 1.5} y={yTop - 1.5} width={BAR_W + 3} height={totalH + 3} rx={BAR_R + 1.5} ry={BAR_R + 1.5}
+                      fill="none" stroke="var(--accent)" strokeWidth={1.5} strokeDasharray="3 3" opacity={0.75} />
+                  )}
+                  {(isBest || isHovered) && hasValue && (
+                    (() => {
+                      const label = v >= 100000 ? `₹${(v / 100000).toFixed(1)}L` : v >= 1000 ? `₹${Math.round(v / 1000)}k` : `₹${v}`;
+                      const chipW = label.length * 6 + 10;
+                      const chipX = x + BAR_W / 2 - chipW / 2;
+                      const chipY = Math.max(2, yTop - 16);
+                      const chipColor = isHovered && !isBest ? "var(--accent)" : "#d7a6ff";
+                      return (
+                        <g>
+                          <rect x={chipX} y={chipY} width={chipW} height={14} rx={7}
+                            fill="var(--bg4)" stroke={chipColor} strokeWidth={1} opacity={0.95} />
+                          <text x={x + BAR_W / 2} y={chipY + 10} fontSize={9} fontWeight={800}
+                            fill={chipColor} textAnchor="middle">{label}</text>
+                        </g>
+                      );
+                    })()
+                  )}
+                  <text x={x + BAR_W / 2} y={baselineY + 14} fontSize={9.5}
+                    fill={isBest ? "#d7a6ff" : isToday ? "var(--accent)" : isWeekend ? "var(--orange)" : "var(--text3)"}
+                    textAnchor="middle" fontWeight={(isBest || isToday || isWeekend) ? 800 : 600}>{i + 1}</text>
+                  <text x={x + BAR_W / 2} y={baselineY + 26} fontSize={8}
+                    fill={isWeekend ? "var(--orange)" : "var(--text3)"}
+                    textAnchor="middle" opacity={isWeekend ? 0.85 : 0.5}
+                    fontWeight={isWeekend ? 700 : 500}>
+                    {dow.slice(0, 1)}
+                  </text>
+                </g>
+              );
+            })}
+          </svg>
+
+          {hover && (
+            <div style={{
+              position: "absolute",
+              left: Math.min(LEFT + hover.i * (BAR_W + GAP) + BAR_W + 10, W - 170),
+              top: 4, pointerEvents: "none",
+              background: "var(--bg4)", border: "1px solid rgba(192,132,252,0.35)", borderRadius: 8,
+              padding: "8px 12px", boxShadow: "0 6px 20px rgba(0,0,0,0.5)", fontSize: 11, zIndex: 3, minWidth: 160,
+            }}>
+              <div style={{ fontSize: 9, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, fontWeight: 700 }}>{hover.dateStr} · {dayOfWeek(hover.i + 1)}</div>
+              <div style={{ fontSize: 14, fontWeight: 800, color: "#d7a6ff", marginTop: 2 }}>{INR(hover.v)}</div>
+              {useAllocations && (
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 10, marginTop: 4 }}>
+                  <span style={{ color: "#d7a6ff", fontWeight: 700 }}>Allocations</span>
+                  <span style={{ color: "#d7a6ff" }}>{INR(hover.alloc || 0)}</span>
+                </div>
+              )}
+              {useLumpsum && (
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 10 }}>
+                  <span style={{ color: "var(--accent)", fontWeight: 700 }}>Daily Entry</span>
+                  <span style={{ color: "var(--accent)" }}>{INR(hover.lump || 0)}</span>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </Card>
   );
 }
 
