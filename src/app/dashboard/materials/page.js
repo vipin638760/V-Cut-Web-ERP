@@ -2095,50 +2095,91 @@ export default function MaterialsPage() {
               </div>
             ) : (
               /* Flat table — every transfer across every branch, newest first. */
-              <Card style={{ padding: 0 }}>
-                {allocations.length === 0 ? (
-                  <div style={{ padding: 24, color: "var(--text3)", fontSize: 12, fontStyle: "italic", textAlign: "center" }}>No transfers yet.</div>
-                ) : (
-                  <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12.5 }}>
-                    <thead><tr>
-                      <TH>Date</TH>
-                      <TH>Branch</TH>
-                      <TH>Material</TH>
-                      <TH right>Qty</TH>
-                      <TH right>Line Total</TH>
-                      <TH right>Transfer Total</TH>
-                      {canDeleteAllocation && <TH> </TH>}
-                    </tr></thead>
-                    <tbody>
-                      {allocations
-                        .slice()
-                        .sort((x, y) => (y.date || y.transferred_at || "").localeCompare(x.date || x.transferred_at || ""))
-                        .flatMap(a => {
-                          const branchName = branches.find(x => x.id === a.branch_id)?.name?.replace("V-CUT ", "") || "—";
-                          const date = a.date || (a.transferred_at || "").slice(0, 10);
-                          return (a.items || []).map((it, i) => ({ ...it, alloc: a, branchName, date, first: i === 0, rowSpan: (a.items || []).length, key: `${a.id}-${i}` }));
-                        })
-                        .map(row => (
-                          <tr key={row.key}>
-                            <TD style={{ whiteSpace: "nowrap", color: "var(--text3)" }}>{row.date || "—"}</TD>
-                            <TD style={{ fontWeight: 600 }}>{row.branchName}</TD>
-                            <TD>{row.name}</TD>
-                            <TD right>{row.qty} {row.unit}</TD>
-                            <TD right style={{ fontWeight: 700, color: "var(--green)" }}>{INR(row.line_total || (row.qty * row.price_at_transfer) || 0)}</TD>
-                            {row.first ? (
-                              <TD right rowSpan={row.rowSpan} style={{ fontWeight: 800, color: "var(--gold)", borderLeft: "1px solid var(--border2)" }}>{INR(row.alloc.total || 0)}</TD>
-                            ) : null}
-                            {canDeleteAllocation && row.first ? (
-                              <TD rowSpan={row.rowSpan}>
-                                <IconBtn name="del" variant="danger" title="Delete this transfer (includes every item row in the same record)" onClick={() => handleDeleteAllocation(row.alloc)} />
-                              </TD>
-                            ) : (!row.first && canDeleteAllocation ? null : null)}
-                          </tr>
-                        ))}
-                    </tbody>
-                  </table>
-                )}
-              </Card>
+              (() => {
+                const sortedAllocs = allocations.slice().sort((x, y) => (y.date || y.transferred_at || "").localeCompare(x.date || x.transferred_at || ""));
+                const allIds = sortedAllocs.map(a => a.id);
+                const allSelected = allIds.length > 0 && allIds.every(id => selectedAllocIds.has(id));
+                const someSelected = selectedAllocIds.size > 0 && !allSelected;
+                const toggleAll = () => {
+                  if (allSelected) clearAllocSelection();
+                  else setSelectedAllocIds(new Set(allIds));
+                };
+                const selectedIds = [...selectedAllocIds].filter(id => allIds.includes(id));
+                return (<>
+                  {canDeleteAllocation && selectedIds.length > 0 && (
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "8px 14px", marginBottom: 8, background: "linear-gradient(90deg, rgba(var(--accent-rgb),0.12), rgba(var(--accent-rgb),0.04))", border: "1px solid rgba(var(--accent-rgb),0.35)", borderRadius: 10, flexWrap: "wrap" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                        <span style={{ fontSize: 11, fontWeight: 800, color: "var(--accent)", textTransform: "uppercase", letterSpacing: 1 }}>{selectedIds.length} selected</span>
+                        <button onClick={clearAllocSelection} style={{ fontSize: 10, color: "var(--text3)", background: "none", border: "none", cursor: "pointer", fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5 }}>Clear</button>
+                      </div>
+                      <button onClick={() => handleBulkDeleteAllocations(selectedIds)}
+                        style={{ padding: "8px 16px", borderRadius: 8, background: "linear-gradient(135deg, #f87171, #dc2626)", color: "#fff", border: "none", cursor: "pointer", fontSize: 11, fontWeight: 800, textTransform: "uppercase", letterSpacing: 0.8, display: "inline-flex", alignItems: "center", gap: 6 }}>
+                        <Icon name="del" size={12} /> Delete {selectedIds.length} Transfer{selectedIds.length === 1 ? "" : "s"}
+                      </button>
+                    </div>
+                  )}
+                  <Card style={{ padding: 0 }}>
+                    {allocations.length === 0 ? (
+                      <div style={{ padding: 24, color: "var(--text3)", fontSize: 12, fontStyle: "italic", textAlign: "center" }}>No transfers yet.</div>
+                    ) : (
+                      <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12.5 }}>
+                        <thead><tr>
+                          {canDeleteAllocation && (
+                            <TH>
+                              <input type="checkbox" checked={allSelected}
+                                ref={el => { if (el) el.indeterminate = someSelected; }}
+                                onChange={toggleAll}
+                                style={{ accentColor: "var(--accent)", cursor: "pointer" }}
+                                title={allSelected ? "Unselect all" : "Select all"} />
+                            </TH>
+                          )}
+                          <TH>Date</TH>
+                          <TH>Branch</TH>
+                          <TH>Material</TH>
+                          <TH right>Qty</TH>
+                          <TH right>Line Total</TH>
+                          <TH right>Transfer Total</TH>
+                          {canDeleteAllocation && <TH> </TH>}
+                        </tr></thead>
+                        <tbody>
+                          {sortedAllocs
+                            .flatMap(a => {
+                              const branchName = branches.find(x => x.id === a.branch_id)?.name?.replace("V-CUT ", "") || "—";
+                              const date = a.date || (a.transferred_at || "").slice(0, 10);
+                              return (a.items || []).map((it, i) => ({ ...it, alloc: a, branchName, date, first: i === 0, rowSpan: (a.items || []).length, key: `${a.id}-${i}` }));
+                            })
+                            .map(row => {
+                              const isSelected = selectedAllocIds.has(row.alloc.id);
+                              return (
+                                <tr key={row.key} style={isSelected ? { background: "rgba(var(--accent-rgb),0.05)" } : undefined}>
+                                  {canDeleteAllocation && row.first ? (
+                                    <TD rowSpan={row.rowSpan}>
+                                      <input type="checkbox" checked={isSelected} onChange={() => toggleAllocSelected(row.alloc.id)}
+                                        style={{ accentColor: "var(--accent)", cursor: "pointer" }} />
+                                    </TD>
+                                  ) : null}
+                                  <TD style={{ whiteSpace: "nowrap", color: "var(--text3)" }}>{row.date || "—"}</TD>
+                                  <TD style={{ fontWeight: 600 }}>{row.branchName}</TD>
+                                  <TD>{row.name}</TD>
+                                  <TD right>{row.qty} {row.unit}</TD>
+                                  <TD right style={{ fontWeight: 700, color: "var(--green)" }}>{INR(row.line_total || (row.qty * row.price_at_transfer) || 0)}</TD>
+                                  {row.first ? (
+                                    <TD right rowSpan={row.rowSpan} style={{ fontWeight: 800, color: "var(--gold)", borderLeft: "1px solid var(--border2)" }}>{INR(row.alloc.total || 0)}</TD>
+                                  ) : null}
+                                  {canDeleteAllocation && row.first ? (
+                                    <TD rowSpan={row.rowSpan}>
+                                      <IconBtn name="del" variant="danger" title="Delete this transfer (includes every item row in the same record)" onClick={() => handleDeleteAllocation(row.alloc)} />
+                                    </TD>
+                                  ) : null}
+                                </tr>
+                              );
+                            })}
+                        </tbody>
+                      </table>
+                    )}
+                  </Card>
+                </>);
+              })()
             )}
           </>
         );
