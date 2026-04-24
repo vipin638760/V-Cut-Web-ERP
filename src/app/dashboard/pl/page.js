@@ -2,7 +2,7 @@
 import { useEffect, useState, useRef } from "react";
 import { db } from "@/lib/firebase";
 import { collection, onSnapshot, query, orderBy } from "firebase/firestore";
-import { INR, MASK, MONTHS, proRataSalary, staffStatusForMonth } from "@/lib/calculations";
+import { INR, MASK, MONTHS, proRataSalary, staffStatusForMonth, getMonthlyFixed } from "@/lib/calculations";
 import { PeriodWidget, ToggleGroup, Card, Icon, TH, TD, Pill } from "@/components/ui";
 import VLoader from "@/components/VLoader";
 
@@ -58,24 +58,6 @@ export default function PLReportPage() {
   const isAdmin = user?.role === "admin";
   const filterPrefix = `${filterYear}-${String(filterMonth).padStart(2, "0")}`;
 
-  // Helper: Get fallback-aware fixed costs
-  const getMonthlyFixed = (bid, monthStr) => {
-    const rec = monthlyExpenses.find(m => m.branch_id === bid && m.month === monthStr);
-    const b = branches.find(x => x.id === bid);
-    if (!b) return { shop_rent: 0, room_rent: 0, shop_elec: 0, room_elec: 0, wifi: 0, water: 0, petrol: 0, maid: 0, dust: 0 };
-    const fv = (recVal, branchVal) => (recVal !== undefined && recVal !== null) ? recVal : (branchVal || 0);
-    return {
-      shop_rent: fv(rec?.shop_rent, b.shop_rent),
-      room_rent: fv(rec?.room_rent, b.room_rent),
-      shop_elec: fv(rec?.shop_elec, b.shop_elec),
-      room_elec: fv(rec?.room_elec, b.room_elec),
-      wifi: fv(rec?.wifi, b.wifi),
-      water: fv(rec?.water, b.water),
-      petrol: fv(rec?.petrol, b.petrol),
-      maid: fv(rec?.maid, b.maid),
-      dust: fv(rec?.dust, b.dust),
-    };
-  };
 
   // Helper: Get active months in year
   const getActiveMonths = (year) => {
@@ -122,18 +104,12 @@ export default function PLReportPage() {
 
     const vOther = periodEnts.reduce((s, e) => s + (e.others || 0) + (e.petrol || 0), 0);
 
-    // Fixed — reads directly off the branch master (shop_rent, room_rent,
-    // shop_elec, room_elec, wifi) so the figure reconciles with the
-    // Dashboard's Operating Cost card exactly. Monthly_expenses overrides
-    // are intentionally *not* consulted here — Dashboard doesn't respect
-    // them either, and supporting them in one place but not the other was
-    // producing small mismatches (rent bumps, ad-hoc electricity spikes)
-    // that made the two pages disagree without any visible reason.
-    const fixedCost = (Number(b.shop_rent) || 0)
-      + (Number(b.room_rent) || 0)
-      + (Number(b.shop_elec) || 0)
-      + (Number(b.room_elec) || 0)
-      + (Number(b.wifi) || 0);
+    // Fixed — honors per-month overrides from `monthly_expenses` (Master
+    // Setup → Fixed Expenses); branch master fills in the gaps. Both
+    // Dashboard and P&L now go through the same `getMonthlyFixed` helper
+    // so a rent bump entered in one place is reflected in both totals.
+    const mf = getMonthlyFixed(b, month, monthlyExpenses);
+    const fixedCost = mf.shop_rent + mf.room_rent + mf.shop_elec + mf.room_elec + mf.wifi;
 
     // Salary
     const activeStaff = staff.filter(s => s.branch_id === bid && staffStatusForMonth(s, month).status !== "inactive");

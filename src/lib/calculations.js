@@ -15,6 +15,31 @@ export const MASK = '•••••';
 // joined Apr 22 but salary computed as 0 because effectiveStart > effectiveEnd).
 export const parseLocalDate = (ymd) => (ymd ? new Date(ymd + "T00:00") : null);
 
+// Fixed-cost resolver — returns per-month fixed-cost figures for a branch.
+// If a row exists in `monthly_expenses` (keyed by branch_id + month), its
+// fields override the branch master defaults. Missing fields fall back to
+// the branch master so a partial override (say, just shop_rent bumped up
+// for one month) still uses defaults for everything else.
+// Shape: { shop_rent, room_rent, shop_elec, room_elec, wifi, water, petrol, maid, dust }
+// Shared by the Dashboard, P&L page, and branch-detail view so a bump
+// entered in Master Setup → Fixed Expenses is honored everywhere.
+export function getMonthlyFixed(branch, monthStr, monthlyExpenses = []) {
+  const b = branch || {};
+  const rec = (monthlyExpenses || []).find(m => m.branch_id === b.id && m.month === monthStr);
+  const fv = (recVal, branchVal) => (recVal !== undefined && recVal !== null) ? Number(recVal) || 0 : (Number(branchVal) || 0);
+  return {
+    shop_rent: fv(rec?.shop_rent, b.shop_rent),
+    room_rent: fv(rec?.room_rent, b.room_rent),
+    shop_elec: fv(rec?.shop_elec, b.shop_elec),
+    room_elec: fv(rec?.room_elec, b.room_elec),
+    wifi:      fv(rec?.wifi,      b.wifi),
+    water:     fv(rec?.water,     b.water),
+    petrol:    fv(rec?.petrol,    b.petrol),
+    maid:      fv(rec?.maid,      b.maid),
+    dust:      fv(rec?.dust,      b.dust),
+  };
+}
+
 // Canonical Cash-in-Hand formula. Mirrors the Daily Entry form so the listing,
 // the Excel export, P&L rollups, and the Recalculate job all agree.
 // Formula: cash + tipsInCash − tipsPaidCash − incentivesTaken − others − petrol

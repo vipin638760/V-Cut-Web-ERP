@@ -3,7 +3,7 @@ import { useEffect, useState, useRef, useMemo } from "react";
 import { collection, onSnapshot, query, orderBy, doc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
-import { INR, staffBillingInPeriod, makeFilterPrefix, periodLabel, proRataSalary, staffLeavesInMonth, staffStatusForMonth, staffIncentivesInPeriod, parseLocalDate, MASK } from "@/lib/calculations";
+import { INR, staffBillingInPeriod, makeFilterPrefix, periodLabel, proRataSalary, staffLeavesInMonth, staffStatusForMonth, staffIncentivesInPeriod, parseLocalDate, getMonthlyFixed, MASK } from "@/lib/calculations";
 import { PeriodWidget, ToggleGroup, Card, Pill, TH, TD, Icon, Modal, TabNav, ProgressBar, useToast } from "@/components/ui";
 import { useRouter } from "next/navigation";
 // ExcelJS is ~200KB — load only when Export is actually used.
@@ -81,6 +81,7 @@ export default function DashboardPage() {
   const [salHistory, setSalHistory] = useState([]);
   const [globalSettings, setGlobalSettings] = useState(null);
   const [materialAllocations, setMaterialAllocations] = useState([]);
+  const [monthlyExpenses, setMonthlyExpenses] = useState([]);
   const [loading, setLoading]     = useState(true);
 
   // Period
@@ -167,6 +168,9 @@ export default function DashboardPage() {
         sn => setMaterialAllocations(sn.docs.map(d => ({ ...d.data(), id: d.id }))),
         err("material_allocations")
       ),
+      onSnapshot(collection(db, "monthly_expenses"),
+        sn => setMonthlyExpenses(sn.docs.map(d => ({ ...d.data(), id: d.id }))),
+        err("monthly_expenses")),
     ];
     return () => unsubs.forEach(u => u());
   }, [subTick]);
@@ -217,13 +221,25 @@ export default function DashboardPage() {
     const vOther = bEntries.reduce((s, e) => s + (e.others || 0) + (e.petrol || 0), 0);
     const vPetrol = bEntries.reduce((s, e) => s + (e.petrol || 0), 0);
 
-    // Fixed costs — charge the full period (rent / wifi / electricity accrue
-    // whether the shop operated that day or not). Matches the branch detail
-    // 'Fixed Costs' KPI so the card P&L lines up with Full Net P&L.
-    const fShopRent = (b.shop_rent || 0) * factor;
-    const fRoomRent = (b.room_rent || 0) * factor;
-    const fWifi     = (b.wifi || 0) * factor;
-    const fElec     = ((b.shop_elec || 0) + (b.room_elec || 0)) * factor;
+    // Fixed costs — sum per-month so any monthly_expenses override (Master
+    // Setup → Fixed Expenses) is honored; branch master is the fallback when
+    // no override exists for that month. Rent / wifi / electricity still
+    // accrue for the whole month regardless of working days.
+    let fShopRent = 0, fRoomRent = 0, fWifi = 0, fShopElec = 0, fRoomElec = 0;
+    {
+      const startFM = isYearly ? 1 : filterMonth;
+      const endFM   = isYearly ? factor : filterMonth;
+      for (let m = startFM; m <= endFM; m++) {
+        const mPrefix = `${filterYear}-${String(m).padStart(2, '0')}`;
+        const mf = getMonthlyFixed(b, mPrefix, monthlyExpenses);
+        fShopRent += mf.shop_rent;
+        fRoomRent += mf.room_rent;
+        fShopElec += mf.shop_elec;
+        fRoomElec += mf.room_elec;
+        fWifi     += mf.wifi;
+      }
+    }
+    const fElec = fShopElec + fRoomElec;
     const fFixedTot = fShopRent + fRoomRent + fWifi + fElec;
 
     // Payroll (Actual) — full monthly pro-rata across every month in range.
