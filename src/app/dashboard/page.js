@@ -1105,6 +1105,11 @@ export default function DashboardPage() {
         <DailyBusinessChart entries={entries} filterYear={filterYear} filterMonth={filterMonth} />
       )}
 
+      {/* Monthly business bar chart — year mode only (12 bars instead of 365) */}
+      {filterMode === "year" && (dashView === "all" || dashView === "shop") && (
+        <MonthlyBusinessChart entries={entries} filterYear={filterYear} />
+      )}
+
       {/* Daily material consumption bar chart — respects the global
           material-source toggles so it lines up with what P&L uses. */}
       {filterMode === "month" && (dashView === "all" || dashView === "shop") && (
@@ -2054,15 +2059,21 @@ function DailyBusinessChart({ entries, filterYear, filterMonth }) {
 
   // Split cash vs non-cash so the stacked bar shows the mix at a glance.
   // Non-cash bucket = online + material sale (the "digital + upsell" portion).
+  // Online and material are ALSO tracked individually so the hover tooltip can
+  // show the full breakdown (Online / Cash / Material) without re-walking entries.
   const byDay = new Array(daysInMonth).fill(0);
   const byDayCash = new Array(daysInMonth).fill(0);
   const byDayNonCash = new Array(daysInMonth).fill(0);
+  const byDayOnline = new Array(daysInMonth).fill(0);
+  const byDayMat = new Array(daysInMonth).fill(0);
   entries.forEach(e => {
     if (!e.date || !e.date.startsWith(prefix)) return;
     const dIdx = Number(e.date.slice(8, 10)) - 1;
     if (dIdx < 0 || dIdx >= daysInMonth) return;
     const matSale = (e.staff_billing || []).reduce((s, sb) => s + (sb.material || 0), 0);
     byDayCash[dIdx] += (e.cash || 0);
+    byDayOnline[dIdx] += (e.online || 0);
+    byDayMat[dIdx] += matSale;
     byDayNonCash[dIdx] += (e.online || 0) + matSale;
     byDay[dIdx] += (e.online || 0) + (e.cash || 0) + matSale;
   });
@@ -2215,7 +2226,7 @@ function DailyBusinessChart({ entries, filterYear, filterMonth }) {
               const clipId = `bar-clip-${filterYear}-${filterMonth}-${i}`;
               return (
                 <g key={i}
-                  onMouseEnter={() => hasValue && setHover({ i, v, cash: byDayCash[i], nonCash: byDayNonCash[i], dateStr })}
+                  onMouseEnter={() => hasValue && setHover({ i, v, cash: byDayCash[i], online: byDayOnline[i], mat: byDayMat[i], nonCash: byDayNonCash[i], dateStr })}
                   onMouseLeave={() => setHover(null)}
                   style={{ cursor: hasValue ? "pointer" : "default", transition: "opacity .15s" }}
                   opacity={dim}>
@@ -2316,20 +2327,253 @@ function DailyBusinessChart({ entries, filterYear, filterMonth }) {
           {hover && (
             <div style={{
               position: "absolute",
-              left: Math.min(LEFT + hover.i * (BAR_W + GAP) + BAR_W + 10, W - 160),
+              left: Math.min(LEFT + hover.i * (BAR_W + GAP) + BAR_W + 10, W - 180),
               top: 4, pointerEvents: "none",
               background: "var(--bg4)", border: "1px solid rgba(var(--accent-rgb),0.35)", borderRadius: 8,
-              padding: "8px 12px", boxShadow: "0 6px 20px rgba(0,0,0,0.5)", fontSize: 11, zIndex: 3, minWidth: 150,
+              padding: "10px 14px", boxShadow: "0 6px 20px rgba(0,0,0,0.5)", fontSize: 11, zIndex: 3, minWidth: 180,
             }}>
               <div style={{ fontSize: 9, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, fontWeight: 700 }}>{hover.dateStr} · {dayOfWeek(hover.i + 1)}</div>
-              <div style={{ fontSize: 14, fontWeight: 800, color: "var(--green)", marginTop: 2 }}>{INR(hover.v)}</div>
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 10, marginTop: 4 }}>
-                <span style={{ color: "#c084fc", fontWeight: 700 }}>Cash</span>
-                <span style={{ color: "#c084fc" }}>{INR(hover.cash || 0)}</span>
+              <div style={{ fontSize: 15, fontWeight: 800, color: "var(--green)", marginTop: 2 }}>{INR(hover.v)}</div>
+              <div style={{ borderTop: "1px dashed var(--border2)", margin: "6px 0" }} />
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 10.5, padding: "2px 0" }}>
+                <span style={{ color: "var(--blue, #60a5fa)", fontWeight: 700 }}>Online</span>
+                <span style={{ color: "var(--blue, #60a5fa)", fontWeight: 700 }}>{INR(hover.online || 0)}</span>
               </div>
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 10 }}>
-                <span style={{ color: "var(--blue, #60a5fa)", fontWeight: 700 }}>Online + Mat</span>
-                <span style={{ color: "var(--blue, #60a5fa)" }}>{INR(hover.nonCash || 0)}</span>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 10.5, padding: "2px 0" }}>
+                <span style={{ color: "#c084fc", fontWeight: 700 }}>Cash</span>
+                <span style={{ color: "#c084fc", fontWeight: 700 }}>{INR(hover.cash || 0)}</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 10.5, padding: "2px 0" }}>
+                <span style={{ color: "var(--orange)", fontWeight: 700 }}>Material</span>
+                <span style={{ color: "var(--orange)", fontWeight: 700 }}>{INR(hover.mat || 0)}</span>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+// Year-mode twin of DailyBusinessChart — 12 bars, one per month, with the same
+// stacked cash / non-cash split and a hover popup that breaks down Online,
+// Cash, and Material for quick month-to-month verification.
+function MonthlyBusinessChart({ entries, filterYear }) {
+  const [hover, setHover] = useState(null);
+  const [showAvg, setShowAvg] = useState(false);
+  const NOW = new Date();
+  const currentYm = NOW.getFullYear() === filterYear ? NOW.getMonth() : 11;
+
+  const byMo = new Array(12).fill(0);
+  const byMoCash = new Array(12).fill(0);
+  const byMoOnline = new Array(12).fill(0);
+  const byMoMat = new Array(12).fill(0);
+  const byMoNonCash = new Array(12).fill(0);
+  entries.forEach(e => {
+    if (!e.date || !e.date.startsWith(String(filterYear))) return;
+    const mIdx = Number(e.date.slice(5, 7)) - 1;
+    if (mIdx < 0 || mIdx > 11) return;
+    const matSale = (e.staff_billing || []).reduce((s, sb) => s + (sb.material || 0), 0);
+    byMoCash[mIdx] += (e.cash || 0);
+    byMoOnline[mIdx] += (e.online || 0);
+    byMoMat[mIdx] += matSale;
+    byMoNonCash[mIdx] += (e.online || 0) + matSale;
+    byMo[mIdx] += (e.online || 0) + (e.cash || 0) + matSale;
+  });
+
+  const max = Math.max(1, ...byMo);
+  const totalBusiness = byMo.reduce((s, v) => s + v, 0);
+  const totalCash = byMoCash.reduce((s, v) => s + v, 0);
+  const totalNonCash = byMoNonCash.reduce((s, v) => s + v, 0);
+  // Active months = months with any entries — used as avg denominator so a
+  // half-finished year doesn't dilute the average with empty months.
+  const activeMonths = byMo.filter(v => v > 0).length;
+  const avg = activeMonths ? Math.round(totalBusiness / activeMonths) : 0;
+  const bestIdx = byMo.indexOf(Math.max(...byMo));
+
+  const H = 230;
+  const BAR_W = 40;
+  const GAP = 20;
+  const LEFT = 56;
+  const PAD_TOP = 22;
+  const PAD_BOTTOM = 34;
+  const W = LEFT + 12 * (BAR_W + GAP) + 8;
+  const yTicks = 4;
+  const BAR_R = 7;
+  const MONTHS_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+  return (
+    <Card style={{ padding: 18, marginBottom: 24 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12, marginBottom: 14 }}>
+        <div>
+          <div style={{ fontSize: 11, fontWeight: 800, color: "var(--accent)", textTransform: "uppercase", letterSpacing: 2 }}>Monthly Business</div>
+          <div style={{ fontSize: 18, fontWeight: 800, color: "var(--gold)", fontFamily: "var(--font-headline, var(--font-outfit))", marginTop: 2 }}>{filterYear}</div>
+        </div>
+        <div style={{ display: "flex", gap: 20, alignItems: "center", flexWrap: "wrap" }}>
+          <div style={{ textAlign: "right" }}>
+            <div style={{ fontSize: 9, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, fontWeight: 700 }}>Total</div>
+            <div style={{ fontSize: 15, fontWeight: 800, color: "var(--green)" }}>{INR(totalBusiness)}</div>
+          </div>
+          <div style={{ textAlign: "right" }}>
+            <div style={{ fontSize: 9, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, fontWeight: 700 }}>Cash / Online+Mat</div>
+            <div style={{ fontSize: 13, fontWeight: 800 }}>
+              <span style={{ color: "#c084fc" }}>{INR(totalCash)}</span>
+              <span style={{ color: "var(--text3)", margin: "0 4px" }}>·</span>
+              <span style={{ color: "var(--blue)" }}>{INR(totalNonCash)}</span>
+            </div>
+          </div>
+          <div style={{ textAlign: "right" }}>
+            <div style={{ fontSize: 9, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, fontWeight: 700 }}>Monthly Avg</div>
+            <div style={{ fontSize: 15, fontWeight: 800, color: "var(--blue)" }}>{INR(avg)}</div>
+          </div>
+          <div style={{ textAlign: "right" }}>
+            <div style={{ fontSize: 9, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, fontWeight: 700 }}>Best Month</div>
+            <div style={{ fontSize: 15, fontWeight: 800, color: "var(--green)" }}>{byMo[bestIdx] > 0 ? `${MONTHS_SHORT[bestIdx]} · ${INR(byMo[bestIdx])}` : "—"}</div>
+          </div>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer", padding: "6px 10px", background: showAvg ? "rgba(96,165,250,0.12)" : "var(--bg3)", border: `1px solid ${showAvg ? "rgba(96,165,250,0.4)" : "var(--border)"}`, borderRadius: 8, fontSize: 10, fontWeight: 700, color: showAvg ? "var(--blue)" : "var(--text3)", textTransform: "uppercase", letterSpacing: 1, userSelect: "none" }}>
+            <input type="checkbox" checked={showAvg} onChange={e => setShowAvg(e.target.checked)} style={{ accentColor: "var(--blue, #60a5fa)", cursor: "pointer" }} />
+            Avg line
+          </label>
+        </div>
+      </div>
+
+      {totalBusiness === 0 ? (
+        <div style={{ height: H, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text3)", fontStyle: "italic", fontSize: 13 }}>No business entries recorded for {filterYear} yet.</div>
+      ) : (
+        <div style={{ position: "relative", overflowX: "auto" }}>
+          <svg width={W} height={H + PAD_TOP + PAD_BOTTOM} style={{ display: "block" }}>
+            <defs>
+              <linearGradient id="mbar-blue" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#38d9f2" /><stop offset="100%" stopColor="#0891a8" stopOpacity="0.75" /></linearGradient>
+              <linearGradient id="mbar-accent" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#5de8ff" /><stop offset="100%" stopColor="#12a5bf" stopOpacity="0.85" /></linearGradient>
+              <linearGradient id="mbar-green" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#7df094" /><stop offset="100%" stopColor="#22a354" stopOpacity="0.85" /></linearGradient>
+              <linearGradient id="mbar-purple" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#d7a6ff" stopOpacity="0.95" /><stop offset="100%" stopColor="#8b5cf6" stopOpacity="0.8" /></linearGradient>
+              <linearGradient id="mbar-sheen" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="rgba(255,255,255,0.22)" /><stop offset="60%" stopColor="rgba(255,255,255,0)" /></linearGradient>
+              <filter id="mbest-glow" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="4" /></filter>
+            </defs>
+            {Array.from({ length: yTicks + 1 }, (_, i) => {
+              const frac = i / yTicks;
+              const y = PAD_TOP + (1 - frac) * H;
+              const v = Math.round(max * frac);
+              const isBaseline = i === 0;
+              return (
+                <g key={i}>
+                  <line x1={LEFT} y1={y} x2={W - 4} y2={y}
+                    stroke={isBaseline ? "rgba(255,255,255,0.14)" : "rgba(255,255,255,0.04)"}
+                    strokeDasharray={isBaseline ? undefined : "2 4"} strokeWidth={1} />
+                  {!isBaseline && (
+                    <text x={LEFT - 8} y={y + 3} fontSize={9} fill="var(--text3)" textAnchor="end" fontWeight={600}>
+                      {v >= 100000 ? `${(v / 100000).toFixed(1)}L` : v >= 1000 ? `${Math.round(v / 1000)}k` : v}
+                    </text>
+                  )}
+                </g>
+              );
+            })}
+            {byMo.map((v, i) => {
+              const x = LEFT + i * (BAR_W + GAP);
+              const hasValue = v > 0;
+              const totalH = hasValue ? Math.max(2, (v / max) * H) : 2;
+              const cashH = hasValue ? (byMoCash[i] / max) * H : 0;
+              const topH = Math.max(0, totalH - cashH);
+              const yTop = PAD_TOP + H - totalH;
+              const yCash = PAD_TOP + H - cashH;
+              const baselineY = PAD_TOP + H;
+              const isCurrent = i === currentYm;
+              const isBest = i === bestIdx && hasValue;
+              const isHovered = hover && hover.i === i;
+              const topFill = isBest ? "url(#mbar-green)" : isCurrent ? "url(#mbar-accent)" : "url(#mbar-blue)";
+              const dim = hover && hover.i !== i ? 0.35 : 1;
+              const monthLabelColor = isBest ? "var(--green)" : isCurrent ? "var(--accent)" : "var(--text3)";
+              const monthWeight = (isBest || isCurrent) ? 800 : 600;
+              const clipId = `mbar-clip-${filterYear}-${i}`;
+              return (
+                <g key={i}
+                  onMouseEnter={() => hasValue && setHover({ i, v, cash: byMoCash[i], online: byMoOnline[i], mat: byMoMat[i] })}
+                  onMouseLeave={() => setHover(null)}
+                  style={{ cursor: hasValue ? "pointer" : "default", transition: "opacity .15s" }}
+                  opacity={dim}>
+                  <defs>
+                    <clipPath id={clipId}>
+                      <path d={`M${x},${yTop + BAR_R}
+                                Q${x},${yTop} ${x + BAR_R},${yTop}
+                                H${x + BAR_W - BAR_R}
+                                Q${x + BAR_W},${yTop} ${x + BAR_W},${yTop + BAR_R}
+                                V${baselineY}
+                                H${x}
+                                Z`} />
+                    </clipPath>
+                  </defs>
+                  {hasValue ? (
+                    <g clipPath={`url(#${clipId})`}>
+                      {isBest && (
+                        <rect x={x - 4} y={yTop - 4} width={BAR_W + 8} height={totalH + 8}
+                          fill="rgba(74,222,128,0.35)" filter="url(#mbest-glow)" />
+                      )}
+                      {topH > 0 && <rect x={x} y={yTop} width={BAR_W} height={topH} fill={topFill} />}
+                      {cashH > 0 && <rect x={x} y={yCash} width={BAR_W} height={cashH} fill="url(#mbar-purple)" />}
+                      {cashH > 0 && topH > 0 && <rect x={x} y={yCash - 0.5} width={BAR_W} height={1} fill="rgba(255,255,255,0.18)" />}
+                      <rect x={x} y={yTop} width={BAR_W} height={Math.min(totalH * 0.35, 20)} fill="url(#mbar-sheen)" />
+                    </g>
+                  ) : (
+                    <rect x={x} y={baselineY - 2} width={BAR_W} height={2} rx={1} fill="rgba(255,255,255,0.06)" />
+                  )}
+                  {isCurrent && hasValue && (
+                    <rect x={x - 1.5} y={yTop - 1.5} width={BAR_W + 3} height={totalH + 3} rx={BAR_R + 1.5} ry={BAR_R + 1.5}
+                      fill="none" stroke="var(--accent)" strokeWidth={1.5} strokeDasharray="3 3" opacity={0.75} />
+                  )}
+                  {(isBest || isHovered) && hasValue && (() => {
+                    const label = v >= 10000000 ? `₹${(v / 10000000).toFixed(2)}Cr` : v >= 100000 ? `₹${(v / 100000).toFixed(1)}L` : v >= 1000 ? `₹${Math.round(v / 1000)}k` : `₹${v}`;
+                    const chipW = label.length * 6.5 + 12;
+                    const chipX = x + BAR_W / 2 - chipW / 2;
+                    const chipY = Math.max(2, yTop - 16);
+                    const chipColor = isHovered && !isBest ? "var(--accent)" : "var(--green)";
+                    return (
+                      <g>
+                        <rect x={chipX} y={chipY} width={chipW} height={14} rx={7}
+                          fill="var(--bg4)" stroke={chipColor} strokeWidth={1} opacity={0.95} />
+                        <text x={x + BAR_W / 2} y={chipY + 10} fontSize={9} fontWeight={800}
+                          fill={chipColor} textAnchor="middle">{label}</text>
+                      </g>
+                    );
+                  })()}
+                  <text x={x + BAR_W / 2} y={baselineY + 16} fontSize={11} fill={monthLabelColor}
+                    textAnchor="middle" fontWeight={monthWeight}>{MONTHS_SHORT[i]}</text>
+                </g>
+              );
+            })}
+            {showAvg && avg > 0 && (() => {
+              const yAvg = PAD_TOP + H - (avg / max) * H;
+              return (
+                <g>
+                  <line x1={LEFT} y1={yAvg} x2={W - 4} y2={yAvg} stroke="var(--blue, #60a5fa)" strokeWidth={1.4} strokeDasharray="5 4" opacity={0.9} />
+                  <rect x={LEFT + 4} y={yAvg - 9} width={84} height={14} rx={3} fill="rgba(96,165,250,0.18)" stroke="rgba(96,165,250,0.45)" />
+                  <text x={LEFT + 8} y={yAvg + 1} fontSize={9} fill="var(--blue, #60a5fa)" fontWeight={800}>AVG {INR(avg)}</text>
+                </g>
+              );
+            })()}
+          </svg>
+
+          {hover && (
+            <div style={{
+              position: "absolute",
+              left: Math.min(LEFT + hover.i * (BAR_W + GAP) + BAR_W + 10, W - 200),
+              top: 4, pointerEvents: "none",
+              background: "var(--bg4)", border: "1px solid rgba(var(--accent-rgb),0.35)", borderRadius: 8,
+              padding: "10px 14px", boxShadow: "0 6px 20px rgba(0,0,0,0.5)", fontSize: 11, zIndex: 3, minWidth: 190,
+            }}>
+              <div style={{ fontSize: 9, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, fontWeight: 700 }}>{MONTHS_SHORT[hover.i]} {filterYear}</div>
+              <div style={{ fontSize: 15, fontWeight: 800, color: "var(--green)", marginTop: 2 }}>{INR(hover.v)}</div>
+              <div style={{ borderTop: "1px dashed var(--border2)", margin: "6px 0" }} />
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 10.5, padding: "2px 0" }}>
+                <span style={{ color: "var(--blue, #60a5fa)", fontWeight: 700 }}>Online</span>
+                <span style={{ color: "var(--blue, #60a5fa)", fontWeight: 700 }}>{INR(hover.online || 0)}</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 10.5, padding: "2px 0" }}>
+                <span style={{ color: "#c084fc", fontWeight: 700 }}>Cash</span>
+                <span style={{ color: "#c084fc", fontWeight: 700 }}>{INR(hover.cash || 0)}</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 10.5, padding: "2px 0" }}>
+                <span style={{ color: "var(--orange)", fontWeight: 700 }}>Material</span>
+                <span style={{ color: "var(--orange)", fontWeight: 700 }}>{INR(hover.mat || 0)}</span>
               </div>
             </div>
           )}

@@ -86,7 +86,7 @@ const MATERIAL_GROUPS = [
 ];
 
 const blankRow = () => ({
-  name: "", unit: "pcs", group: "", gst_pct: 18, price_inc_gst: "",
+  name: "", unit: "pcs", group: "", gst_pct: 18, price_inc_gst: "", vendor: "",
   existingId: null, showSuggest: false,
 });
 
@@ -876,6 +876,7 @@ export default function MaterialMasterPage() {
       group: m.group || "",
       gst_pct: m.gst_pct ?? 18,
       price_inc_gst: m.current_price || "",
+      vendor: m.vendor || "",
       existingId: m.id,
       showSuggest: false,
     });
@@ -920,6 +921,7 @@ export default function MaterialMasterPage() {
         const priceInc = Number(r.price_inc_gst) || 0;
         const gstPct = Number(r.gst_pct) || 0;
         const basePrice = +(priceInc / (1 + gstPct / 100)).toFixed(2);
+        const vendor = (r.vendor || "").trim();
         const payload = {
           name,
           unit: r.unit || "pcs",
@@ -929,6 +931,7 @@ export default function MaterialMasterPage() {
           last_updated: nowISO,
           last_updated_by: currentUser?.id || currentUser?.name || "admin",
           ...(r.group ? { group: r.group } : {}),
+          ...(vendor ? { vendor } : {}),
         };
         const matchingExisting = r.existingId
           ? materials.find(m => m.id === r.existingId)
@@ -936,6 +939,10 @@ export default function MaterialMasterPage() {
 
         if (matchingExisting) {
           const priceChanged = Math.abs((matchingExisting.current_price || 0) - priceInc) > 0.01;
+          const vendorChanged = vendor && vendor !== (matchingExisting.vendor || "");
+          // Sourced date = last time this material was either first added, re-priced, or vendor-switched.
+          // Pure edits to unit/group/GST don't bump it.
+          if (priceChanged || vendorChanged) payload.sourced_at = today;
           batch.set(doc(db, "materials", matchingExisting.id), payload, { merge: true });
           if (priceChanged) {
             batch.set(doc(collection(db, "material_price_history")), {
@@ -946,6 +953,7 @@ export default function MaterialMasterPage() {
               gst_pct: gstPct,
               effective_from: today,
               source: "material-master-grid",
+              vendor: vendor || matchingExisting.vendor || "",
               changed_by: currentUser?.id || currentUser?.name || "admin",
               changed_at: nowISO,
             });
@@ -954,7 +962,7 @@ export default function MaterialMasterPage() {
           updated++;
         } else {
           const mRef = doc(collection(db, "materials"));
-          batch.set(mRef, payload);
+          batch.set(mRef, { ...payload, sourced_at: today });
           batch.set(doc(collection(db, "material_price_history")), {
             material_id: mRef.id,
             material_name: name,
@@ -963,6 +971,7 @@ export default function MaterialMasterPage() {
             gst_pct: gstPct,
             effective_from: today,
             source: "material-master-grid",
+            vendor: vendor || "",
             changed_by: currentUser?.id || currentUser?.name || "admin",
             changed_at: nowISO,
           });
@@ -1066,6 +1075,8 @@ export default function MaterialMasterPage() {
             case "transferred":   return transferredByMaterial[m.id] || 0;
             case "available":     return (Number(m.total_purchased) || 0) - (transferredByMaterial[m.id] || 0);
             case "last_updated":  return Number(m.last_updated) || 0;
+            case "vendor":        return (m.vendor || "").toLowerCase();
+            case "sourced_at":    return m.sourced_at || "";
             default:              return 0;
           }
         };
@@ -1174,6 +1185,20 @@ export default function MaterialMasterPage() {
         const groupCounts = {};
         materials.forEach(m => { const g = m.group || "—"; groupCounts[g] = (groupCounts[g] || 0) + 1; });
         const totalValue = materials.reduce((s, m) => s + (Number(m.current_price) || 0), 0);
+        // Per-vendor rollup — uses available stock × current price so card value = live inventory
+        // (matches what operationally matters: cash tied up with this vendor right now).
+        const byVendor = {};
+        materials.forEach(m => {
+          const v = (m.vendor || "").trim() || "Unassigned";
+          const avl = (Number(m.total_purchased) || 0) - (transferredByMaterial[m.id] || 0);
+          const stockValue = Math.max(0, avl) * (Number(m.current_price) || 0);
+          if (!byVendor[v]) byVendor[v] = { count: 0, stockValue: 0, lastSourced: "" };
+          byVendor[v].count += 1;
+          byVendor[v].stockValue += stockValue;
+          if (m.sourced_at && m.sourced_at > byVendor[v].lastSourced) byVendor[v].lastSourced = m.sourced_at;
+        });
+        const vendorCards = Object.entries(byVendor)
+          .sort((a, b) => b[1].stockValue - a[1].stockValue);
         return (
           <>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 12, marginBottom: 16 }}>
@@ -1181,6 +1206,7 @@ export default function MaterialMasterPage() {
                 ["Total Unique Materials", materials.length, "var(--accent)"],
                 ["Catalog Value", INR(totalValue), "var(--green)"],
                 ["Groups Used", Object.keys(groupCounts).length, "var(--gold)"],
+                ["Vendors", vendorCards.length, "var(--purple, #c084fc)"],
                 ["Showing", filtered.length, "var(--blue)"],
               ].map(([l, v, c]) => (
                 <div key={l} style={{ padding: 14, borderRadius: 12, background: "var(--bg3)", border: "1px solid var(--border)" }}>
@@ -1189,6 +1215,29 @@ export default function MaterialMasterPage() {
                 </div>
               ))}
             </div>
+
+            {/* Per-vendor summary cards — inventory value + material count + last sourced date. */}
+            {vendorCards.length > 0 && (
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 10, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.5, marginBottom: 8 }}>Vendors ({vendorCards.length})</div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(200px,1fr))", gap: 10 }}>
+                  {vendorCards.map(([name, v]) => {
+                    const isUnassigned = name === "Unassigned";
+                    return (
+                      <div key={name} style={{ padding: 14, borderRadius: 12, background: "var(--bg3)", border: `1px solid ${isUnassigned ? "var(--border)" : "rgba(192,132,252,0.25)"}`, boxShadow: isUnassigned ? "none" : "0 0 10px rgba(192,132,252,0.08)" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+                          <div style={{ fontSize: 12, fontWeight: 800, color: isUnassigned ? "var(--text3)" : "var(--purple, #c084fc)", textTransform: "uppercase", letterSpacing: 0.5, overflow: "hidden", textOverflow: "ellipsis" }} title={name}>{name}</div>
+                          <div style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", background: "var(--bg4)", padding: "2px 6px", borderRadius: 6, flexShrink: 0 }}>{v.count}</div>
+                        </div>
+                        <div style={{ fontSize: 18, fontWeight: 800, color: "var(--green)", marginTop: 6 }}>{INR(v.stockValue)}</div>
+                        <div style={{ fontSize: 9, color: "var(--text3)", marginTop: 2, fontWeight: 600 }}>Stock value · Last sourced {v.lastSourced ? new Date(v.lastSourced).toLocaleDateString() : "—"}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
             {/* ── Analytics panel ──────────────────────────────────────── */}
             <Card style={{ padding: 0, marginBottom: 16 }}>
               <div style={{ padding: "10px 14px", borderBottom: showAnalytics ? "1px solid var(--border)" : "none", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
@@ -1292,6 +1341,8 @@ export default function MaterialMasterPage() {
                     <SortableTH k="gst_pct" right>GST %</SortableTH>
                     <SortableTH k="base_price" right>Base Price</SortableTH>
                     <SortableTH k="current_price" right>Price (incl. GST)</SortableTH>
+                    <SortableTH k="vendor">Vendor</SortableTH>
+                    <SortableTH k="sourced_at">Sourced</SortableTH>
                     <SortableTH k="last_updated">Last Updated</SortableTH>
                     <TH right style={{ width: 80, fontWeight: 900, letterSpacing: 0.5, textTransform: "uppercase", fontSize: 10, color: "var(--accent)" }}>History</TH>
                   </tr>
@@ -1318,6 +1369,8 @@ export default function MaterialMasterPage() {
                       <TD right style={{ color: "var(--orange)", fontWeight: 700 }}>{m.gst_pct || 0}%</TD>
                       <TD right style={{ color: "var(--text3)" }}>{INR(m.base_price || 0)}</TD>
                       <TD right style={{ color: "var(--accent)", fontWeight: 800 }}>{INR(m.current_price || 0)}</TD>
+                      <TD style={{ fontWeight: 600, color: m.vendor ? "var(--text)" : "var(--text3)" }}>{m.vendor || "—"}</TD>
+                      <TD style={{ fontSize: 11, color: "var(--text3)" }}>{m.sourced_at ? new Date(m.sourced_at).toLocaleDateString() : "—"}</TD>
                       <TD style={{ fontSize: 11, color: "var(--text3)" }}>{m.last_updated ? new Date(m.last_updated).toLocaleDateString() : "—"}</TD>
                       <TD right>
                         <IconBtn name="log" title="Purchase & price history" variant="secondary" onClick={() => setHistoryModal(m)} />
@@ -1326,7 +1379,7 @@ export default function MaterialMasterPage() {
                     );
                   })}
                   {filtered.length === 0 && (
-                    <tr><td colSpan={isAdmin ? 13 : 12} style={{ padding: 40, textAlign: "center", color: "var(--text3)", fontStyle: "italic" }}>
+                    <tr><td colSpan={isAdmin ? 15 : 14} style={{ padding: 40, textAlign: "center", color: "var(--text3)", fontStyle: "italic" }}>
                       {materials.length === 0 ? "No materials yet — click Add Materials to get started." : "No matches. Try clearing filters."}
                     </td></tr>
                   )}
@@ -1351,6 +1404,7 @@ export default function MaterialMasterPage() {
               <TH>Material Name *</TH>
               <TH style={{ width: 110 }}>Unit</TH>
               <TH style={{ width: 160 }}>Group</TH>
+              <TH style={{ width: 160 }}>Vendor</TH>
               <TH right style={{ width: 90 }}>GST %</TH>
               <TH right style={{ width: 140 }}>Price (incl. GST) *</TH>
               <TH right style={{ width: 120 }}>Base (ex-GST)</TH>
@@ -1405,6 +1459,12 @@ export default function MaterialMasterPage() {
                       minWidth={0}
                       buttonStyle={inp}
                     />
+                  </TD>
+                  <TD>
+                    <input value={r.vendor} onChange={e => updateRow(i, { vendor: e.target.value })} placeholder="Vendor / supplier" style={inp} list={`vendors-${i}`} />
+                    <datalist id={`vendors-${i}`}>
+                      {[...new Set(materials.map(m => m.vendor).filter(Boolean))].map(v => <option key={v} value={v} />)}
+                    </datalist>
                   </TD>
                   <TD right>
                     <input type="number" min="0" step="0.01" value={r.gst_pct} onChange={e => updateRow(i, { gst_pct: Number(e.target.value) })} style={{ ...inp, textAlign: "right" }} />
