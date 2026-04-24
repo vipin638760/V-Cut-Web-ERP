@@ -421,6 +421,7 @@ export default function BranchesPage() {
     });
   };
   const clearBranchSelection = () => setSelectedBranches(new Set());
+  const selectAllBranches = () => setSelectedBranches(new Set(branches.map(b => b.id)));
   const openBulkRecalc = () => {
     if (selectedBranches.size === 0) return;
     const list = Array.from(selectedBranches)
@@ -2486,7 +2487,7 @@ export default function BranchesPage() {
 
         {/* Recent Entries */}
         {openSections.has("entries") && (<>
-        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 12, color: "var(--gold)" }}>Recent Entries</div>
+        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 12, color: "var(--gold)" }}>Recent Entries ({periodEntries.length})</div>
         <Card>
           <table className="pill-table" style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12.5 }}>
             <thead><tr>
@@ -2494,7 +2495,7 @@ export default function BranchesPage() {
               {canEdit && <TH sticky> </TH>}
             </tr></thead>
             <tbody>
-              {periodEntries.slice(0, 15).map(e => {
+              {periodEntries.map(e => {
                 const totalBillingE = (e.staff_billing || []).reduce((s, sb) => s + (sb.billing || 0), 0);
                 const totalMatE = (e.staff_billing || []).reduce((s, sb) => s + (sb.material || 0), 0);
                 const totalIncE = (e.staff_billing || []).reduce((s, sb) => s + (sb.incentive || 0) + (sb.mat_incentive || 0), 0);
@@ -2583,21 +2584,41 @@ export default function BranchesPage() {
 
       <PeriodWidget filterMode={filterMode} setFilterMode={setFilterMode} filterYear={filterYear} setFilterYear={setFilterYear} filterMonth={filterMonth} setFilterMonth={setFilterMonth} />
 
-      {/* Bulk recalculate action bar */}
-      {canEdit && selectedBranches.size > 0 && (
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", padding: "10px 16px", marginBottom: 12, borderRadius: 10, background: "linear-gradient(135deg, rgba(96,165,250,0.10), rgba(34,211,238,0.06))", border: "1px solid rgba(96,165,250,0.25)" }}>
+      {/* Bulk recalculate action bar — always visible for admin/accountant so
+          "Select all / Recalculate all" is a one-click action. */}
+      {canEdit && branches.length > 0 && (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", padding: "10px 16px", marginBottom: 12, borderRadius: 10, background: selectedBranches.size > 0 ? "linear-gradient(135deg, rgba(96,165,250,0.10), rgba(34,211,238,0.06))" : "var(--bg3)", border: `1px solid ${selectedBranches.size > 0 ? "rgba(96,165,250,0.25)" : "var(--border)"}` }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 12 }}>
-            <span style={{ fontWeight: 800, color: "var(--blue, #60a5fa)" }}>{selectedBranches.size}</span>
-            <span style={{ color: "var(--text2)", fontWeight: 600 }}>branch{selectedBranches.size === 1 ? "" : "es"} selected</span>
+            {selectedBranches.size > 0 ? (
+              <>
+                <span style={{ fontWeight: 800, color: "var(--blue, #60a5fa)" }}>{selectedBranches.size}</span>
+                <span style={{ color: "var(--text2)", fontWeight: 600 }}>of {branches.length} branch{branches.length === 1 ? "" : "es"} selected</span>
+              </>
+            ) : (
+              <span style={{ color: "var(--text3)", fontWeight: 600 }}>No branches selected — tick cards or use Select All to batch recalculate.</span>
+            )}
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <button onClick={clearBranchSelection}
-              style={{ padding: "8px 14px", borderRadius: 8, background: "var(--bg4)", color: "var(--text2)", border: "1px solid var(--border2)", fontWeight: 600, fontSize: 11, cursor: "pointer" }}>
-              Clear
-            </button>
-            <button onClick={openBulkRecalc}
-              style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 8, background: "linear-gradient(135deg, var(--accent), var(--gold2))", color: "#000", border: "none", fontWeight: 800, fontSize: 12, cursor: "pointer" }}>
-              <Icon name="check" size={13} /> Recalculate Selected
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            {selectedBranches.size === branches.length ? (
+              <button onClick={clearBranchSelection}
+                style={{ padding: "8px 14px", borderRadius: 8, background: "var(--bg4)", color: "var(--text2)", border: "1px solid var(--border2)", fontWeight: 700, fontSize: 11, cursor: "pointer" }}>
+                Clear
+              </button>
+            ) : (
+              <button onClick={selectAllBranches}
+                style={{ padding: "8px 14px", borderRadius: 8, background: "var(--bg4)", color: "var(--accent)", border: "1px solid var(--border2)", fontWeight: 700, fontSize: 11, cursor: "pointer" }}>
+                Select All ({branches.length})
+              </button>
+            )}
+            {selectedBranches.size > 0 && selectedBranches.size < branches.length && (
+              <button onClick={clearBranchSelection}
+                style={{ padding: "8px 14px", borderRadius: 8, background: "var(--bg4)", color: "var(--text2)", border: "1px solid var(--border2)", fontWeight: 600, fontSize: 11, cursor: "pointer" }}>
+                Clear
+              </button>
+            )}
+            <button onClick={openBulkRecalc} disabled={selectedBranches.size === 0}
+              style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 8, background: selectedBranches.size === 0 ? "var(--bg4)" : "linear-gradient(135deg, var(--accent), var(--gold2))", color: selectedBranches.size === 0 ? "var(--text3)" : "#000", border: "none", fontWeight: 800, fontSize: 12, cursor: selectedBranches.size === 0 ? "not-allowed" : "pointer", opacity: selectedBranches.size === 0 ? 0.6 : 1 }}>
+              <Icon name="check" size={13} /> Recalculate {selectedBranches.size === 0 ? "" : selectedBranches.size === branches.length ? "All" : "Selected"}
             </button>
           </div>
         </div>
