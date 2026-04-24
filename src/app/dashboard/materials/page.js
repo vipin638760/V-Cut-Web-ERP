@@ -393,6 +393,33 @@ export default function MaterialsPage() {
   const canDeleteAllocation = ["admin", "accountant"].includes(currentUser?.role);
   // Allocation view: cards grouped by branch (default) vs flat table of every transfer.
   const [allocView, setAllocView] = useState("branches");
+  // Multi-select for bulk delete in the flat Table view.
+  const [selectedAllocIds, setSelectedAllocIds] = useState(() => new Set());
+  const toggleAllocSelected = (id) => setSelectedAllocIds(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const clearAllocSelection = () => setSelectedAllocIds(new Set());
+
+  const handleBulkDeleteAllocations = (ids) => {
+    if (!ids.length) return;
+    const picked = allocations.filter(a => ids.includes(a.id));
+    const totalVal = picked.reduce((s, a) => s + (Number(a.total) || 0), 0);
+    const totalItems = picked.reduce((s, a) => s + ((a.items || []).length), 0);
+    confirm({
+      title: `Delete ${picked.length} Transfers`,
+      message: `Delete <strong>${picked.length} transfer${picked.length === 1 ? "" : "s"}</strong> covering <strong>${totalItems} item row${totalItems === 1 ? "" : "s"}</strong>?<br/><br/>Combined value: <strong>${INR(totalVal)}</strong><br/><br/>This removes the allocation records only — stock / daily-expense rollback has to be reconciled manually.`,
+      confirmText: `Yes, Delete ${picked.length}`,
+      cancelText: "Cancel",
+      type: "danger",
+      onConfirm: async () => {
+        try {
+          await Promise.all(picked.map(a => deleteDoc(doc(db, "material_allocations", a.id))));
+          clearAllocSelection();
+          toast({ title: "Deleted", message: `${picked.length} transfer record${picked.length === 1 ? "" : "s"} removed.`, type: "success" });
+        } catch (e) {
+          confirm({ title: "Error", message: e.message, confirmText: "OK", type: "danger", onConfirm: () => {} });
+        }
+      }
+    });
+  };
 
   // Delete a full material_allocations doc. One doc = one transfer event, possibly with many
   // items — the confirm spells out how many to avoid surprise deletes.

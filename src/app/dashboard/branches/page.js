@@ -384,6 +384,10 @@ export default function BranchesPage() {
     return q === "summary" || q === "table" || q === "card" ? q : "card";
   });
   const [summaryTab, setSummaryTab] = useState("summary"); // "summary" | "dailycash"
+  // Deep-link target for DailyCashOnline — e.g. dashboard's Missing Entries
+  // card sets this to "missing" so the right collapsible card is already open
+  // on arrival. Once consumed, DailyCashOnline clears it back to null.
+  const [dailyCashExpanded, setDailyCashExpanded] = useState(null);
 
   // Edit form
   const [showForm, setShowForm] = useState(false);
@@ -470,6 +474,8 @@ export default function BranchesPage() {
       const params = new URLSearchParams(window.location.search);
       const bid  = params.get("branchId");
       const view = params.get("view");
+      const tab  = params.get("tab");
+      const expand = params.get("expand");
       const mode = params.get("mode");
       const yr   = params.get("year");
       const mo   = params.get("month");
@@ -480,6 +486,10 @@ export default function BranchesPage() {
         // A ?view= deep-link targets the list/summary tab — never a single branch.
         setSelectedBranch(null);
       }
+      if (tab === "summary" || tab === "dailycash") setSummaryTab(tab);
+      // Dashboard's Missing Entries card deep-links with ?expand=missing so the
+      // relevant card is open on arrival.
+      if (expand) setDailyCashExpanded(expand);
       if (bid)  setSelectedBranch(bid);
       if (mode) setFilterMode(mode);
       if (yr)   setFilterYear(Number(yr));
@@ -495,7 +505,7 @@ export default function BranchesPage() {
       }
 
       // Clean URL params so a refresh doesn't re-apply stale deep-link state.
-      if (bid || view || mode || yr || mo || cal) {
+      if (bid || view || tab || expand || mode || yr || mo || cal) {
         window.history.replaceState({}, "", window.location.pathname);
       }
     };
@@ -2692,6 +2702,8 @@ export default function BranchesPage() {
           filterYear={filterYear}
           filterMonth={filterMonth}
           isAdmin={isAdmin}
+          initialDailyCashExpanded={dailyCashExpanded}
+          onDailyCashExpandedConsumed={() => setDailyCashExpanded(null)}
         />
       ) : brView === "table" ? (
         <Card style={{ overflowX: "auto" }}>
@@ -3035,7 +3047,7 @@ function ElegantRow({ label, val, col }) {
 
 // ─── Summary View (read-only Excel-like layout) ─────────────────────────────
 
-function SummaryView({ summaryTab, setSummaryTab, branchData, branches, entries, globalSettings, filterMode, filterPrefix, filterYear, filterMonth, isAdmin }) {
+function SummaryView({ summaryTab, setSummaryTab, branchData, branches, entries, globalSettings, filterMode, filterPrefix, filterYear, filterMonth, isAdmin, initialDailyCashExpanded, onDailyCashExpandedConsumed }) {
   const MASK = "•••••";
   const gstPct = globalSettings?.gst_pct || 0;
 
@@ -3228,6 +3240,8 @@ function SummaryView({ summaryTab, setSummaryTab, branchData, branches, entries,
           filterPrefix={filterPrefix}
           filterYear={filterYear}
           filterMonth={filterMonth}
+          initialExpanded={initialDailyCashExpanded}
+          onInitialExpandedConsumed={onDailyCashExpandedConsumed}
         />
       )}
     </div>
@@ -3236,8 +3250,18 @@ function SummaryView({ summaryTab, setSummaryTab, branchData, branches, entries,
 
 // ─── Daily Cash & Online — three collapsible cards ─────────────────────────
 
-function DailyCashOnline({ branches, entries, filterMode, filterPrefix, filterYear, filterMonth }) {
-  const [expanded, setExpanded] = useState(null); // "online" | "cash" | "total" | null
+function DailyCashOnline({ branches, entries, filterMode, filterPrefix, filterYear, filterMonth, initialExpanded, onInitialExpandedConsumed }) {
+  const [expanded, setExpanded] = useState(null); // "online" | "cash" | "total" | "missing" | null
+
+  // Honour an initial ?expand=... deep-link from the dashboard once, then clear
+  // it so the user can collapse the card freely afterwards without it snapping
+  // back on re-render.
+  useEffect(() => {
+    if (initialExpanded && ["online", "cash", "total", "missing"].includes(initialExpanded)) {
+      setExpanded(initialExpanded);
+      onInitialExpandedConsumed?.();
+    }
+  }, [initialExpanded, onInitialExpandedConsumed]);
 
   // Build the list of days in the selected period.
   const days = (() => {
