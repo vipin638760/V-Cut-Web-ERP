@@ -1583,6 +1583,27 @@ export default function EntryPage() {
 
           {selBranch && (
             <>
+              {/* Unattributed banner — how much of (Online + Cash) isn't
+                  covered by any staff_billing row. Mirrors the dashboard's
+                  "Unattributed service pay" reconciliation so a gap on the
+                  admin view is obvious here at source. */}
+              {(() => {
+                const cashOnline = Number(onlineInc || 0) + Number(totalCash || 0);
+                const unatt = Math.max(0, Math.round(cashOnline - totalBilling));
+                if (unatt === 0) return null;
+                return (
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "10px 14px", marginBottom: 12, borderRadius: 10, background: "rgba(251,146,60,0.08)", border: "1px solid rgba(251,146,60,0.4)", color: "var(--orange)", fontSize: 12 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                      <span style={{ fontSize: 11, fontWeight: 900, textTransform: "uppercase", letterSpacing: 1.2, padding: "2px 8px", borderRadius: 999, background: "rgba(251,146,60,0.15)", border: "1px solid rgba(251,146,60,0.35)" }}>Unattributed</span>
+                      <span><strong>{INR(unatt)}</strong> of (Online {INR(Number(onlineInc) || 0)} + Cash {INR(totalCash)}) is not in any staff billing row.</span>
+                    </div>
+                    <span style={{ fontSize: 10, color: "var(--text3)", fontWeight: 600 }}>
+                      Staff billing sum: {INR(totalBilling)}
+                    </span>
+                  </div>
+                );
+              })()}
+
               {/* Income */}
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(200px,1fr))", gap: 12, marginBottom: 16 }}>
                 <FG label="Online Income (₹)" income>
