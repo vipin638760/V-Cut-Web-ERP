@@ -4,7 +4,7 @@ import { collection, onSnapshot, query, orderBy, where, addDoc, deleteDoc, doc, 
 import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
 import { INR, computeCashInHand } from "@/lib/calculations";
-import { Icon, IconBtn, Card, PeriodWidget, TH, TD, Modal, BranchSelect, SearchSelect, ToggleGroup, useConfirm, useToast, useSort } from "@/components/ui";
+import { Icon, IconBtn, Card, PeriodWidget, TH, TD, Modal, BranchSelect, SearchSelect, useConfirm, useToast, useSort } from "@/components/ui";
 import { staffStatusForMonth, effectiveBranchOnDate } from "@/lib/calculations";
 import VLoader from "@/components/VLoader";
 
@@ -1480,13 +1480,58 @@ export default function EntryPage() {
   return (
     <div>
       {/* Header */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20, flexWrap: "wrap", gap: 12 }}>
-        <div style={{ fontSize: 24, fontWeight: 800, color: "var(--gold)", letterSpacing: 1 }}>Data Entry</div>
-        <ToggleGroup
-          options={[["record", "Record Entry"], ["recent", "Recent Entries"]]}
-          value={pageView}
-          onChange={setPageView}
-        />
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, flexWrap: "wrap", gap: 12 }}>
+        <div>
+          <div style={{ fontSize: 24, fontWeight: 800, color: "var(--gold)", letterSpacing: 1 }}>Data Entry</div>
+          <div style={{ fontSize: 11, color: "var(--text3)", fontWeight: 600, letterSpacing: 0.3, marginTop: 2 }}>
+            Record a new day or browse, filter, and edit previous entries.
+          </div>
+        </div>
+      </div>
+
+      {/* Prominent tab slider — sits above everything else so the accountant
+          can see at a glance which half of the page is active. */}
+      <div style={{ position: "relative", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 0, padding: 4, borderRadius: 14, background: "var(--bg3)", border: "1px solid var(--border2)", marginBottom: 20, boxShadow: "inset 0 2px 6px rgba(0,0,0,0.25)" }}>
+        {/* Sliding pill indicator */}
+        <div style={{
+          position: "absolute", top: 4, bottom: 4,
+          left: pageView === "record" ? 4 : "calc(50% + 0px)",
+          width: "calc(50% - 4px)",
+          background: "linear-gradient(135deg, var(--accent), var(--gold2))",
+          borderRadius: 10,
+          transition: "left 0.25s ease",
+          boxShadow: "0 4px 14px rgba(34,211,238,0.28)",
+          zIndex: 0,
+        }} />
+        {[
+          { id: "record", label: "Record Entry", hint: "Log today's sales and staff billing", icon: "edit" },
+          { id: "recent", label: "Recent Entries", hint: "Filter, sort, and edit past rows", icon: "pie" },
+        ].map(tab => {
+          const on = pageView === tab.id;
+          return (
+            <button key={tab.id} type="button" onClick={() => setPageView(tab.id)}
+              style={{
+                position: "relative", zIndex: 1,
+                display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+                padding: "14px 18px",
+                background: "transparent", border: "none", cursor: "pointer",
+                color: on ? "#000" : "var(--text3)",
+                fontFamily: "var(--font-headline, var(--font-outfit))",
+                fontWeight: 800, fontSize: 14, letterSpacing: 0.4,
+                transition: "color 0.2s",
+              }}>
+              <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 28, height: 28, borderRadius: 8, background: on ? "rgba(0,0,0,0.12)" : "var(--bg4)", color: on ? "#000" : "var(--accent)" }}>
+                <Icon name={tab.icon} size={15} />
+              </span>
+              <span style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 0, textAlign: "left" }}>
+                <span style={{ textTransform: "uppercase" }}>{tab.label}</span>
+                <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: 0.3, textTransform: "none", opacity: on ? 0.75 : 0.7 }}>
+                  {tab.hint}
+                </span>
+              </span>
+            </button>
+          );
+        })}
       </div>
 
       {pageView === "recent" && (
