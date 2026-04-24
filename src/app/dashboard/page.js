@@ -1576,7 +1576,12 @@ function TopPerformersSection({ staffData, branchesById, brTypeFilter, staffView
                     const qs = new URLSearchParams({ edit: r.id });
                     if (yr) qs.set("year", yr);
                     if (mo) qs.set("month", String(Number(mo)));
-                    router.push(`/dashboard/entry?${qs.toString()}`);
+                    // Use a plain location assignment — router.push was not
+                    // navigating in some cases (stale closure / intercepted
+                    // event). A full navigation is cheap here and guaranteed
+                    // to land on the entry page with the URL the deep-link
+                    // effect consumes.
+                    window.location.href = `/dashboard/entry?${qs.toString()}`;
                   }} />
                 <ReconRow label="Orphaned billing" value={recon.orphaned}
                   hint="staff_billing rows whose staff_id no longer matches any staff record"
@@ -1723,8 +1728,8 @@ function ReconRow({ label, value, hint, color, rows, onRowClick }) {
             <div key={r.id}
               role={onRowClick ? "button" : undefined}
               tabIndex={onRowClick ? 0 : undefined}
-              onClick={onRowClick ? () => onRowClick(r) : undefined}
-              onKeyDown={onRowClick ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onRowClick(r); } } : undefined}
+              onClick={onRowClick ? (ev) => { ev.stopPropagation(); onRowClick(r); } : undefined}
+              onKeyDown={onRowClick ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); onRowClick(r); } } : undefined}
               style={{ display: "grid", gridTemplateColumns: "80px 1fr auto", gap: 6, fontSize: 11, padding: "6px 2px", borderBottom: "1px solid rgba(255,255,255,0.03)", cursor: onRowClick ? "pointer" : "default", alignItems: "center" }}
               onMouseEnter={onRowClick ? (e) => { e.currentTarget.style.background = "rgba(255,255,255,0.03)"; } : undefined}
               onMouseLeave={onRowClick ? (e) => { e.currentTarget.style.background = "transparent"; } : undefined}>
