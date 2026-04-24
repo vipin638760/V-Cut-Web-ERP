@@ -1699,9 +1699,13 @@ function DailyMaterialChart({ entries, allocations, branches = [], filterYear, f
       if (e.branch_id) bumpBranch(e.branch_id, "lump", amt);
     });
   }
+  // Ensure every branch shows up — even ones with zero consumption.
+  // Heaviest first; zero-spend branches sort to the bottom alphabetically.
+  branches.forEach(b => {
+    if (!byBranch.has(b.id)) byBranch.set(b.id, { name: b.name, alloc: 0, lump: 0, total: 0 });
+  });
   const branchRows = Array.from(byBranch.values())
-    .filter(r => r.total > 0)
-    .sort((a, b) => b.total - a.total);
+    .sort((a, b) => (b.total - a.total) || a.name.localeCompare(b.name));
 
   const byDay = byDayAlloc.map((v, i) => v + byDayLump[i]);
   const max = Math.max(1, ...byDay);
@@ -1958,31 +1962,37 @@ function DailyMaterialChart({ entries, allocations, branches = [], filterYear, f
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             {branchRows.map((r, i) => {
-              const pct = branchRows[0].total > 0 ? (r.total / branchRows[0].total) * 100 : 0;
+              const topTotal = branchRows[0].total;
+              const pct = topTotal > 0 ? (r.total / topTotal) * 100 : 0;
               const shareOfTotal = total > 0 ? (r.total / total) * 100 : 0;
               const name = r.name.replace("V-CUT ", "");
-              const rankColor = i === 0 ? "#d7a6ff" : i === 1 ? "var(--accent)" : i === 2 ? "#ffb877" : "var(--text2)";
+              const isZero = r.total <= 0;
+              const rankColor = isZero ? "var(--text3)" : i === 0 ? "#d7a6ff" : i === 1 ? "var(--accent)" : i === 2 ? "#ffb877" : "var(--text2)";
+              // The "X% of total" chip lives outside the bar so it's always readable,
+              // regardless of how short the filled portion is. Right-floats when the bar
+              // is long enough to host it inline without collisions.
+              const pctLabel = shareOfTotal >= 0.05 ? `${shareOfTotal.toFixed(1)}%` : isZero ? "" : "<0.1%";
               return (
-                <div key={r.name + i} style={{ display: "grid", gridTemplateColumns: "22px minmax(120px, 170px) 1fr auto", alignItems: "center", gap: 10 }}>
-                  <div style={{ width: 20, height: 20, borderRadius: 6, background: i < 3 ? "rgba(192,132,252,0.12)" : "var(--bg4)", border: `1px solid ${i < 3 ? "rgba(192,132,252,0.35)" : "var(--border)"}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 900, color: rankColor }}>
+                <div key={r.name + i} style={{ display: "grid", gridTemplateColumns: "22px minmax(120px, 170px) 1fr 48px auto", alignItems: "center", gap: 10, opacity: isZero ? 0.55 : 1 }}>
+                  <div style={{ width: 20, height: 20, borderRadius: 6, background: isZero ? "var(--bg4)" : i < 3 ? "rgba(192,132,252,0.12)" : "var(--bg4)", border: `1px solid ${isZero ? "var(--border)" : i < 3 ? "rgba(192,132,252,0.35)" : "var(--border)"}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 900, color: rankColor }}>
                     {i + 1}
                   </div>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.name}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: isZero ? "var(--text3)" : "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.name}>
                     {name}
                   </div>
-                  <div style={{ position: "relative", height: 18, background: "rgba(255,255,255,0.025)", borderRadius: 5, overflow: "hidden", display: "flex" }}>
+                  <div style={{ position: "relative", height: 18, background: "rgba(255,255,255,0.03)", border: isZero ? "1px dashed var(--border)" : "1px solid transparent", borderRadius: 5, overflow: "hidden", display: "flex" }}>
                     {useAllocations && r.alloc > 0 && (
-                      <div style={{ width: `${pct * (r.alloc / r.total)}%`, height: "100%", background: "linear-gradient(90deg, rgba(215,166,255,0.85), rgba(139,92,246,0.4))" }} />
+                      <div style={{ width: `${pct * (r.alloc / r.total)}%`, height: "100%", background: "linear-gradient(90deg, rgba(215,166,255,0.9), rgba(139,92,246,0.55))" }} />
                     )}
                     {useLumpsum && r.lump > 0 && (
-                      <div style={{ width: `${pct * (r.lump / r.total)}%`, height: "100%", background: "linear-gradient(90deg, rgba(93,232,255,0.7), rgba(8,145,168,0.35))" }} />
+                      <div style={{ width: `${pct * (r.lump / r.total)}%`, height: "100%", background: "linear-gradient(90deg, rgba(93,232,255,0.8), rgba(8,145,168,0.45))" }} />
                     )}
-                    <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", paddingLeft: 8, fontSize: 10, color: "var(--text3)", fontWeight: 600, pointerEvents: "none" }}>
-                      {shareOfTotal >= 1 ? `${shareOfTotal.toFixed(1)}% of total` : ""}
-                    </div>
+                  </div>
+                  <div style={{ fontSize: 10.5, color: isZero ? "var(--text3)" : "var(--text2)", fontWeight: 700, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+                    {pctLabel || (isZero ? "—" : "")}
                   </div>
                   <div style={{ fontSize: 12.5, fontWeight: 800, color: rankColor, fontFamily: "var(--font-headline, var(--font-outfit))", minWidth: 80, textAlign: "right" }}>
-                    {INR(r.total)}
+                    {isZero ? "—" : INR(r.total)}
                   </div>
                 </div>
               );
