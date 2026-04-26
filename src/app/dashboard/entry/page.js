@@ -607,6 +607,30 @@ export default function EntryPage() {
   // Attendance handlers
   const handleAttendanceToggle = (s, present) => {
     if (present) {
+      // Re-checking present while an approved leave exists on this date
+      // means the user wants to cancel that leave — confirm before deletion.
+      const existing = approvedLeavesByStaff[s.id];
+      if (existing) {
+        confirm({
+          title: "Cancel Approved Leave?",
+          message: `<strong>${s.name}</strong> has an approved <strong>${existing.type || "Paid"}</strong> leave on <strong>${selDate}</strong>${existing.reason ? ` — "${existing.reason}"` : ""}.<br/><br/>Marking present will <strong>delete</strong> this leave record.`,
+          confirmText: "Yes, Cancel Leave",
+          cancelText: "Keep Leave",
+          type: "warning",
+          onConfirm: async () => {
+            try {
+              await deleteDoc(doc(db, "leaves", existing.id));
+              updateStaffRow(s.id, "present", true);
+              updateStaffRow(s.id, "leave_type", "");
+              updateStaffRow(s.id, "leave_reason", "");
+              toast({ title: "Leave Cancelled", message: `${s.name}'s leave for ${selDate} removed. Marked present.`, type: "success" });
+            } catch (err) {
+              confirm({ title: "Error", message: err.message, confirmText: "OK", cancelText: "Close", type: "danger", onConfirm: () => {} });
+            }
+          },
+        });
+        return;
+      }
       // Marking present: remove any draft leave + restore inputs
       updateStaffRow(s.id, "present", true);
       updateStaffRow(s.id, "leave_type", "");
