@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { collection, onSnapshot, query, orderBy, addDoc, doc, writeBatch, deleteDoc, updateDoc, increment } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
@@ -71,6 +71,105 @@ export default function MaterialsPage() {
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
   });
+
+  // Per-branch By-Branch view: which transfer groups are currently expanded.
+  // Default is collapsed — branches show one row per date until the user opens one.
+  const [expandedAllocs, setExpandedAllocs] = useState(() => new Set());
+  const toggleAllocExpand = (id) => setExpandedAllocs(prev => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+  const expandAllocIds = (ids) => setExpandedAllocs(prev => {
+    const next = new Set(prev);
+    ids.forEach(id => next.add(id));
+    return next;
+  });
+  const collapseAllocIds = (ids) => setExpandedAllocs(prev => {
+    const next = new Set(prev);
+    ids.forEach(id => next.delete(id));
+    return next;
+  });
+
+  // Per-allocation printable transfer slip (one date / one transfer).
+  const openSingleTransferSlip = (branch, alloc) => {
+    const items = (alloc.items || []);
+    const subtotal = Number(alloc.subtotal) || items.reduce((s, i) => s + (Number(i.qty) || 0) * (Number(i.price_at_transfer) || 0), 0);
+    const opsPct = Number(alloc.operation_cost_pct) || 0;
+    const opsCost = Number(alloc.operation_cost) || 0;
+    const total = Number(alloc.total) || (subtotal + opsCost);
+    const date = alloc.date || (alloc.transferred_at || "").slice(0, 10) || "—";
+    const rowsHtml = items.map((i, idx) => `
+      <tr>
+        <td style="text-align:center;">${idx + 1}</td>
+        <td>${(i.name || "").replace(/</g, "&lt;")}</td>
+        <td style="text-align:right;">${Number(i.qty) || 0}</td>
+        <td style="text-align:center;">${(i.unit || "pcs").replace(/</g, "&lt;")}</td>
+        <td style="text-align:right;">&#8377;${Math.round(Number(i.price_at_transfer) || 0).toLocaleString("en-IN")}</td>
+        <td style="text-align:right;"><strong>&#8377;${Math.round(Number(i.line_total) || (Number(i.qty) * Number(i.price_at_transfer)) || 0).toLocaleString("en-IN")}</strong></td>
+      </tr>
+    `).join("");
+    const printedOn = new Date().toLocaleString();
+    const branchName = (branch?.name || "—").replace(/</g, "&lt;");
+    const html = `<!DOCTYPE html>
+<html><head><meta charset="utf-8" /><title>Material Transfer Slip — ${branchName} — ${date}</title>
+<style>
+  *{box-sizing:border-box;}
+  body{font-family:Arial,Helvetica,sans-serif;color:#000;padding:24px;font-size:12px;}
+  h1{text-align:center;margin:0 0 4px;font-size:18px;letter-spacing:1px;}
+  .sub{text-align:center;color:#555;font-size:11px;margin-bottom:18px;}
+  .meta{display:flex;justify-content:space-between;gap:16px;margin-bottom:12px;}
+  .meta div{flex:1;}
+  .fill{display:inline-block;border-bottom:1px solid #000;min-width:160px;padding:0 6px;}
+  table{width:100%;border-collapse:collapse;margin-top:8px;}
+  th,td{border:1px solid #000;padding:7px 9px;font-size:12px;vertical-align:middle;}
+  th{background:#f2f2f2;text-align:left;}
+  .totals td{border-top:none;}
+  .grand td{font-weight:bold;background:#fafafa;font-size:13px;}
+  .sigs{margin-top:36px;display:flex;justify-content:space-between;gap:24px;}
+  .sigs div{flex:1;border-top:1px solid #000;padding-top:6px;text-align:center;font-size:11px;}
+  .note{margin-top:14px;font-size:10.5px;color:#555;line-height:1.5;}
+  .note b{color:#000;}
+  .actions{margin-top:20px;text-align:center;}
+  .actions button{padding:8px 18px;font-size:12px;border:1px solid #333;background:#065f46;color:#fff;border-radius:4px;cursor:pointer;}
+  @media print{.actions{display:none;}body{padding:0;}}
+</style></head><body>
+  <h1>V-CUT SALON — MATERIAL TRANSFER SLIP</h1>
+  <div class="sub">Printed on ${printedOn}</div>
+  <div class="meta">
+    <div>Branch: <span class="fill">${branchName}</span></div>
+    <div>Transfer date: <span class="fill">${date}</span></div>
+    <div>Items: <span class="fill">${items.length}</span></div>
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th style="width:32px;text-align:center;">#</th>
+        <th>Material</th>
+        <th style="width:70px;text-align:right;">Qty</th>
+        <th style="width:60px;text-align:center;">Unit</th>
+        <th style="width:110px;text-align:right;">Unit ₹</th>
+        <th style="width:120px;text-align:right;">Line Total</th>
+      </tr>
+    </thead>
+    <tbody>${rowsHtml || `<tr><td colspan="6" style="text-align:center;color:#888;">No items</td></tr>`}</tbody>
+  </table>
+  <table class="totals">
+    <tr><td colspan="5" style="text-align:right;border:none;">Subtotal</td><td style="text-align:right;width:120px;border:1px solid #000;">&#8377;${Math.round(subtotal).toLocaleString("en-IN")}</td></tr>
+    ${opsCost > 0 ? `<tr><td colspan="5" style="text-align:right;border:none;">Operation / Delivery Cost (${opsPct}%)</td><td style="text-align:right;border:1px solid #000;">&#8377;${Math.round(opsCost).toLocaleString("en-IN")}</td></tr>` : ""}
+    <tr class="grand"><td colspan="5" style="text-align:right;border:none;">GRAND TOTAL</td><td style="text-align:right;border:1px solid #000;">&#8377;${Math.round(total).toLocaleString("en-IN")}</td></tr>
+  </table>
+  ${alloc.note ? `<div class="note"><b>Note:</b> ${String(alloc.note).replace(/</g, "&lt;")}</div>` : ""}
+  <div class="sigs">
+    <div>Issued By (HO)</div>
+    <div>Received By (Branch)</div>
+  </div>
+  <div class="actions"><button onclick="window.print()">Print / Save as PDF</button></div>
+</body></html>`;
+    const w = window.open("", "_blank", "width=900,height=800");
+    if (!w) return;
+    w.document.open(); w.document.write(html); w.document.close();
+  };
 
   // Open a printable per-branch material bill for a given month.
   const openBranchMaterialBill = (branch, branchAllocs, monthLabel) => {
@@ -502,7 +601,7 @@ export default function MaterialsPage() {
     const totalItems = picked.reduce((s, a) => s + ((a.items || []).length), 0);
     confirm({
       title: `Delete ${picked.length} Transfers`,
-      message: `Delete <strong>${picked.length} transfer${picked.length === 1 ? "" : "s"}</strong> covering <strong>${totalItems} item row${totalItems === 1 ? "" : "s"}</strong>?<br/><br/>Combined value: <strong>${INR(totalVal)}</strong><br/><br/>This removes the allocation records only — stock / daily-expense rollback has to be reconciled manually.`,
+      message: `Delete <strong>${picked.length} transfer${picked.length === 1 ? "" : "s"}</strong> covering <strong>${totalItems} item row${totalItems === 1 ? "" : "s"}</strong>?<br/><br/>Combined value: <strong>${INR(totalVal)}</strong><br/><br/>This removes the allocation records only — stock / online-expense rollback has to be reconciled manually.`,
       confirmText: `Yes, Delete ${picked.length}`,
       cancelText: "Cancel",
       type: "danger",
@@ -526,7 +625,7 @@ export default function MaterialsPage() {
     const when = a.date || (a.transferred_at || "").slice(0, 10) || "—";
     confirm({
       title: "Delete Transfer",
-      message: `Delete the transfer of <strong>${items} item${items === 1 ? "" : "s"}</strong> to <strong>${branchName}</strong> on <strong>${when}</strong>?<br/><br/>Total: <strong>${INR(a.total || 0)}</strong><br/><br/>This only removes the allocation record — any downstream stock or daily-expense rollback has to be reconciled manually.`,
+      message: `Delete the transfer of <strong>${items} item${items === 1 ? "" : "s"}</strong> to <strong>${branchName}</strong> on <strong>${when}</strong>?<br/><br/>Total: <strong>${INR(a.total || 0)}</strong><br/><br/>This only removes the allocation record — any downstream stock or online-expense rollback has to be reconciled manually.`,
       confirmText: "Yes, Delete",
       cancelText: "Cancel",
       type: "danger",
@@ -2341,7 +2440,7 @@ export default function MaterialsPage() {
                                     {!outOfStock && (
                                       <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 2 }}>
                                         <div style={{ display: "inline-flex", alignItems: "center", border: "1px solid var(--border2)", borderRadius: 6, background: "var(--bg2)", overflow: "hidden" }}>
-                                          <button type="button" onClick={stop} onMouseDown={(e) => { stop(e); bumpPickerQty(m.id, -1, stock); }} disabled={curQty <= 1}
+                                          <button type="button" onClick={(e) => { stop(e); bumpPickerQty(m.id, -1, stock); }} disabled={curQty <= 1}
                                             style={{ padding: "2px 8px", background: "transparent", color: curQty <= 1 ? "var(--text3)" : "var(--text)", border: "none", cursor: curQty <= 1 ? "not-allowed" : "pointer", fontSize: 14, fontWeight: 800, lineHeight: 1 }}>−</button>
                                           <input type="number" min="1" max={stock} value={curQty}
                                             onClick={stop}
@@ -2350,7 +2449,7 @@ export default function MaterialsPage() {
                                               setPickerQty(q => ({ ...q, [m.id]: v }));
                                             }}
                                             style={{ width: 38, padding: "2px 4px", background: "transparent", color: "var(--text)", border: "none", borderLeft: "1px solid var(--border2)", borderRight: "1px solid var(--border2)", fontSize: 12, fontWeight: 700, textAlign: "center", outline: "none" }} />
-                                          <button type="button" onClick={stop} onMouseDown={(e) => { stop(e); bumpPickerQty(m.id, +1, stock); }} disabled={curQty >= stock}
+                                          <button type="button" onClick={(e) => { stop(e); bumpPickerQty(m.id, +1, stock); }} disabled={curQty >= stock}
                                             style={{ padding: "2px 8px", background: "transparent", color: curQty >= stock ? "var(--text3)" : "var(--text)", border: "none", cursor: curQty >= stock ? "not-allowed" : "pointer", fontSize: 14, fontWeight: 800, lineHeight: 1 }}>+</button>
                                         </div>
                                         <button type="button" onClick={(e) => { stop(e); addToCart(m, curQty); }}
@@ -2547,9 +2646,15 @@ export default function MaterialsPage() {
                   {branchesWithData.map(({ b, allocs }) => {
                     const branchTotal = allocs.reduce((s, a) => s + (Number(a.total) || 0), 0);
                     const itemCount = allocs.reduce((s, a) => s + (a.items || []).length, 0);
-                    const rows = allocs.flatMap(a =>
-                      (a.items || []).map((it, i) => ({ ...it, alloc: a, date: a.date || (a.transferred_at || "").slice(0, 10), first: i === 0, rowSpan: (a.items || []).length, key: `${a.id}-${i}` }))
-                    ).sort((x, y) => (y.date || "").localeCompare(x.date || ""));
+                    // Sort allocations newest first; each one is a collapsible date group.
+                    const sortedAllocs = allocs.slice().sort((x, y) =>
+                      ((y.date || y.transferred_at || "").localeCompare(x.date || x.transferred_at || ""))
+                    );
+                    const allocIds = sortedAllocs.map(a => a.id);
+                    const expandedHere = allocIds.filter(id => expandedAllocs.has(id)).length;
+                    const allExpanded = expandedHere === allocIds.length;
+                    const noneExpanded = expandedHere === 0;
+                    const colCount = 7 + (canDeleteAllocation ? 1 : 0);
                     return (
                       <Card key={b.id} style={{ padding: 0 }}>
                         <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--border)", background: "var(--bg4)", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
@@ -2557,7 +2662,12 @@ export default function MaterialsPage() {
                             <div style={{ fontWeight: 800, fontSize: 14, color: "var(--text)" }}>{b.name.replace("V-CUT ", "")}</div>
                             <div style={{ fontSize: 10, color: "var(--text3)", marginTop: 2 }}>{allocs.length} transfer{allocs.length === 1 ? "" : "s"} · {itemCount} item{itemCount === 1 ? "" : "s"} · {monthLabel}</div>
                           </div>
-                          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                            <button onClick={() => allExpanded ? collapseAllocIds(allocIds) : expandAllocIds(allocIds)}
+                              title={allExpanded ? "Collapse every date for this branch" : "Expand every date for this branch"}
+                              style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 12px", borderRadius: 8, fontSize: 10, fontWeight: 800, letterSpacing: 0.5, background: "var(--bg3)", color: "var(--text2)", border: "1px solid var(--border2)", cursor: "pointer", textTransform: "uppercase" }}>
+                              <span style={{ fontSize: 9 }}>{allExpanded ? "▴" : "▾"}</span> {allExpanded ? "Collapse all" : noneExpanded ? "Expand all" : `Expand all (${allocIds.length - expandedHere})`}
+                            </button>
                             <div style={{ fontSize: 16, color: "var(--green)", fontWeight: 800 }}>{INR(branchTotal)}</div>
                             <button onClick={() => openBranchMaterialBill(b, allocs, monthLabel)}
                               title="Open a printable material bill for this branch and month"
@@ -2569,44 +2679,76 @@ export default function MaterialsPage() {
                         <div style={{ padding: "2px 0 4px" }}>
                           <table className="pill-table" style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
                             <thead><tr>
+                              <TH style={{ width: 30 }}> </TH>
                               <TH>Date</TH>
-                              <TH>Material</TH>
-                              <TH right>Qty</TH>
-                              <TH right>Line Total</TH>
+                              <TH right>Items</TH>
                               <TH right title="Transfer subtotal (items only, no ops cost)">Subtotal</TH>
                               <TH right title="Operation / delivery charge applied to this transfer">Ops</TH>
                               <TH right>Transfer Total</TH>
-                              {canDeleteAllocation && <TH> </TH>}
+                              <TH right style={{ width: 100 }}>Slip</TH>
+                              {canDeleteAllocation && <TH style={{ width: 50 }}> </TH>}
                             </tr></thead>
                             <tbody>
-                              {rows.map(row => {
-                                const sub = Number(row.alloc.subtotal) || Number(row.alloc.total) || 0;
-                                const ops = Number(row.alloc.operation_cost) || 0;
-                                const opsPct = Number(row.alloc.operation_cost_pct) || 0;
+                              {sortedAllocs.map(alloc => {
+                                const date = alloc.date || (alloc.transferred_at || "").slice(0, 10);
+                                const items = alloc.items || [];
+                                const sub = Number(alloc.subtotal) || Number(alloc.total) || 0;
+                                const ops = Number(alloc.operation_cost) || 0;
+                                const opsPct = Number(alloc.operation_cost_pct) || 0;
+                                const total = Number(alloc.total) || 0;
+                                const isOpen = expandedAllocs.has(alloc.id);
                                 return (
-                                  <tr key={row.key}>
-                                    <TD style={{ whiteSpace: "nowrap", color: "var(--text3)" }}>{row.date || "—"}</TD>
-                                    <TD style={{ fontWeight: 600 }}>{row.name}</TD>
-                                    <TD right>{row.qty} {row.unit}</TD>
-                                    <TD right style={{ fontWeight: 700, color: "var(--green)" }}>{INR(row.line_total || (row.qty * row.price_at_transfer) || 0)}</TD>
-                                    {row.first ? <TD right rowSpan={row.rowSpan} style={{ color: "var(--text2)" }}>{INR(sub)}</TD> : null}
-                                    {row.first ? (
-                                      <TD right rowSpan={row.rowSpan} style={{ color: ops > 0 ? "var(--orange)" : "var(--text3)" }}>
+                                  <Fragment key={alloc.id}>
+                                    {/* Summary row — always visible. Click anywhere on it to toggle. */}
+                                    <tr onClick={() => toggleAllocExpand(alloc.id)}
+                                      style={{ cursor: "pointer", background: isOpen ? "rgba(34,211,238,0.06)" : "transparent" }}>
+                                      <TD style={{ textAlign: "center", color: "var(--text3)", fontSize: 11, userSelect: "none" }}>
+                                        {isOpen ? "▾" : "▸"}
+                                      </TD>
+                                      <TD style={{ whiteSpace: "nowrap", color: "var(--text)", fontWeight: 700 }}>{date || "—"}</TD>
+                                      <TD right style={{ color: "var(--text3)" }}>{items.length}</TD>
+                                      <TD right style={{ color: "var(--text2)" }}>{INR(sub)}</TD>
+                                      <TD right style={{ color: ops > 0 ? "var(--orange)" : "var(--text3)" }}>
                                         {ops > 0 ? <>{INR(ops)}<span style={{ fontSize: 9, color: "var(--text3)", marginLeft: 4 }}>({opsPct}%)</span></> : "—"}
                                       </TD>
-                                    ) : null}
-                                    {row.first ? <TD right rowSpan={row.rowSpan} style={{ fontWeight: 800, color: "var(--gold)", borderLeft: "1px solid var(--border2)" }}>{INR(row.alloc.total || 0)}</TD> : null}
-                                    {canDeleteAllocation && row.first ? (
-                                      <TD rowSpan={row.rowSpan}>
-                                        <IconBtn name="del" variant="danger" title="Delete this transfer (removes every item row in the same record)" onClick={() => handleDeleteAllocation(row.alloc)} />
+                                      <TD right style={{ fontWeight: 800, color: "var(--gold)", borderLeft: "1px solid var(--border2)" }}>{INR(total)}</TD>
+                                      <TD right onClick={(e) => e.stopPropagation()}>
+                                        <button onClick={() => openSingleTransferSlip(b, alloc)}
+                                          title={`Print transfer slip / save as PDF for ${date}`}
+                                          style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "4px 10px", borderRadius: 6, fontSize: 10, fontWeight: 800, letterSpacing: 0.5, background: "var(--bg3)", color: "var(--accent)", border: "1px solid rgba(34,211,238,0.35)", cursor: "pointer", textTransform: "uppercase" }}>
+                                          <Icon name="save" size={10} /> Slip
+                                        </button>
                                       </TD>
-                                    ) : null}
-                                  </tr>
+                                      {canDeleteAllocation && (
+                                        <TD onClick={(e) => e.stopPropagation()}>
+                                          <IconBtn name="del" variant="danger" title="Delete this transfer (removes every item row in the same record)" onClick={() => handleDeleteAllocation(alloc)} />
+                                        </TD>
+                                      )}
+                                    </tr>
+                                    {/* Expanded item detail rows. */}
+                                    {isOpen && items.map((it, i) => (
+                                      <tr key={`${alloc.id}-${i}`} style={{ background: "var(--bg3)" }}>
+                                        <TD> </TD>
+                                        <TD colSpan={2} style={{ paddingLeft: 28, color: "var(--text3)", fontSize: 11 }}>
+                                          <span style={{ display: "inline-block", width: 22, color: "var(--text3)", fontVariantNumeric: "tabular-nums" }}>{i + 1}.</span>
+                                          <span style={{ color: "var(--text)", fontWeight: 600 }}>{it.name}</span>
+                                          <span style={{ color: "var(--text3)", marginLeft: 8 }}>· {it.qty} {it.unit}</span>
+                                        </TD>
+                                        <TD right colSpan={2} style={{ color: "var(--text3)", fontSize: 11 }}>
+                                          @ {INR(Number(it.price_at_transfer) || 0)}
+                                        </TD>
+                                        <TD right style={{ fontWeight: 700, color: "var(--green)", fontSize: 11 }}>
+                                          {INR(Number(it.line_total) || (Number(it.qty) * Number(it.price_at_transfer)) || 0)}
+                                        </TD>
+                                        <TD colSpan={canDeleteAllocation ? 2 : 1}> </TD>
+                                      </tr>
+                                    ))}
+                                  </Fragment>
                                 );
                               })}
                               <tr style={{ background: "var(--bg3)", borderTop: "2px solid var(--border2)" }}>
-                                <TD colSpan={3} style={{ fontWeight: 800, color: "var(--gold)", letterSpacing: 0.5, textTransform: "uppercase", fontSize: 11 }}>Branch Total ({monthLabel})</TD>
-                                <TD right colSpan={canDeleteAllocation ? 5 : 4} style={{ fontWeight: 800, color: "var(--green)", fontSize: 14 }}>{INR(branchTotal)}</TD>
+                                <TD colSpan={colCount - 3} style={{ fontWeight: 800, color: "var(--gold)", letterSpacing: 0.5, textTransform: "uppercase", fontSize: 11 }}>Branch Total ({monthLabel})</TD>
+                                <TD right colSpan={3} style={{ fontWeight: 800, color: "var(--green)", fontSize: 14 }}>{INR(branchTotal)}</TD>
                               </tr>
                             </tbody>
                           </table>
