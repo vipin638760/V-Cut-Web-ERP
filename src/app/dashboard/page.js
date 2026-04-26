@@ -2144,7 +2144,18 @@ function DailyMaterialChart({ entries, allocations, branches = [], filterYear, f
               const isHovered = branchHover && branchHover.id === r.id;
               return (
                 <div key={(r.id || r.name) + "-" + i}
-                  onMouseEnter={() => !isZero && setBranchHover({ id: r.id, name: r.name, total: r.total, alloc: r.alloc, lump: r.lump })}
+                  onMouseEnter={(ev) => {
+                    if (isZero) return;
+                    const rect = ev.currentTarget.getBoundingClientRect();
+                    setBranchHover({
+                      id: r.id, name: r.name, total: r.total, alloc: r.alloc, lump: r.lump,
+                      // Place popover anchored to the row's vertical centre on the right edge
+                      // of the row. If the row sits in the bottom 35% of the viewport we
+                      // flip to above so it doesn't fall off the bottom.
+                      anchorTop: rect.top, anchorBottom: rect.bottom, anchorRight: rect.right, anchorLeft: rect.left,
+                      anchorAbove: (window.innerHeight - rect.bottom) < 340,
+                    });
+                  }}
                   onMouseLeave={() => setBranchHover(null)}
                   style={{ display: "grid", gridTemplateColumns: "22px minmax(120px, 170px) 1fr 48px auto", alignItems: "center", gap: 10, opacity: isZero ? 0.55 : 1, padding: "4px 8px", borderRadius: 8, background: isHovered ? "rgba(192,132,252,0.06)" : "transparent", transition: "background 0.15s", cursor: isZero ? "default" : "pointer" }}>
                   <div style={{ width: 20, height: 20, borderRadius: 6, background: isZero ? "var(--bg4)" : i < 3 ? "rgba(192,132,252,0.12)" : "var(--bg4)", border: `1px solid ${isZero ? "var(--border)" : i < 3 ? "rgba(192,132,252,0.35)" : "var(--border)"}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 900, color: rankColor }}>
@@ -2182,10 +2193,20 @@ function DailyMaterialChart({ entries, allocations, branches = [], filterYear, f
                 : [];
               const topRows = rows.slice(0, 14);
               const totalQty = rows.reduce((s, r) => s + r.qty, 0);
+              // Anchor the popover to the hovered row using the captured rect.
+              // Default placement: just below the row, right-aligned to its right edge.
+              // Flip above the row if the bottom of the viewport is too close.
+              const POPOVER_W = 380;
+              const popLeft = Math.max(8, Math.min((branchHover.anchorRight || 0) - POPOVER_W, window.innerWidth - POPOVER_W - 8));
+              const popTop = branchHover.anchorAbove
+                ? Math.max(8, (branchHover.anchorTop || 0) - 8)
+                : (branchHover.anchorBottom || 0) + 6;
               return (
                 <div style={{
-                  position: "absolute", right: 0, top: "100%", marginTop: 6,
-                  width: 380, maxWidth: "calc(100% - 8px)",
+                  position: "fixed",
+                  top: popTop, left: popLeft,
+                  transform: branchHover.anchorAbove ? "translateY(-100%)" : "none",
+                  width: POPOVER_W, maxWidth: "calc(100vw - 16px)",
                   background: "var(--bg2)", border: "1px solid rgba(192,132,252,0.4)",
                   borderRadius: 10, boxShadow: "0 12px 32px rgba(0,0,0,0.55)",
                   padding: "12px 14px", zIndex: 50, pointerEvents: "none",
