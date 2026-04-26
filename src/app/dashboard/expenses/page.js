@@ -920,8 +920,8 @@ export default function ExpensesPage() {
             </button>
           )}
           {viewType === "variable" && (
-            <button onClick={() => { setRecalcFlash(true); setTimeout(() => setRecalcFlash(false), 900); toast({ title: "Recalculated", message: "Variable totals refreshed from daily_expenses.", type: "success" }); }}
-              title="Re-aggregate Variable totals from daily_expenses"
+            <button onClick={() => { setRecalcFlash(true); setTimeout(() => setRecalcFlash(false), 900); toast({ title: "Recalculated", message: "Variable totals refreshed from Online Expense Paid.", type: "success" }); }}
+              title="Re-aggregate Variable totals from Online Expense Paid"
               style={{ display: "flex", alignItems: "center", gap: 6, padding: "10px 16px", borderRadius: 10, background: recalcFlash ? "linear-gradient(135deg,var(--accent),var(--gold2))" : "var(--bg3)", color: recalcFlash ? "#000" : "var(--accent)", border: "1px solid rgba(var(--accent-rgb),0.3)", cursor: "pointer", fontWeight: 700, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, transition: "all .2s" }}>
               <Icon name="check" size={12} /> Recalculate
             </button>
@@ -1433,7 +1433,7 @@ export default function ExpensesPage() {
           return (
             <div>
               <div style={{ fontSize: 11, color: "var(--text3)", marginBottom: 12, lineHeight: 1.5 }}>
-                Adds a new column to the <strong style={{ color: "var(--gold)" }}>{addColDialog.category === "fixed" ? "Fixed" : "Variable"}</strong> tab. The column becomes available everywhere this master list feeds — Operational Expenses, Daily Expenses, and exports.
+                Adds a new column to the <strong style={{ color: "var(--gold)" }}>{addColDialog.category === "fixed" ? "Fixed" : "Variable"}</strong> tab. The column becomes available everywhere this master list feeds — Operational Expenses, Online Expense Paid, and exports.
               </div>
               <input type="text" placeholder="e.g. Security · Dust Bag · Maid" autoFocus
                 value={addColName} onChange={e => setAddColName(e.target.value)}

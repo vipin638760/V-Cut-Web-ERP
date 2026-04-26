@@ -24,7 +24,7 @@ export default function SearchPalette({ isOpen, onClose, context, userRole }) {
       { id: "staff",                 label: "Staff Management",       cat: "Navigation", icon: "users",       path: "/dashboard/staff",                roles: ["admin", "accountant"] },
       { id: "materials",             label: "Material Entry",         cat: "Navigation", icon: "wallet",      path: "/dashboard/materials",            roles: ["admin", "accountant"] },
       { id: "material-master",       label: "Historic Material",      cat: "Navigation", icon: "grid",        path: "/dashboard/material-master",      roles: ["admin", "accountant"] },
-      { id: "daily-expenses",        label: "Daily Expenses",         cat: "Navigation", icon: "wallet",      path: "/dashboard/daily-expenses",       roles: ["admin", "accountant"] },
+      { id: "daily-expenses",        label: "Online Expense Paid",    cat: "Navigation", icon: "wallet",      path: "/dashboard/daily-expenses",       roles: ["admin", "accountant"] },
       { id: "expenses",              label: "Operational Expenses",   cat: "Navigation", icon: "trending",    path: "/dashboard/expenses",             roles: ["admin", "accountant"] },
       { id: "pl",                    label: "P&L Analytics",          cat: "Navigation", icon: "pie",         path: "/dashboard/pl",                   roles: ["admin"] },
       { id: "leaves",                label: "Leave Management",       cat: "Navigation", icon: "checkCircle", path: "/dashboard/leaves",               roles: ["admin", "accountant"] },

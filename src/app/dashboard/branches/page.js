@@ -1323,7 +1323,7 @@ export default function BranchesPage() {
             </div>
           )}
           <div style={{ fontSize: 12, color: "var(--text3)", marginTop: 4 }}>
-            Recalculates incentives (ceil-to-10, per-staff rate, daily/period defaults), updates material expense from allocations, and other expenses from daily expenses.
+            Recalculates incentives (ceil-to-10, per-staff rate, daily/period defaults), updates material expense from allocations, and other expenses from online expense paid.
           </div>
         </div>
         <div style={{ padding: "16px 24px", display: "flex", flexDirection: "column", gap: 14 }}>
@@ -1894,7 +1894,7 @@ export default function BranchesPage() {
             rows = [
               { label: "Staff Incentives", value: totalIncentiveExp, hint: "Sum of staff incentive + mat_incentive across all entries in period", color: "var(--red)" },
               { label: "Material Cost", value: totalMatExp, hint: "Sum of mat_expense across all entries in period", color: "var(--red)" },
-              { label: "Other / Petrol", value: totalOtherExp, hint: "Sum of others + petrol (daily expenses paid by HO)", color: "var(--red)" },
+              { label: "Other / Petrol", value: totalOtherExp, hint: "Sum of others + petrol (online expenses paid by HO)", color: "var(--red)" },
             ];
           } else if (kpiBreakdown === "fixed") {
             title = "Fixed Costs"; titleColor = "var(--orange)"; total = totalFixedSalaryComp;

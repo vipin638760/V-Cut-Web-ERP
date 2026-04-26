@@ -1791,12 +1791,15 @@ function DailyMaterialChart({ entries, allocations, branches = [], filterYear, f
     dayMap.set(id, row);
   };
 
-  // Per-branch per-date rollup — Map<branchId, Map<dateStr, { date, qty, value }>>
-  // Used by the leaderboard hover popover to show "on which dates and how much
-  // material was procured" for the hovered branch. Allocation records contribute
-  // both qty and value (sum of items.qty); lumpsum entries contribute value only
-  // (entry.mat_expense — no qty info).
+  // Per-branch save log — Map<branchId, Array<{ date, qty, value, source, id, time }>>
+  // One row per allocation save (and one per lumpsum entry that has a value)
+  // so duplicates are visible in the popover instead of being silently merged.
+  // Sorted newest-first when rendered.
   const branchDates = new Map();
+  const pushBranchRow = (branchId, row) => {
+    if (!branchDates.has(branchId)) branchDates.set(branchId, []);
+    branchDates.get(branchId).push(row);
+  };
 
   if (useAllocations) {
     allocations.forEach(a => {
@@ -1809,17 +1812,12 @@ function DailyMaterialChart({ entries, allocations, branches = [], filterYear, f
       if (a.branch_id) {
         bumpBranch(a.branch_id, "alloc", total);
         bumpDayBranch(dIdx, a.branch_id, "alloc", total);
-        // Date-level rollup — sum every line's qty and value into the date bucket.
-        if (!branchDates.has(a.branch_id)) branchDates.set(a.branch_id, new Map());
-        const dateMap = branchDates.get(a.branch_id);
-        const row = dateMap.get(date) || { date, qty: 0, value: 0, source: "alloc" };
-        (a.items || []).forEach(it => {
-          row.qty += Number(it.qty) || 0;
-          row.value += Number(it.line_total) || (Number(it.qty) * Number(it.price_at_transfer)) || 0;
+        const qty = (a.items || []).reduce((s, it) => s + (Number(it.qty) || 0), 0);
+        pushBranchRow(a.branch_id, {
+          id: a.id, date, qty, value: total, source: "alloc",
+          time: a.transferred_at || `${date}T00:00:00`,
+          itemCount: (a.items || []).length,
         });
-        // Some allocations save a top-level total without items[] — fall back to that.
-        if ((!a.items || a.items.length === 0) && total > 0) row.value += total;
-        dateMap.set(date, row);
       }
     });
   }
@@ -1834,14 +1832,10 @@ function DailyMaterialChart({ entries, allocations, branches = [], filterYear, f
       if (e.branch_id) {
         bumpBranch(e.branch_id, "lump", amt);
         bumpDayBranch(dIdx, e.branch_id, "lump", amt);
-        // Lumpsum carries value only (qty unknown). Tag the source so the
-        // popover can show "—" in the qty column for these rows.
-        if (!branchDates.has(e.branch_id)) branchDates.set(e.branch_id, new Map());
-        const dateMap = branchDates.get(e.branch_id);
-        const row = dateMap.get(e.date) || { date: e.date, qty: 0, value: 0, source: "lump" };
-        row.value += amt;
-        if (row.source === "alloc") row.source = "mixed";
-        dateMap.set(e.date, row);
+        pushBranchRow(e.branch_id, {
+          id: `lump-${e.id}`, date: e.date, qty: 0, value: amt, source: "lump",
+          time: `${e.date}T23:59:59`,
+        });
       }
     });
   }
@@ -2187,10 +2181,21 @@ function DailyMaterialChart({ entries, allocations, branches = [], filterYear, f
                 across all line items per allocation; lumpsum-only dates have
                 value but no qty (shown as "—"). */}
             {branchHover && (() => {
-              const dateMap = branchDates.get(branchHover.id);
-              const rows = dateMap
-                ? Array.from(dateMap.values()).sort((a, b) => b.date.localeCompare(a.date))
-                : [];
+              const branchSaves = branchDates.get(branchHover.id) || [];
+              // Sort newest-first; tie-break by time so multiple saves on the
+              // same calendar day stay in commit order.
+              const rows = [...branchSaves].sort((a, b) => {
+                const d = (b.date || "").localeCompare(a.date || "");
+                return d !== 0 ? d : (b.time || "").localeCompare(a.time || "");
+              });
+              // Tag rows that share a date so the popover can flag duplicates visually.
+              const dateCounts = rows.reduce((m, r) => { m[r.date] = (m[r.date] || 0) + 1; return m; }, {});
+              const seenIdx = {};
+              rows.forEach(r => {
+                seenIdx[r.date] = (seenIdx[r.date] || 0) + 1;
+                r._dupIdx = seenIdx[r.date];
+                r._dupOf = dateCounts[r.date];
+              });
               const topRows = rows.slice(0, 14);
               const totalQty = rows.reduce((s, r) => s + r.qty, 0);
               // Anchor the popover to the hovered row using the captured rect.
@@ -2218,7 +2223,7 @@ function DailyMaterialChart({ entries, allocations, branches = [], filterYear, f
                     </div>
                     <div style={{ textAlign: "right" }}>
                       <div style={{ fontSize: 9, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>
-                        {rows.length} day{rows.length === 1 ? "" : "s"}{totalQty > 0 ? ` · ${totalQty} units` : ""}
+                        {rows.length} save{rows.length === 1 ? "" : "s"}{totalQty > 0 ? ` · ${totalQty} units` : ""}
                       </div>
                       <div style={{ fontSize: 14, fontWeight: 800, color: "#d7a6ff", fontFamily: "var(--font-headline, var(--font-outfit))" }}>{INR(branchHover.total)}</div>
                     </div>
@@ -2233,23 +2238,33 @@ function DailyMaterialChart({ entries, allocations, branches = [], filterYear, f
                         <span style={{ fontSize: 9, color: "var(--text3)", fontWeight: 800, textTransform: "uppercase", letterSpacing: 1 }}>Date</span>
                         <span style={{ fontSize: 9, color: "var(--text3)", fontWeight: 800, textTransform: "uppercase", letterSpacing: 1, textAlign: "right" }}>Qty</span>
                         <span style={{ fontSize: 9, color: "var(--text3)", fontWeight: 800, textTransform: "uppercase", letterSpacing: 1, textAlign: "right" }}>Value</span>
-                        {topRows.map((row, idx) => (
-                          <Fragment key={idx}>
-                            <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text)" }}>
-                              {row.date}
-                              {row.source === "lump" && <span style={{ fontSize: 9, color: "var(--accent)", marginLeft: 6, fontWeight: 800 }}>· LUMPSUM</span>}
-                              {row.source === "mixed" && <span style={{ fontSize: 9, color: "var(--accent)", marginLeft: 6, fontWeight: 800 }}>· MIXED</span>}
-                            </span>
-                            <span style={{ fontSize: 11, color: row.qty > 0 ? "var(--text2)" : "var(--text3)", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
-                              {row.qty > 0 ? row.qty : "—"}
-                            </span>
-                            <span style={{ fontSize: 11, fontWeight: 700, color: "#d7a6ff", textAlign: "right", fontFamily: "var(--font-headline, var(--font-outfit))" }}>{INR(row.value)}</span>
-                          </Fragment>
-                        ))}
+                        {topRows.map((row, idx) => {
+                          const isDup = row._dupOf > 1;
+                          return (
+                            <Fragment key={row.id || idx}>
+                              <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text)" }}>
+                                {row.date}
+                                {isDup && (
+                                  <span style={{ fontSize: 9, color: "var(--orange)", marginLeft: 6, fontWeight: 800 }}>
+                                    · {row._dupIdx}/{row._dupOf}
+                                  </span>
+                                )}
+                                {row.source === "lump" && <span style={{ fontSize: 9, color: "var(--accent)", marginLeft: 6, fontWeight: 800 }}>· LUMPSUM</span>}
+                                {row.itemCount > 0 && row.source !== "lump" && (
+                                  <span style={{ fontSize: 9, color: "var(--text3)", marginLeft: 6, fontWeight: 600 }}>· {row.itemCount} item{row.itemCount === 1 ? "" : "s"}</span>
+                                )}
+                              </span>
+                              <span style={{ fontSize: 11, color: row.qty > 0 ? "var(--text2)" : "var(--text3)", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+                                {row.qty > 0 ? row.qty : "—"}
+                              </span>
+                              <span style={{ fontSize: 11, fontWeight: 700, color: "#d7a6ff", textAlign: "right", fontFamily: "var(--font-headline, var(--font-outfit))" }}>{INR(row.value)}</span>
+                            </Fragment>
+                          );
+                        })}
                       </div>
                       {rows.length > 14 && (
                         <div style={{ marginTop: 8, fontSize: 10, color: "var(--text3)", fontStyle: "italic", textAlign: "right" }}>
-                          +{rows.length - 14} more day{rows.length - 14 === 1 ? "" : "s"}
+                          +{rows.length - 14} more save{rows.length - 14 === 1 ? "" : "s"}
                         </div>
                       )}
                     </>
