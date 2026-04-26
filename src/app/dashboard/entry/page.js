@@ -431,6 +431,24 @@ export default function EntryPage() {
       })
     : [];
 
+  // Approved-leaves index for the selected entry date. Used so that a staff
+  // who already has an approved leave on file is auto-defaulted to ABSENT
+  // in the daily entry table, instead of silently saving as present and
+  // contradicting the leave record.
+  const approvedLeavesByStaff = useMemo(() => {
+    const map = {};
+    if (!selDate) return map;
+    leaves.forEach(l => {
+      if (l.status === "approved" && l.date === selDate) map[l.staff_id] = l;
+    });
+    return map;
+  }, [leaves, selDate]);
+  const isStaffPresent = (sid) => {
+    const r = staffRows[sid] || {};
+    if (r.present !== undefined) return r.present !== false;
+    return !approvedLeavesByStaff[sid];
+  };
+
   // Cross-branch active staff — used by the loan-resource picker.
   const allActiveStaffOnDate = selDate
     ? staff.filter(s => {
@@ -594,6 +612,17 @@ export default function EntryPage() {
       updateStaffRow(s.id, "leave_type", "");
       updateStaffRow(s.id, "leave_reason", "");
     } else {
+      // If an approved leave already exists on this date, just mark absent
+      // using its details — no need to open a duplicate-creating popup.
+      const existing = approvedLeavesByStaff[s.id];
+      if (existing) {
+        setStaffRows(prev => ({
+          ...prev,
+          [s.id]: { ...(prev[s.id] || {}), present: false, leave_type: existing.type || "Paid", leave_reason: existing.reason || "", billing: 0, material: 0, tips: 0, incentive: 0, mat_incentive: 0, staff_total_inc: 0, total: 0 },
+        }));
+        toast({ title: "On Leave", message: `${s.name} is on approved ${existing.type || "Paid"} leave for ${selDate}.`, type: "success" });
+        return;
+      }
       // Marking absent: open leave application popup
       setLeavePrompt({ staff: s, type: "Paid", reason: "" });
     }
@@ -649,8 +678,8 @@ export default function EntryPage() {
   // needs to resolve (uncheck Present or remove the stale leave). Keep the warning
   // in sync with what's visible on screen.
   const zeroWorkPresent = [...branchStaff, ...loanStaffList].filter(s => {
+    if (!isStaffPresent(s.id)) return false;
     const r = staffRows[s.id] || {};
-    if (r.present === false) return false;
     const hasWork = (Number(r.billing) || 0) > 0 || (Number(r.material) || 0) > 0 || (Number(r.tips) || 0) > 0;
     return !hasWork;
   });
@@ -710,6 +739,8 @@ export default function EntryPage() {
             const isUnisex = (branch?.type || "").toLowerCase() === "unisex";
             const role = (s.role || "").toLowerCase();
             const taken = r.incentive_taken !== undefined ? r.incentive_taken : (isUnisex ? (role.includes("hairdresser") || role.includes("hair dresser")) : true);
+            const approvedLeave = approvedLeavesByStaff[s.id];
+            const present = r.present !== undefined ? r.present !== false : !approvedLeave;
             return {
               staff_id: s.id,
               billing: r.billing || 0,
@@ -719,7 +750,11 @@ export default function EntryPage() {
               tips: r.tips || 0,
               tip_in: r.tip_in || "online",
               tip_paid: r.tip_paid || "cash",
-              present: r.present !== false,
+              present,
+              ...(present ? {} : {
+                leave_type: r.leave_type || approvedLeave?.type || "Paid",
+                leave_reason: r.leave_reason || approvedLeave?.reason || "",
+              }),
               staff_total_inc: baseTotalInc,
               incentive_taken: taken,
               ...(shBilling > 0 ? { shared_billing: shBilling } : {}),
@@ -735,6 +770,8 @@ export default function EntryPage() {
             const baseTotalInc = (staffRows[s.id]?.staff_total_inc || 0) + shIncentive;
             const r = staffRows[s.id] || {};
             const taken = r.incentive_taken !== undefined ? r.incentive_taken : true;
+            const approvedLeave = approvedLeavesByStaff[s.id];
+            const present = r.present !== undefined ? r.present !== false : !approvedLeave;
             return {
               staff_id: s.id,
               billing: r.billing || 0,
@@ -744,7 +781,11 @@ export default function EntryPage() {
               tips: r.tips || 0,
               tip_in: r.tip_in || "online",
               tip_paid: r.tip_paid || "cash",
-              present: r.present !== false,
+              present,
+              ...(present ? {} : {
+                leave_type: r.leave_type || approvedLeave?.type || "Paid",
+                leave_reason: r.leave_reason || approvedLeave?.reason || "",
+              }),
               staff_total_inc: baseTotalInc,
               incentive_taken: taken,
               ...(shBilling > 0 ? { shared_billing: shBilling } : {}),
@@ -1944,7 +1985,10 @@ export default function EntryPage() {
                         const isLoan = loanStaffIds.has(s.id);
                         const loanHome = isLoan ? (branchesById.get(homeBranchOf(s))?.name || "").replace("V-CUT ", "") : "";
                         const r = staffRows[s.id] || {};
-                        const isPresent = r.present !== false; // default true
+                        const approvedLeave = approvedLeavesByStaff[s.id];
+                        // Auto-default to absent when an approved leave is on file for this date.
+                        // The user can still re-check Present to override.
+                        const isPresent = r.present !== undefined ? r.present !== false : !approvedLeave;
                         const incPct = (s.incentive_pct ?? 10) / 100;
                         const matInc = Math.round((r.material || 0) * 0.05);
                         const inc = Math.round(r.incentive !== undefined ? Number(r.incentive) || 0 : (r.billing || 0) * incPct);
@@ -1978,7 +2022,7 @@ export default function EntryPage() {
                                 )}
                               </div>
                               <div style={{ fontSize: 10, color: "var(--text3)", fontWeight: 400, marginTop: 2 }}>
-                                {!isPresent ? <span style={{ color: "var(--red)", fontWeight: 700 }}>ON LEAVE ({r.leave_type || "Paid"}){r.leave_reason ? ` — ${r.leave_reason}` : ""}</span> : isLoan ? <span style={{ color: "var(--orange)" }}>Home: {loanHome}</span> : (s.role || "")}
+                                {!isPresent ? <span style={{ color: "var(--red)", fontWeight: 700 }}>ON LEAVE ({r.leave_type || approvedLeave?.type || "Paid"}){(r.leave_reason || approvedLeave?.reason) ? ` — ${r.leave_reason || approvedLeave?.reason}` : ""}</span> : isLoan ? <span style={{ color: "var(--orange)" }}>Home: {loanHome}</span> : (s.role || "")}
                               </div>
                             </td>
                             <td style={{ padding: "6px 14px", textAlign: "right", ...disabledStyle }}>
@@ -2214,7 +2258,7 @@ export default function EntryPage() {
                 {/* Daily Expenses — informational only, NOT deducted from cash. */}
                 <FG label={
                   <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                    Daily Expenses (₹)
+                    Online Expense Paid (₹)
                     {dailyExpenses.length > 0 && (
                       <button type="button" onClick={() => setShowExpBreakdown(v => !v)}
                         title={showExpBreakdown ? "Hide breakdown" : "Show breakdown"}
@@ -2224,7 +2268,7 @@ export default function EntryPage() {
                     )}
                   </span>
                 }>
-                  <div title="Recorded on the Daily Expenses page — informational only, NOT deducted from cash-in-hand"
+                  <div title="Recorded on the Online Expense Paid page — informational only, NOT deducted from cash-in-hand"
                     style={{ padding: "14px 16px", borderRadius: 10, border: "2px solid rgba(96,165,250,0.4)", background: "var(--bg3)", fontSize: 18, fontWeight: 800, color: dailyExpTotal > 0 ? "var(--blue, #60a5fa)" : "var(--text3)", position: "relative" }}>
                     {dailyExpTotal > 0 ? INR(dailyExpTotal) : "—"}
                     <span style={{ position: "absolute", top: 4, right: 8, fontSize: 8, fontWeight: 700, color: "var(--text3)", letterSpacing: 1, textTransform: "uppercase" }}>info only</span>
@@ -2857,13 +2901,13 @@ export default function EntryPage() {
         </div>
       </Modal>
 
-      <Modal isOpen={showExpBreakdown} onClose={() => setShowExpBreakdown(false)} title="Daily Expenses Breakdown" width={480}>
+      <Modal isOpen={showExpBreakdown} onClose={() => setShowExpBreakdown(false)} title="Online Expense Paid Breakdown" width={480}>
         <div style={{ fontSize: 11, color: "var(--text3)", marginBottom: 12, lineHeight: 1.5 }}>
-          Recorded on the <strong style={{ color: "var(--accent)" }}>Daily Expenses</strong> page. These are paid by the head-office cashier and are <strong>not</strong> deducted from the branch cash-in-hand.
+          Recorded on the <strong style={{ color: "var(--accent)" }}>Online Expense Paid</strong> page. These are paid by the head-office cashier and are <strong>not</strong> deducted from the branch cash-in-hand.
         </div>
         {dailyExpenses.length === 0 ? (
           <div style={{ padding: "24px 12px", textAlign: "center", color: "var(--text3)", fontStyle: "italic", fontSize: 12 }}>
-            No daily expenses recorded for this day.
+            No online expenses recorded for this day.
           </div>
         ) : (
           <div style={{ borderRadius: 10, overflow: "hidden", border: "1px solid var(--border)" }}>
