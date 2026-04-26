@@ -246,6 +246,10 @@ export default function DailyExpensesPage() {
       return;
     }
     const d = multiForm.defaults || {};
+    // Drop any row whose amount is 0/empty BEFORE applying defaults — a branch
+    // with no amount must not pick up the default expense_type / paid_by / note
+    // and become a phantom entry on save.
+    const nonZeroRows = (multiForm.rows || []).filter(r => Number(r.amount) > 0);
     const resolve = (r) => ({
       branch_id: r.branch_id,
       expense_type: (r.expense_type || d.expense_type || "").trim(),
@@ -254,13 +258,13 @@ export default function DailyExpensesPage() {
       paid_by: r.paid_by || d.paid_by || defaultPaidBy.name,
       paid_by_role: r.paid_by_role || d.paid_by_role || defaultPaidBy.role,
     });
-    const resolved = (multiForm.rows || []).map(resolve);
-    const ready = resolved.filter(r => r.branch_id && r.amount > 0 && r.expense_type);
+    const resolved = nonZeroRows.map(resolve);
+    const ready = resolved.filter(r => r.branch_id && r.expense_type);
     if (ready.length === 0) {
-      toast({ title: "Nothing to save", message: "Add an expense type and amount on at least one row.", type: "warning" });
+      toast({ title: "Nothing to save", message: "Add an expense type and amount on at least one row. Rows with 0 amount are ignored.", type: "warning" });
       return;
     }
-    const missingType = resolved.filter(r => r.branch_id && r.amount > 0 && !r.expense_type).length;
+    const missingType = resolved.filter(r => r.branch_id && !r.expense_type).length;
     if (missingType > 0) {
       toast({ title: "Missing expense type", message: `${missingType} row(s) have an amount but no expense type.`, type: "warning" });
       return;
@@ -764,9 +768,12 @@ export default function DailyExpensesPage() {
                     const showsDefaultType = !r.expense_type && !!d.expense_type;
                     const showsDefaultPaidBy = !r.paid_by && !!d.paid_by;
                     return (
-                      <tr key={r.id} style={{ background: active ? "rgba(74,222,128,0.06)" : "transparent", borderBottom: isLastForBranch ? "2px solid var(--border2)" : "1px dashed var(--border)" }}>
+                      <tr key={r.id} title={active ? undefined : "Amount is 0 — this row will be skipped on save"} style={{ background: active ? "rgba(74,222,128,0.06)" : "transparent", borderBottom: isLastForBranch ? "2px solid var(--border2)" : "1px dashed var(--border)", opacity: active ? 1 : 0.55 }}>
                         <TD style={{ fontWeight: isFirstForBranch ? 700 : 500, color: isFirstForBranch ? "var(--text)" : "var(--text3)" }}>
                           {isFirstForBranch ? (b.name || "—").replace("V-CUT ", "") : <span style={{ paddingLeft: 12, fontSize: 11 }}>↳ same branch</span>}
+                          {!active && (
+                            <span style={{ display: "inline-block", marginLeft: 8, padding: "1px 6px", borderRadius: 4, background: "var(--bg4)", color: "var(--text3)", fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5, verticalAlign: "middle" }}>Skipped</span>
+                          )}
                         </TD>
                         <TD>
                           <SearchSelect
