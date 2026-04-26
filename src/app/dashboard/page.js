@@ -1791,10 +1791,12 @@ function DailyMaterialChart({ entries, allocations, branches = [], filterYear, f
     dayMap.set(id, row);
   };
 
-  // Per-branch item rollup — Map<branchId, Map<itemKey, { name, unit, qty, value }>>
-  // Only allocation records carry per-item details, so this is allocations-only.
-  // Lumpsum entries can't break down beyond a total, and that's surfaced separately.
-  const branchItems = new Map();
+  // Per-branch per-date rollup — Map<branchId, Map<dateStr, { date, qty, value }>>
+  // Used by the leaderboard hover popover to show "on which dates and how much
+  // material was procured" for the hovered branch. Allocation records contribute
+  // both qty and value (sum of items.qty); lumpsum entries contribute value only
+  // (entry.mat_expense — no qty info).
+  const branchDates = new Map();
 
   if (useAllocations) {
     allocations.forEach(a => {
@@ -1807,18 +1809,17 @@ function DailyMaterialChart({ entries, allocations, branches = [], filterYear, f
       if (a.branch_id) {
         bumpBranch(a.branch_id, "alloc", total);
         bumpDayBranch(dIdx, a.branch_id, "alloc", total);
-        // Track each line item under the branch.
-        if (!branchItems.has(a.branch_id)) branchItems.set(a.branch_id, new Map());
-        const itemMap = branchItems.get(a.branch_id);
+        // Date-level rollup — sum every line's qty and value into the date bucket.
+        if (!branchDates.has(a.branch_id)) branchDates.set(a.branch_id, new Map());
+        const dateMap = branchDates.get(a.branch_id);
+        const row = dateMap.get(date) || { date, qty: 0, value: 0, source: "alloc" };
         (a.items || []).forEach(it => {
-          const key = it.material_id || (it.name || "").toLowerCase();
-          if (!key) return;
-          const value = Number(it.line_total) || (Number(it.qty) * Number(it.price_at_transfer)) || 0;
-          const row = itemMap.get(key) || { name: it.name || "—", unit: it.unit || "pcs", qty: 0, value: 0 };
           row.qty += Number(it.qty) || 0;
-          row.value += value;
-          itemMap.set(key, row);
+          row.value += Number(it.line_total) || (Number(it.qty) * Number(it.price_at_transfer)) || 0;
         });
+        // Some allocations save a top-level total without items[] — fall back to that.
+        if ((!a.items || a.items.length === 0) && total > 0) row.value += total;
+        dateMap.set(date, row);
       }
     });
   }
@@ -1833,6 +1834,14 @@ function DailyMaterialChart({ entries, allocations, branches = [], filterYear, f
       if (e.branch_id) {
         bumpBranch(e.branch_id, "lump", amt);
         bumpDayBranch(dIdx, e.branch_id, "lump", amt);
+        // Lumpsum carries value only (qty unknown). Tag the source so the
+        // popover can show "—" in the qty column for these rows.
+        if (!branchDates.has(e.branch_id)) branchDates.set(e.branch_id, new Map());
+        const dateMap = branchDates.get(e.branch_id);
+        const row = dateMap.get(e.date) || { date: e.date, qty: 0, value: 0, source: "lump" };
+        row.value += amt;
+        if (row.source === "alloc") row.source = "mixed";
+        dateMap.set(e.date, row);
       }
     });
   }
@@ -2162,60 +2171,64 @@ function DailyMaterialChart({ entries, allocations, branches = [], filterYear, f
               );
             })}
 
-            {/* Hover popover — lists the material items procured by the hovered
-                branch in this period, sorted by spend. Allocation-only since
-                lumpsum entries don't carry per-item details. */}
+            {/* Hover popover — lists the dates the hovered branch received
+                material in this period, sorted newest-first. Qty is summed
+                across all line items per allocation; lumpsum-only dates have
+                value but no qty (shown as "—"). */}
             {branchHover && (() => {
-              const itemMap = branchItems.get(branchHover.id);
-              const items = itemMap ? Array.from(itemMap.values()).sort((a, b) => b.value - a.value) : [];
-              const topItems = items.slice(0, 12);
+              const dateMap = branchDates.get(branchHover.id);
+              const rows = dateMap
+                ? Array.from(dateMap.values()).sort((a, b) => b.date.localeCompare(a.date))
+                : [];
+              const topRows = rows.slice(0, 14);
+              const totalQty = rows.reduce((s, r) => s + r.qty, 0);
               return (
                 <div style={{
                   position: "absolute", right: 0, top: "100%", marginTop: 6,
-                  width: 360, maxWidth: "calc(100% - 8px)",
+                  width: 380, maxWidth: "calc(100% - 8px)",
                   background: "var(--bg2)", border: "1px solid rgba(192,132,252,0.4)",
                   borderRadius: 10, boxShadow: "0 12px 32px rgba(0,0,0,0.55)",
                   padding: "12px 14px", zIndex: 50, pointerEvents: "none",
                 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10, marginBottom: 8 }}>
                     <div>
-                      <div style={{ fontSize: 9, fontWeight: 800, color: "#d7a6ff", textTransform: "uppercase", letterSpacing: 1.2 }}>Procured by</div>
+                      <div style={{ fontSize: 9, fontWeight: 800, color: "#d7a6ff", textTransform: "uppercase", letterSpacing: 1.2 }}>Procurement dates</div>
                       <div style={{ fontSize: 13, fontWeight: 800, color: "var(--text)", fontFamily: "var(--font-headline, var(--font-outfit))", marginTop: 1 }}>{branchHover.name.replace("V-CUT ", "")}</div>
                     </div>
                     <div style={{ textAlign: "right" }}>
-                      <div style={{ fontSize: 9, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Total</div>
+                      <div style={{ fontSize: 9, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>
+                        {rows.length} day{rows.length === 1 ? "" : "s"}{totalQty > 0 ? ` · ${totalQty} units` : ""}
+                      </div>
                       <div style={{ fontSize: 14, fontWeight: 800, color: "#d7a6ff", fontFamily: "var(--font-headline, var(--font-outfit))" }}>{INR(branchHover.total)}</div>
                     </div>
                   </div>
-                  {items.length === 0 ? (
+                  {rows.length === 0 ? (
                     <div style={{ fontSize: 11, color: "var(--text3)", fontStyle: "italic", padding: "8px 0" }}>
-                      {useLumpsum && branchHover.lump > 0
-                        ? `Lumpsum entry only (${INR(branchHover.lump)}) — no per-item breakdown available.`
-                        : "No allocation records for this branch in the period."}
+                      No procurement records for this branch in the period.
                     </div>
                   ) : (
                     <>
-                      <div style={{ display: "grid", gridTemplateColumns: "1fr auto auto", columnGap: 10, rowGap: 4, fontSize: 11 }}>
-                        <span style={{ fontSize: 9, color: "var(--text3)", fontWeight: 800, textTransform: "uppercase", letterSpacing: 1 }}>Material</span>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr auto auto", columnGap: 12, rowGap: 4, fontSize: 11 }}>
+                        <span style={{ fontSize: 9, color: "var(--text3)", fontWeight: 800, textTransform: "uppercase", letterSpacing: 1 }}>Date</span>
                         <span style={{ fontSize: 9, color: "var(--text3)", fontWeight: 800, textTransform: "uppercase", letterSpacing: 1, textAlign: "right" }}>Qty</span>
                         <span style={{ fontSize: 9, color: "var(--text3)", fontWeight: 800, textTransform: "uppercase", letterSpacing: 1, textAlign: "right" }}>Value</span>
-                        {topItems.map((it, idx) => (
+                        {topRows.map((row, idx) => (
                           <Fragment key={idx}>
-                            <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={it.name}>{it.name}</span>
-                            <span style={{ fontSize: 11, color: "var(--text2)", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{it.qty} {it.unit}</span>
-                            <span style={{ fontSize: 11, fontWeight: 700, color: "#d7a6ff", textAlign: "right", fontFamily: "var(--font-headline, var(--font-outfit))" }}>{INR(it.value)}</span>
+                            <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text)" }}>
+                              {row.date}
+                              {row.source === "lump" && <span style={{ fontSize: 9, color: "var(--accent)", marginLeft: 6, fontWeight: 800 }}>· LUMPSUM</span>}
+                              {row.source === "mixed" && <span style={{ fontSize: 9, color: "var(--accent)", marginLeft: 6, fontWeight: 800 }}>· MIXED</span>}
+                            </span>
+                            <span style={{ fontSize: 11, color: row.qty > 0 ? "var(--text2)" : "var(--text3)", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+                              {row.qty > 0 ? row.qty : "—"}
+                            </span>
+                            <span style={{ fontSize: 11, fontWeight: 700, color: "#d7a6ff", textAlign: "right", fontFamily: "var(--font-headline, var(--font-outfit))" }}>{INR(row.value)}</span>
                           </Fragment>
                         ))}
                       </div>
-                      {items.length > 12 && (
+                      {rows.length > 14 && (
                         <div style={{ marginTop: 8, fontSize: 10, color: "var(--text3)", fontStyle: "italic", textAlign: "right" }}>
-                          +{items.length - 12} more material{items.length - 12 === 1 ? "" : "s"}
-                        </div>
-                      )}
-                      {useLumpsum && branchHover.lump > 0 && (
-                        <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px dashed rgba(255,255,255,0.08)", fontSize: 10, color: "var(--accent)", display: "flex", justifyContent: "space-between" }}>
-                          <span style={{ fontWeight: 700 }}>Lumpsum (no item detail)</span>
-                          <span style={{ fontWeight: 800 }}>{INR(branchHover.lump)}</span>
+                          +{rows.length - 14} more day{rows.length - 14 === 1 ? "" : "s"}
                         </div>
                       )}
                     </>

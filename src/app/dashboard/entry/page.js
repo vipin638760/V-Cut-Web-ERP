@@ -80,6 +80,7 @@ export default function EntryPage() {
   const [selDate, setSelDate] = useState(new Date().toISOString().slice(0, 10));
   const [onlineInc, setOnlineInc] = useState("");
   const [matExp, setMatExp] = useState("");
+  const [materialAllocations, setMaterialAllocations] = useState([]);
   const [otherExp, setOtherExp] = useState("");
   const [petrol, setPetrol] = useState("");
   const [actualCash, setActualCash] = useState("");
@@ -223,6 +224,7 @@ export default function EntryPage() {
       onSnapshot(collection(db, "staff"), wrap(setStaff)),
       onSnapshot(collection(db, "staff_transfers"), wrap(setTransfers)),
       onSnapshot(collection(db, "leaves"), wrap(setLeaves)),
+      onSnapshot(collection(db, "material_allocations"), wrap(setMaterialAllocations)),
       onSnapshot(doc(db, "settings", "global"), sn => {
         if (!sn.exists()) return;
         const data = sn.data();
@@ -1692,7 +1694,47 @@ export default function EntryPage() {
                 <FG label="Cash Income (₹)" income>
                   <input type="number" readOnly value={totalCash} style={{ background: "transparent", color: "var(--green)", cursor: "not-allowed", fontWeight: 700 }} title="Auto-calculated: Total Sale − Online" />
                 </FG>
-                <FG label="Material Expense (₹)" expense><input type="number" placeholder="0" min="0" value={matExp} onChange={e => setMatExp(e.target.value)} /></FG>
+                {/* Material expense — two sources, governed by global flags:
+                    `mat_use_allocations` (default on) pulls the day's branch
+                    allocations from material_allocations; `mat_use_lumpsum`
+                    (off by default) adds the lumpsum value typed here on top.
+                    Showing both side-by-side avoids the old confusion where
+                    accountants would re-type a value already counted as a
+                    transfer. The active source(s) per the master flags are
+                    badged "Counted in P&L" so it's obvious which is live. */}
+                {(() => {
+                  const matUseAllocations = globalSettings?.mat_use_allocations !== false;
+                  const matUseLumpsum = globalSettings?.mat_use_lumpsum === true;
+                  const allocTotal = (materialAllocations || [])
+                    .filter(a => a.branch_id === selBranch && (a.date || (a.transferred_at || "").slice(0, 10)) === selDate)
+                    .reduce((s, a) => s + (Number(a.total) || 0), 0);
+                  const allocActive = matUseAllocations;
+                  const lumpActive = matUseLumpsum;
+                  const Badge = ({ on }) => on ? (
+                    <span title="This source is counted in P&L per the global flags in Master Setup → Settings"
+                      style={{ marginLeft: 6, padding: "1px 6px", borderRadius: 999, background: "rgba(74,222,128,0.18)", color: "var(--green)", fontSize: 8.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: 0.6, border: "1px solid rgba(74,222,128,0.4)" }}>P&L</span>
+                  ) : (
+                    <span title="Disabled in Master Setup → Settings"
+                      style={{ marginLeft: 6, padding: "1px 6px", borderRadius: 999, background: "var(--bg4)", color: "var(--text3)", fontSize: 8.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: 0.6, border: "1px solid var(--border)" }}>off</span>
+                  );
+                  return (
+                    <>
+                      <FG label={<>Material (transfers)<Badge on={allocActive} /></>} expense>
+                        <input type="number" readOnly value={allocTotal}
+                          title={allocActive
+                            ? "Sum of material_allocations to this branch on this date — fetched live from the Materials → Transfers log. Read-only here."
+                            : "mat_use_allocations is off in Master Setup → Settings, so this won't be added to P&L."}
+                          style={{ background: "transparent", color: allocActive ? "var(--orange)" : "var(--text3)", cursor: "not-allowed", fontWeight: 700, opacity: allocActive ? 1 : 0.6 }} />
+                      </FG>
+                      <FG label={<>Material Lumpsum (₹)<Badge on={lumpActive} /></>} expense>
+                        <input type="number" placeholder="0" min="0" value={matExp} onChange={e => setMatExp(e.target.value)}
+                          title={lumpActive
+                            ? "Manual lumpsum for material expense not already captured as a transfer. Counted in P&L on top of the transfers."
+                            : "mat_use_lumpsum is off in Master Setup → Settings, so this lumpsum is informational only and won't hit P&L."} />
+                      </FG>
+                    </>
+                  );
+                })()}
               </div>
 
               {/* Staff Billing Table */}
