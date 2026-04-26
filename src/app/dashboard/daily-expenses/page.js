@@ -47,9 +47,19 @@ export default function DailyExpensesPage() {
   const [drillType, setDrillType] = useState(null);
 
   // Form
+  // mode = "single" → modal with one branch + amount.
+  // mode = "multi"  → inline form at the top with one row per branch so the
+  //   user can record the same expense type across many branches in a single
+  //   pass (e.g. AC service done at 5 outlets on the same day).
+  // paid_by stays on every doc so the second table on this page can credit
+  //   admin contributions separately while the regular expense rollups treat
+  //   them all as ordinary daily_expenses.
+  const [entryMode, setEntryMode] = useState("single");
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState(null);
-  const [form, setForm] = useState({ date: new Date().toISOString().slice(0, 10), branch_id: "", expense_type: "", amount: "", note: "" });
+  const [form, setForm] = useState({ date: new Date().toISOString().slice(0, 10), branch_id: "", expense_type: "", amount: "", note: "", paid_by: "Pravesh" });
+  const [multiForm, setMultiForm] = useState({ date: new Date().toISOString().slice(0, 10), expense_type: "", note: "", paid_by: "Pravesh", amounts: {} });
+  const [multiSaving, setMultiSaving] = useState(false);
 
   // New expense type inline
   const [showNewType, setShowNewType] = useState(false);
@@ -156,6 +166,13 @@ export default function DailyExpensesPage() {
 
   const totalAmount = filtered.reduce((s, e) => s + (Number(e.amount) || 0), 0);
 
+  // Admin-paid recognition list — same date range / branch filter as the
+  // main view, but only entries where paid_by is "Admin". Rendered in its
+  // own table below so admin contributions read at a glance without losing
+  // the unified expense rollup the rest of the app reads from.
+  const adminPaid = useMemo(() => filtered.filter(e => (e.paid_by || "Pravesh") === "Admin"), [filtered]);
+  const adminPaidTotal = adminPaid.reduce((s, e) => s + (Number(e.amount) || 0), 0);
+
   const handleSave = async () => {
     if (!form.branch_id || !form.expense_type || !form.amount || !form.date) {
       toast({ title: "Incomplete", message: "Fill all required fields.", type: "warning" });
@@ -169,6 +186,7 @@ export default function DailyExpensesPage() {
         expense_type: form.expense_type,
         amount: Number(form.amount) || 0,
         note: form.note?.trim() || "",
+        paid_by: form.paid_by || "Pravesh",
         ...(editId ? { updated_at: new Date().toISOString(), updated_by: currentUser?.name || "user" }
                     : { created_at: new Date().toISOString(), created_by: currentUser?.name || "user" }),
       };
@@ -179,11 +197,54 @@ export default function DailyExpensesPage() {
         await addDoc(collection(db, "daily_expenses"), payload);
         toast({ title: "Saved", message: `${form.expense_type} — ${INR(Number(form.amount))} added.`, type: "success" });
       }
-      setForm({ date: form.date, branch_id: form.branch_id, expense_type: "", amount: "", note: "" });
+      setForm({ date: form.date, branch_id: form.branch_id, expense_type: "", amount: "", note: "", paid_by: form.paid_by || "Pravesh" });
       setEditId(null);
       setShowForm(false);
     } catch (err) {
       toast({ title: "Error", message: err.message, type: "error" });
+    }
+  };
+
+  // Multi-branch save — fires one daily_expenses doc per branch with a
+  // non-zero amount entered. Shared fields (date, type, note, paid_by) carry
+  // through; per-branch amount comes from multiForm.amounts[branch_id].
+  const handleMultiSave = async () => {
+    if (!multiForm.date || !multiForm.expense_type) {
+      toast({ title: "Incomplete", message: "Pick a date and expense type.", type: "warning" });
+      return;
+    }
+    const rows = branches
+      .map(b => ({ b, amt: Number(multiForm.amounts[b.id]) || 0 }))
+      .filter(r => r.amt > 0);
+    if (rows.length === 0) {
+      toast({ title: "No branches", message: "Enter an amount on at least one branch row.", type: "warning" });
+      return;
+    }
+    setMultiSaving(true);
+    try {
+      const stamp = new Date().toISOString();
+      const by = currentUser?.name || "user";
+      await Promise.all(rows.map(({ b, amt }) =>
+        addDoc(collection(db, "daily_expenses"), {
+          date: multiForm.date,
+          branch_id: b.id,
+          branch_name: b.name || "",
+          expense_type: multiForm.expense_type,
+          amount: amt,
+          note: multiForm.note?.trim() || "",
+          paid_by: multiForm.paid_by || "Pravesh",
+          created_at: stamp,
+          created_by: by,
+        })
+      ));
+      const total = rows.reduce((s, r) => s + r.amt, 0);
+      toast({ title: "Saved", message: `${rows.length} branches · ${multiForm.expense_type} · ${INR(total)} total`, type: "success" });
+      setMultiForm({ date: multiForm.date, expense_type: "", note: "", paid_by: multiForm.paid_by || "Pravesh", amounts: {} });
+      setShowForm(false);
+    } catch (err) {
+      toast({ title: "Error", message: err.message, type: "error" });
+    } finally {
+      setMultiSaving(false);
     }
   };
 
@@ -200,7 +261,8 @@ export default function DailyExpensesPage() {
   };
 
   const handleEdit = (e) => {
-    setForm({ date: e.date, branch_id: e.branch_id, expense_type: e.expense_type, amount: e.amount, note: e.note || "" });
+    setEntryMode("single");
+    setForm({ date: e.date, branch_id: e.branch_id, expense_type: e.expense_type, amount: e.amount, note: e.note || "", paid_by: e.paid_by || "Pravesh" });
     setEditId(e.id);
     setShowForm(true);
   };
@@ -346,7 +408,7 @@ export default function DailyExpensesPage() {
       wb.worksheets.unshift(wb.worksheets.pop()); // move the new sheet to front
       summary.getColumn(1).width = 30;
       summary.getColumn(2).width = 24;
-      summary.getCell("A1").value = "V-CUT SALON — DAILY EXPENSES EXPORT";
+      summary.getCell("A1").value = "V-CUT SALON — ONLINE EXPENSE PAID EXPORT";
       summary.getCell("A1").font = { bold: true, size: 14, color: { argb: "FF065F46" } };
       summary.getCell("A3").value = "Date Range"; summary.getCell("B3").value = rangeLabel;
       summary.getCell("A4").value = "Branch Filter"; summary.getCell("B4").value = branchFilter ? (branchesById.get(branchFilter)?.name || branchFilter) : "All";
@@ -408,7 +470,7 @@ export default function DailyExpensesPage() {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20, flexWrap: "wrap", gap: 10 }}>
         <div>
           <div style={{ fontSize: 11, fontWeight: 800, color: "var(--accent)", textTransform: "uppercase", letterSpacing: 2 }}>Operations</div>
-          <div style={{ fontSize: 24, fontWeight: 800, color: "var(--gold)", letterSpacing: 1 }}>Daily Expenses</div>
+          <div style={{ fontSize: 24, fontWeight: 800, color: "var(--gold)", letterSpacing: 1 }}>Online Expense Paid</div>
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button onClick={exportToExcel} disabled={exporting || filtered.length === 0}
@@ -421,13 +483,121 @@ export default function DailyExpensesPage() {
               style={{ padding: "10px 16px", borderRadius: 10, background: "var(--bg3)", border: "1px solid var(--border2)", color: "var(--accent)", fontWeight: 800, fontSize: 11, cursor: "pointer", textTransform: "uppercase", letterSpacing: 0.5, display: "inline-flex", alignItems: "center", gap: 6 }}>
               <Icon name="settings" size={12} /> Manage Types
             </button>
-            <button onClick={() => { setEditId(null); setForm({ date: new Date().toISOString().slice(0, 10), branch_id: branches[0]?.id || "", expense_type: activeTypes[0] || "", amount: "", note: "" }); setShowForm(true); }}
+            <div style={{ display: "inline-flex", gap: 2, background: "var(--bg4)", padding: 3, borderRadius: 10 }} title="Single = one branch · Multiple = same expense type recorded across many branches at once">
+              {[["single", "Single"], ["multi", "Multiple"]].map(([v, l]) => (
+                <button key={v} onClick={() => setEntryMode(v)}
+                  style={{ padding: "8px 14px", borderRadius: 8, fontSize: 11, fontWeight: 800, letterSpacing: 0.5, textTransform: "uppercase", border: "none", cursor: "pointer",
+                    background: entryMode === v ? "linear-gradient(135deg,var(--accent),var(--gold2))" : "transparent",
+                    color: entryMode === v ? "#000" : "var(--text3)" }}>
+                  {l}
+                </button>
+              ))}
+            </div>
+            <button onClick={() => {
+              setEditId(null);
+              if (entryMode === "multi") {
+                setMultiForm(m => ({ date: new Date().toISOString().slice(0, 10), expense_type: activeTypes[0] || "", note: "", paid_by: m.paid_by || "Pravesh", amounts: {} }));
+                setShowForm(true);
+              } else {
+                setForm(f => ({ date: new Date().toISOString().slice(0, 10), branch_id: branches[0]?.id || "", expense_type: activeTypes[0] || "", amount: "", note: "", paid_by: f.paid_by || "Pravesh" }));
+                setShowForm(true);
+              }
+            }}
               style={{ padding: "10px 18px", borderRadius: 10, background: "linear-gradient(135deg,var(--accent),var(--gold2))", color: "#000", border: "none", fontWeight: 800, fontSize: 11, cursor: "pointer", textTransform: "uppercase", letterSpacing: 0.5, display: "inline-flex", alignItems: "center", gap: 6 }}>
-              <Icon name="plus" size={14} /> Add Expense
+              <Icon name="plus" size={14} /> {entryMode === "multi" ? "Add Expense (Multi)" : "Add Expense"}
             </button>
           </>)}
         </div>
       </div>
+
+      {/* Multi-branch entry form — inline at the top so the user can record
+          one expense type across many branches in a single pass without a
+          modal context-switch. */}
+      {canEdit && entryMode === "multi" && showForm && !editId && (
+        <Card style={{ marginBottom: 16, padding: 18, border: "1px solid rgba(34,211,238,0.3)" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 800, color: "var(--accent)", textTransform: "uppercase", letterSpacing: 1.5 }}>Multi-Branch Entry</div>
+              <div style={{ fontSize: 12, color: "var(--text3)", marginTop: 2 }}>Same expense type, applied across selected branches in one save.</div>
+            </div>
+            <button onClick={() => setShowForm(false)}
+              style={{ padding: "6px 12px", borderRadius: 8, background: "var(--bg4)", border: "1px solid var(--border2)", color: "var(--text2)", fontSize: 11, fontWeight: 700, cursor: "pointer", textTransform: "uppercase", letterSpacing: 0.5 }}>
+              ✕ Close
+            </button>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12, marginBottom: 14 }}>
+            <div>
+              <label style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Date *</label>
+              <input type="date" value={multiForm.date} onChange={e => setMultiForm(f => ({ ...f, date: e.target.value }))}
+                style={{ width: "100%", padding: "10px 12px", borderRadius: 8, background: "var(--bg4)", border: "1px solid var(--border2)", color: "var(--text)", fontSize: 13, marginTop: 4 }} />
+            </div>
+            <div>
+              <label style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Expense Type *</label>
+              <SearchSelect
+                value={multiForm.expense_type}
+                onChange={(v) => setMultiForm(f => ({ ...f, expense_type: v }))}
+                options={activeTypes.map(t => ({ value: t, label: t }))}
+                placeholder="Select type…"
+                minWidth={0}
+                style={{ marginTop: 4 }}
+                buttonStyle={{ padding: "10px 12px", borderRadius: 8, background: "var(--bg4)", color: "var(--text)", fontSize: 13 }}
+              />
+            </div>
+            <div>
+              <label style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Paid By *</label>
+              <div style={{ display: "inline-flex", gap: 2, background: "var(--bg4)", padding: 3, borderRadius: 8, marginTop: 4 }}>
+                {["Pravesh", "Admin"].map(opt => (
+                  <button key={opt} onClick={() => setMultiForm(f => ({ ...f, paid_by: opt }))}
+                    style={{ padding: "8px 14px", borderRadius: 6, fontSize: 12, fontWeight: 700, border: "none", cursor: "pointer",
+                      background: multiForm.paid_by === opt ? (opt === "Admin" ? "var(--orange)" : "var(--green)") : "transparent",
+                      color: multiForm.paid_by === opt ? "#000" : "var(--text3)" }}>
+                    {opt}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div style={{ gridColumn: "1 / -1" }}>
+              <label style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Note</label>
+              <input type="text" placeholder="Optional note (applied to every branch row)…" value={multiForm.note} onChange={e => setMultiForm(f => ({ ...f, note: e.target.value }))}
+                style={{ width: "100%", padding: "10px 12px", borderRadius: 8, background: "var(--bg4)", border: "1px solid var(--border2)", color: "var(--text)", fontSize: 13, marginTop: 4 }} />
+            </div>
+          </div>
+          <div style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 }}>Per-Branch Amounts (₹) — leave blank to skip</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 8, marginBottom: 14, maxHeight: 280, overflowY: "auto", padding: 4 }}>
+            {branches.map(b => {
+              const amt = multiForm.amounts[b.id] || "";
+              const active = Number(amt) > 0;
+              return (
+                <div key={b.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", borderRadius: 8, background: active ? "rgba(74,222,128,0.08)" : "var(--bg4)", border: `1px solid ${active ? "rgba(74,222,128,0.3)" : "var(--border2)"}` }}>
+                  <div style={{ flex: 1, minWidth: 0, fontSize: 12, fontWeight: 600, color: "var(--text)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={b.name}>{(b.name || "—").replace("V-CUT ", "")}</div>
+                  <input type="number" min="0" step="1" placeholder="0" value={amt}
+                    onChange={e => setMultiForm(f => ({ ...f, amounts: { ...f.amounts, [b.id]: e.target.value } }))}
+                    style={{ width: 90, padding: "6px 8px", borderRadius: 6, background: "var(--bg3)", border: `1px solid ${active ? "var(--accent)" : "var(--border2)"}`, color: active ? "var(--accent)" : "var(--text)", fontSize: 13, fontWeight: 700, textAlign: "right", outline: "none" }} />
+                </div>
+              );
+            })}
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, paddingTop: 12, borderTop: "1px solid var(--border)" }}>
+            <div style={{ fontSize: 12, color: "var(--text3)" }}>
+              {(() => {
+                const rows = branches.filter(b => Number(multiForm.amounts[b.id]) > 0);
+                const total = rows.reduce((s, b) => s + (Number(multiForm.amounts[b.id]) || 0), 0);
+                return rows.length > 0
+                  ? <>Will create <strong style={{ color: "var(--accent)" }}>{rows.length}</strong> entries · Total <strong style={{ color: "var(--green)" }}>{INR(total)}</strong></>
+                  : <>Enter at least one branch amount to enable Save.</>;
+              })()}
+            </div>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={() => setShowForm(false)} disabled={multiSaving}
+                style={{ padding: "10px 18px", borderRadius: 10, background: "var(--bg4)", color: "var(--text3)", border: "1px solid var(--border2)", fontWeight: 600, fontSize: 12, cursor: "pointer" }}>Cancel</button>
+              <button onClick={handleMultiSave} disabled={multiSaving}
+                style={{ padding: "10px 22px", borderRadius: 10, background: "linear-gradient(135deg,var(--accent),var(--gold2))", color: "#000", border: "none", fontWeight: 800, fontSize: 12, cursor: multiSaving ? "wait" : "pointer", opacity: multiSaving ? 0.6 : 1 }}>
+                {multiSaving ? "Saving…" : "Save All"}
+              </button>
+            </div>
+          </div>
+        </Card>
+      )}
 
       {/* Filters */}
       <Card style={{ marginBottom: 16, padding: 14 }}>
@@ -511,37 +681,47 @@ export default function DailyExpensesPage() {
         <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 13 }}>
           <thead>
             <tr style={{ background: "var(--bg4)" }}>
-              <TH>Date</TH><TH>Branch</TH><TH>Expense Type</TH><TH right>Amount</TH><TH>Note</TH><TH>By</TH>
+              <TH>Date</TH><TH>Branch</TH><TH>Expense Type</TH><TH right>Amount</TH><TH>Paid By</TH><TH>Note</TH><TH>By</TH>
               {canEdit && <TH style={{ width: 80, textAlign: "center" }}>Actions</TH>}
             </tr>
           </thead>
           <tbody>
             {filtered.length === 0 && (
-              <tr><td colSpan={canEdit ? 7 : 6} style={{ textAlign: "center", padding: 30, color: "var(--text3)", fontSize: 13 }}>No expenses in the selected range.</td></tr>
+              <tr><td colSpan={canEdit ? 8 : 7} style={{ textAlign: "center", padding: 30, color: "var(--text3)", fontSize: 13 }}>No expenses in the selected range.</td></tr>
             )}
-            {filtered.map(e => (
-              <tr key={e.id} style={{ borderBottom: "1px solid var(--border)" }}>
-                <TD>{e.date}</TD>
-                <TD>{(e.branch_name || branchesById.get(e.branch_id)?.name || "—").replace("V-CUT ", "")}</TD>
-                <TD style={{ fontWeight: 600 }}>{e.expense_type}</TD>
-                <TD right style={{ fontWeight: 700, color: "var(--red)" }}>{INR(e.amount)}</TD>
-                <TD style={{ color: "var(--text3)", fontSize: 12 }}>{e.note || "—"}</TD>
-                <TD style={{ color: "var(--text3)", fontSize: 11 }}>{e.created_by || "—"}</TD>
-                {canEdit && (
-                  <TD style={{ textAlign: "center" }}>
-                    <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
-                      <IconBtn name="edit" variant="secondary" onClick={() => handleEdit(e)} title="Edit" />
-                      <IconBtn name="del" variant="danger" onClick={() => handleDelete(e)} title="Delete" />
-                    </div>
+            {filtered.map(e => {
+              const paidBy = e.paid_by || "Pravesh";
+              const paidByAdmin = paidBy === "Admin";
+              return (
+                <tr key={e.id} style={{ borderBottom: "1px solid var(--border)" }}>
+                  <TD>{e.date}</TD>
+                  <TD>{(e.branch_name || branchesById.get(e.branch_id)?.name || "—").replace("V-CUT ", "")}</TD>
+                  <TD style={{ fontWeight: 600 }}>{e.expense_type}</TD>
+                  <TD right style={{ fontWeight: 700, color: "var(--red)" }}>{INR(e.amount)}</TD>
+                  <TD>
+                    <span style={{ fontSize: 10, fontWeight: 800, padding: "2px 8px", borderRadius: 4, letterSpacing: 0.5, textTransform: "uppercase",
+                      background: paidByAdmin ? "rgba(251,146,60,0.15)" : "rgba(74,222,128,0.12)",
+                      color: paidByAdmin ? "var(--orange)" : "var(--green)",
+                      border: `1px solid ${paidByAdmin ? "rgba(251,146,60,0.35)" : "rgba(74,222,128,0.3)"}` }}>{paidBy}</span>
                   </TD>
-                )}
-              </tr>
-            ))}
+                  <TD style={{ color: "var(--text3)", fontSize: 12 }}>{e.note || "—"}</TD>
+                  <TD style={{ color: "var(--text3)", fontSize: 11 }}>{e.created_by || "—"}</TD>
+                  {canEdit && (
+                    <TD style={{ textAlign: "center" }}>
+                      <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
+                        <IconBtn name="edit" variant="secondary" onClick={() => handleEdit(e)} title="Edit" />
+                        <IconBtn name="del" variant="danger" onClick={() => handleDelete(e)} title="Delete" />
+                      </div>
+                    </TD>
+                  )}
+                </tr>
+              );
+            })}
             {filtered.length > 0 && (
               <tr style={{ background: "var(--bg3)", fontWeight: 700, borderTop: "2px solid var(--border2)" }}>
                 <TD>TOTAL</TD><TD></TD><TD></TD>
                 <TD right style={{ color: "var(--red)", fontWeight: 800 }}>{INR(totalAmount)}</TD>
-                <TD></TD><TD></TD>
+                <TD></TD><TD></TD><TD></TD>
                 {canEdit && <TD></TD>}
               </tr>
             )}
@@ -549,8 +729,52 @@ export default function DailyExpensesPage() {
         </table>
       </Card>
 
-      {/* Add/Edit Expense Modal */}
-      <Modal isOpen={showForm} onClose={() => { setShowForm(false); setEditId(null); }} title={editId ? "Edit Expense" : "Add Daily Expense"} width={480}>
+      {/* Admin-paid recognition table — same entries already counted above,
+          spotlighted here so admin contributions are easy to acknowledge
+          without scanning the full list. */}
+      {adminPaid.length > 0 && (
+        <div style={{ marginTop: 24 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10, flexWrap: "wrap", gap: 10 }}>
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 800, color: "var(--orange)", textTransform: "uppercase", letterSpacing: 1.5 }}>Recognition</div>
+              <div style={{ fontSize: 16, fontWeight: 800, color: "var(--gold)", marginTop: 2 }}>Paid by Admin</div>
+            </div>
+            <div style={{ fontSize: 13, color: "var(--text3)" }}>
+              {adminPaid.length} entries · Total <strong style={{ color: "var(--orange)", fontSize: 16 }}>{INR(adminPaidTotal)}</strong>
+            </div>
+          </div>
+          <Card style={{ padding: 0, overflowX: "auto", border: "1px solid rgba(251,146,60,0.25)" }}>
+            <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 13 }}>
+              <thead>
+                <tr style={{ background: "rgba(251,146,60,0.08)" }}>
+                  <TH>Date</TH><TH>Branch</TH><TH>Expense Type</TH><TH right>Amount</TH><TH>Note</TH><TH>Entered By</TH>
+                </tr>
+              </thead>
+              <tbody>
+                {adminPaid.map(e => (
+                  <tr key={e.id} style={{ borderBottom: "1px solid var(--border)" }}>
+                    <TD>{e.date}</TD>
+                    <TD>{(e.branch_name || branchesById.get(e.branch_id)?.name || "—").replace("V-CUT ", "")}</TD>
+                    <TD style={{ fontWeight: 600 }}>{e.expense_type}</TD>
+                    <TD right style={{ fontWeight: 700, color: "var(--orange)" }}>{INR(e.amount)}</TD>
+                    <TD style={{ color: "var(--text3)", fontSize: 12 }}>{e.note || "—"}</TD>
+                    <TD style={{ color: "var(--text3)", fontSize: 11 }}>{e.created_by || "—"}</TD>
+                  </tr>
+                ))}
+                <tr style={{ background: "rgba(251,146,60,0.06)", fontWeight: 700, borderTop: "2px solid rgba(251,146,60,0.3)" }}>
+                  <TD>TOTAL</TD><TD></TD><TD></TD>
+                  <TD right style={{ color: "var(--orange)", fontWeight: 800 }}>{INR(adminPaidTotal)}</TD>
+                  <TD></TD><TD></TD>
+                </tr>
+              </tbody>
+            </table>
+          </Card>
+        </div>
+      )}
+
+      {/* Add/Edit Expense Modal — single mode only. Multi-branch flow is the
+          inline form at the top so the picker has room for a row per branch. */}
+      <Modal isOpen={showForm && (entryMode === "single" || !!editId)} onClose={() => { setShowForm(false); setEditId(null); }} title={editId ? "Edit Expense" : "Add Online Expense Paid"} width={480}>
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             <div>
@@ -587,6 +811,19 @@ export default function DailyExpensesPage() {
             <label style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Amount (₹) *</label>
             <input type="number" min="0" placeholder="0" value={form.amount} onChange={e => setForm(f => ({ ...f, amount: e.target.value }))}
               style={{ width: "100%", padding: "10px 12px", borderRadius: 8, background: "var(--bg4)", border: "2px solid var(--accent)", color: "var(--accent)", fontSize: 16, fontWeight: 800, marginTop: 4 }} />
+          </div>
+          <div>
+            <label style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Paid By *</label>
+            <div style={{ display: "inline-flex", gap: 2, background: "var(--bg4)", padding: 3, borderRadius: 8, marginTop: 4 }}>
+              {["Pravesh", "Admin"].map(opt => (
+                <button key={opt} type="button" onClick={() => setForm(f => ({ ...f, paid_by: opt }))}
+                  style={{ padding: "8px 14px", borderRadius: 6, fontSize: 12, fontWeight: 700, border: "none", cursor: "pointer",
+                    background: (form.paid_by || "Pravesh") === opt ? (opt === "Admin" ? "var(--orange)" : "var(--green)") : "transparent",
+                    color: (form.paid_by || "Pravesh") === opt ? "#000" : "var(--text3)" }}>
+                  {opt}
+                </button>
+              ))}
+            </div>
           </div>
           <div>
             <label style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Note</label>
