@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState, useRef, useMemo, startTransition } from "react";
-import { collection, onSnapshot, query, orderBy, where, addDoc, deleteDoc, doc, updateDoc, getDoc, getDocs } from "firebase/firestore";
+import { collection, onSnapshot, query, orderBy, where, addDoc, deleteDoc, doc, updateDoc, getDoc, getDocs, writeBatch } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
 import { INR, computeCashInHand } from "@/lib/calculations";
@@ -123,6 +123,83 @@ export default function EntryPage() {
   const roleKnown = !!currentUser?.role;
   const canEdit = !roleKnown || ["admin", "accountant"].includes(currentUser.role);
   const canDelete = !roleKnown || currentUser.role === "admin";
+  const isAdmin = currentUser?.role === "admin";
+
+  // Bulk cleanup of legacy double-bumped mat_expense (one-time migration).
+  // Pre-split, every transfer commit added the transfer total to the day's
+  // entries.mat_expense — so old entries have a lumpsum that already
+  // contains their transfers. Once both global flags are on the rupees
+  // count twice. This walks every entry, matches it against the day's
+  // material_allocations total, and when the saved lumpsum is ≥ the
+  // transfer total writes mat_expense = max(0, mat_expense - allocTotal).
+  // Confirms before running so the user sees the count and total to be
+  // subtracted; entries where the lumpsum is genuinely smaller (i.e.
+  // never auto-bumped) are left alone.
+  const cleanAllLegacyLumpsums = async () => {
+    if (!db) return;
+    const allocByKey = new Map(); // `${branch_id}|${date}` → total
+    (materialAllocations || []).forEach(a => {
+      const date = a.date || (a.transferred_at || "").slice(0, 10);
+      if (!a.branch_id || !date) return;
+      const k = `${a.branch_id}|${date}`;
+      allocByKey.set(k, (allocByKey.get(k) || 0) + (Number(a.total) || 0));
+    });
+    // Pull every entry once — bulk migration is rare and one-shot, so eating
+    // a single full read is fine. (The form's onSnapshot is period-scoped,
+    // so we can't reuse it to scan the whole table.)
+    const allEntriesSn = await getDocs(collection(db, "entries"));
+    const candidates = [];
+    let totalSubtract = 0;
+    allEntriesSn.docs.forEach(d => {
+      const data = d.data();
+      const k = `${data.branch_id}|${data.date}`;
+      const allocTotal = allocByKey.get(k) || 0;
+      const lump = Number(data.mat_expense) || 0;
+      if (allocTotal > 0 && lump >= allocTotal) {
+        candidates.push({ id: d.id, branch_id: data.branch_id, date: data.date, lump, allocTotal, cleaned: Math.max(0, lump - allocTotal), activity_log: data.activity_log });
+        totalSubtract += allocTotal;
+      }
+    });
+    if (candidates.length === 0) {
+      toast({ title: "Nothing to clean", message: "No entries have a lumpsum ≥ their transfer total.", type: "info" });
+      return;
+    }
+    confirm({
+      title: `Clean ${candidates.length} legacy lumpsum${candidates.length === 1 ? "" : "s"}?`,
+      message: `Found <strong>${candidates.length}</strong> entries where the saved <strong>mat_expense</strong> is ≥ the day's transfer total — likely double-bumped pre-split.<br/><br/>` +
+        `Subtracting transfers will remove a combined <strong>${INR(totalSubtract)}</strong> of double-counted material expense.<br/><br/>` +
+        `Each entry's <code>mat_expense</code> will be rewritten to <code>max(0, mat_expense − transfers)</code> with an activity_log breadcrumb. Entries where the lumpsum was a genuine standalone purchase (lumpsum &lt; transfers) are skipped.`,
+      confirmText: `Clean ${candidates.length} entries`,
+      cancelText: "Cancel",
+      type: "warning",
+      onConfirm: async () => {
+        try {
+          // writeBatch caps at 500 ops per commit — chunk so the migration
+          // safely handles networks with hundreds of legacy entries.
+          const nowISO = new Date().toISOString();
+          const userLabel = currentUser?.name || currentUser?.id || "admin";
+          for (let i = 0; i < candidates.length; i += 400) {
+            const chunk = candidates.slice(i, i + 400);
+            const batch = writeBatch(db);
+            chunk.forEach(c => {
+              const activity = Array.isArray(c.activity_log) ? [...c.activity_log] : [];
+              activity.push({
+                action: "Lumpsum cleanup (bulk)",
+                user: userLabel,
+                time: nowISO,
+                note: `mat_expense ${INR(c.lump)} → ${INR(c.cleaned)} (subtracted ₹${c.allocTotal.toFixed(2)} of transfers already counted via material_allocations).`,
+              });
+              batch.update(doc(db, "entries", c.id), { mat_expense: c.cleaned, activity_log: activity, updated_at: nowISO });
+            });
+            await batch.commit();
+          }
+          toast({ title: "Cleaned", message: `${candidates.length} entries cleaned · ${INR(totalSubtract)} of double-counted lumpsum removed.`, type: "success" });
+        } catch (err) {
+          confirm({ title: "Cleanup Failed", message: err.message || "Unknown error", confirmText: "OK", type: "danger", onConfirm: () => {} });
+        }
+      },
+    });
+  };
 
   // Define handlers BEFORE any other function that references them.
   // (Turbopack/SWC production minifier does not reliably hoist `function` declarations,
@@ -1573,6 +1650,13 @@ export default function EntryPage() {
           <div style={{ fontSize: 12, fontWeight: 700, color: "var(--gold)", textTransform: "uppercase", letterSpacing: 1 }}>Daily Sales Entry</div>
           {canEdit && (
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              {isAdmin && (
+                <button type="button" onClick={cleanAllLegacyLumpsums}
+                  title="Find every entry whose mat_expense was bumped by a transfer pre-split and subtract the transfer total in one shot"
+                  style={{ padding: "6px 14px", borderRadius: 8, background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.4)", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 800, color: "var(--red)", textTransform: "uppercase", letterSpacing: 0.5 }}>
+                  <Icon name="del" size={13} /> Clean Legacy Lumpsums
+                </button>
+              )}
               <button type="button" onClick={() => setTemplatePicker(true)} title="Download upload template"
                 style={{ padding: "6px 14px", borderRadius: 8, background: "var(--bg4)", border: "1px solid var(--border2)", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 700, color: "var(--orange)", textTransform: "uppercase", letterSpacing: 0.5 }}>
                 <Icon name="save" size={13} /> Template
