@@ -1337,9 +1337,16 @@ export default function MaterialsPage() {
         transferred_at: nowISO,
       });
 
-      // Auto-update the daily entry's material expense for that branch+date
+      // No longer mutating entries.mat_expense from a transfer.
+      // The daily entry now reads material_allocations directly into the
+      // "Material (transfers)" field with its own P&L flag
+      // (mat_use_allocations). Bumping mat_expense here double-counted once
+      // the two-source split shipped — transfers and lumpsum used to land in
+      // the same field. Now the allocation doc itself is the single source
+      // of truth; we just leave a breadcrumb on the day's entry (if it
+      // exists) so the audit log still tells the story.
       if (transferModal.auto_entry_update && total > 0) {
-        const { getDocs, query: fsQuery, where, updateDoc: fsUpdate, addDoc: fsAdd } = await import("firebase/firestore");
+        const { getDocs, query: fsQuery, where, updateDoc: fsUpdate } = await import("firebase/firestore");
         const entriesQ = fsQuery(
           collection(db, "entries"),
           where("branch_id", "==", transferModal.branch_id),
@@ -1349,37 +1356,18 @@ export default function MaterialsPage() {
         if (!snap.empty) {
           const existing = snap.docs[0];
           const data = existing.data();
-          const newMat = (Number(data.mat_expense) || 0) + total;
           const activity = Array.isArray(data.activity_log) ? [...data.activity_log] : [];
           activity.push({
             action: "Material Transfer",
             user: currentUser?.name || currentUser?.id || "admin",
             time: nowISO,
-            note: `Added ₹${total.toFixed(2)} material expense from ${transferModal.items.length} item(s)`,
+            note: `Logged ₹${total.toFixed(2)} transfer (${transferModal.items.length} item(s)) — counted in P&L via material_allocations, not added to lumpsum.`,
           });
-          await fsUpdate(existing.ref, { mat_expense: newMat, activity_log: activity, updated_at: nowISO });
-        } else {
-          // No entry for that day yet — create a minimal one so the expense is captured.
-          await fsAdd(collection(db, "entries"), {
-            branch_id: transferModal.branch_id,
-            date: transferDate,
-            online: 0, cash: 0,
-            mat_expense: total,
-            others: 0, petrol: 0,
-            staff_billing: [],
-            total_gst: 0,
-            activity_log: [{
-              action: "Create",
-              user: currentUser?.name || currentUser?.id || "admin",
-              time: nowISO,
-              note: `Stub created via material transfer (₹${total.toFixed(2)})`,
-            }],
-            created_at: nowISO,
-          });
+          await fsUpdate(existing.ref, { activity_log: activity, updated_at: nowISO });
         }
       }
 
-      toast({ title: "Transferred", message: `${filledItems.length} material(s) sent to ${branch?.name} on ${transferDate}. Daily entry updated with ₹${total.toFixed(0)} material expense (incl. ${opsPct}% ops cost).`, type: "success" });
+      toast({ title: "Transferred", message: `${filledItems.length} material(s) sent to ${branch?.name} on ${transferDate}. Counted in P&L via Material (transfers) — lumpsum left untouched.`, type: "success" });
       setTransferModal(null);
       setSelectedIds([]);
     } catch (err) {

@@ -1737,6 +1737,57 @@ export default function EntryPage() {
                 })()}
               </div>
 
+              {/* Legacy lumpsum cleanup. Pre-split, every transfer commit
+                  bumped entries.mat_expense by the transfer total — so older
+                  entries have a lumpsum that already includes their transfers.
+                  Now that the two sources are separate this would double-count
+                  if both flags get turned on. This banner only shows up when
+                  the saved lumpsum is at least as large as the day's
+                  transferred total (a strong signal of legacy bumping) and
+                  offers a one-click subtract that rewrites mat_expense to
+                  max(0, mat_expense - allocTotal) with an audit-log entry. */}
+              {editId && (() => {
+                const dbEntry = entries.find(e => e.id === editId);
+                if (!dbEntry) return null;
+                const allocTotal = (materialAllocations || [])
+                  .filter(a => a.branch_id === selBranch && (a.date || (a.transferred_at || "").slice(0, 10)) === selDate)
+                  .reduce((s, a) => s + (Number(a.total) || 0), 0);
+                const dbLump = Number(dbEntry.mat_expense) || 0;
+                if (allocTotal <= 0 || dbLump < allocTotal) return null;
+                const cleaned = Math.max(0, dbLump - allocTotal);
+                const cleanLumpsum = async () => {
+                  try {
+                    const nowISO = new Date().toISOString();
+                    const activity = Array.isArray(dbEntry.activity_log) ? [...dbEntry.activity_log] : [];
+                    activity.push({
+                      action: "Lumpsum cleanup",
+                      user: currentUser?.name || currentUser?.id || "admin",
+                      time: nowISO,
+                      note: `mat_expense ${INR(dbLump)} → ${INR(cleaned)} (subtracted ₹${allocTotal.toFixed(2)} of transfers already counted via material_allocations).`,
+                    });
+                    await updateDoc(doc(db, "entries", editId), { mat_expense: cleaned, activity_log: activity, updated_at: nowISO });
+                    setMatExp(cleaned ? String(cleaned) : "");
+                    toast({ title: "Lumpsum cleaned", message: `Subtracted ${INR(allocTotal)} of transfers from the lumpsum (${INR(dbLump)} → ${INR(cleaned)}).`, type: "success" });
+                  } catch (err) {
+                    confirm({ title: "Cleanup Failed", message: err.message || "Unknown error", confirmText: "OK", type: "danger", onConfirm: () => {} });
+                  }
+                };
+                return (
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "10px 14px", marginBottom: 12, borderRadius: 10, background: "rgba(248,113,113,0.06)", border: "1px solid rgba(248,113,113,0.35)", color: "var(--red)", fontSize: 12, flexWrap: "wrap" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                      <span style={{ fontSize: 11, fontWeight: 900, textTransform: "uppercase", letterSpacing: 1.2, padding: "2px 8px", borderRadius: 999, background: "rgba(248,113,113,0.18)", border: "1px solid rgba(248,113,113,0.45)" }}>Legacy Lumpsum</span>
+                      <span style={{ color: "var(--text2)" }}>
+                        Saved lumpsum {INR(dbLump)} ≥ today's transfers {INR(allocTotal)} — likely double-counted from the old transfer auto-bump.
+                      </span>
+                    </div>
+                    <button type="button" onClick={cleanLumpsum}
+                      style={{ padding: "6px 14px", borderRadius: 8, background: "linear-gradient(135deg, #22d3ee, #a5b4fc)", color: "#000", border: "none", fontWeight: 800, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.8, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 }}>
+                      <Icon name="save" size={12} /> Subtract transfers ({INR(dbLump)} → {INR(cleaned)})
+                    </button>
+                  </div>
+                );
+              })()}
+
               {/* Staff Billing Table */}
               <div style={{ height: 1, background: "linear-gradient(90deg,transparent,var(--border2),transparent)", margin: "16px 0" }} />
               <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 12, color: "var(--gold)", textTransform: "uppercase", letterSpacing: 1 }}>Staff Billing & Incentives</div>
