@@ -2654,7 +2654,8 @@ export default function MaterialsPage() {
                     const expandedHere = allocIds.filter(id => expandedAllocs.has(id)).length;
                     const allExpanded = expandedHere === allocIds.length;
                     const noneExpanded = expandedHere === 0;
-                    const colCount = 7 + (canDeleteAllocation ? 1 : 0);
+                    const colCount = 8 + (canDeleteAllocation ? 1 : 0);
+                    let runningItemIdx = 0;
                     return (
                       <Card key={b.id} style={{ padding: 0 }}>
                         <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--border)", background: "var(--bg4)", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
@@ -2680,6 +2681,7 @@ export default function MaterialsPage() {
                           <table className="pill-table" style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
                             <thead><tr>
                               <TH style={{ width: 30 }}> </TH>
+                              <TH right style={{ width: 40 }}>#</TH>
                               <TH>Date</TH>
                               <TH right>Items</TH>
                               <TH right title="Transfer subtotal (items only, no ops cost)">Subtotal</TH>
@@ -2689,7 +2691,7 @@ export default function MaterialsPage() {
                               {canDeleteAllocation && <TH style={{ width: 50 }}> </TH>}
                             </tr></thead>
                             <tbody>
-                              {sortedAllocs.map(alloc => {
+                              {sortedAllocs.map((alloc, allocIdx) => {
                                 const date = alloc.date || (alloc.transferred_at || "").slice(0, 10);
                                 const items = alloc.items || [];
                                 const sub = Number(alloc.subtotal) || Number(alloc.total) || 0;
@@ -2705,6 +2707,7 @@ export default function MaterialsPage() {
                                       <TD style={{ textAlign: "center", color: "var(--text3)", fontSize: 11, userSelect: "none" }}>
                                         {isOpen ? "▾" : "▸"}
                                       </TD>
+                                      <TD right style={{ color: "var(--text3)", fontVariantNumeric: "tabular-nums" }}>{allocIdx + 1}</TD>
                                       <TD style={{ whiteSpace: "nowrap", color: "var(--text)", fontWeight: 700 }}>{date || "—"}</TD>
                                       <TD right style={{ color: "var(--text3)" }}>{items.length}</TD>
                                       <TD right style={{ color: "var(--text2)" }}>{INR(sub)}</TD>
@@ -2726,11 +2729,13 @@ export default function MaterialsPage() {
                                       )}
                                     </tr>
                                     {/* Expanded item detail rows. */}
-                                    {isOpen && items.map((it, i) => (
+                                    {isOpen && items.map((it, i) => {
+                                      runningItemIdx += 1;
+                                      return (
                                       <tr key={`${alloc.id}-${i}`} style={{ background: "var(--bg3)" }}>
                                         <TD> </TD>
+                                        <TD right style={{ color: "var(--accent)", fontWeight: 700, fontSize: 11, fontVariantNumeric: "tabular-nums" }}>{runningItemIdx}</TD>
                                         <TD colSpan={2} style={{ paddingLeft: 28, color: "var(--text3)", fontSize: 11 }}>
-                                          <span style={{ display: "inline-block", width: 22, color: "var(--text3)", fontVariantNumeric: "tabular-nums" }}>{i + 1}.</span>
                                           <span style={{ color: "var(--text)", fontWeight: 600 }}>{it.name}</span>
                                           <span style={{ color: "var(--text3)", marginLeft: 8 }}>· {it.qty} {it.unit}</span>
                                         </TD>
@@ -2742,7 +2747,8 @@ export default function MaterialsPage() {
                                         </TD>
                                         <TD colSpan={canDeleteAllocation ? 2 : 1}> </TD>
                                       </tr>
-                                    ))}
+                                      );
+                                    })}
                                   </Fragment>
                                 );
                               })}
