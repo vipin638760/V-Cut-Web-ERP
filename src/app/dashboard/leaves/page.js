@@ -128,11 +128,37 @@ export default function LeavesPage() {
   })();
 
   const handleApprove = async (id) => {
-    try { await updateDoc(doc(db, "leaves", id), { status: "approved" }); toast({ title: "Approved", message: "Leave request approved.", type: "success" }); }
+    try { await updateDoc(doc(db, "leaves", id), { status: "approved", processed: false }); toast({ title: "Approved", message: "Leave request approved.", type: "success" }); }
     catch (e) { confirm({ title: "Error", message: e.message, confirmText: "OK", type: "danger", onConfirm: () => {} }); }
   };
   const handleReject = async (id) => {
-    try { await updateDoc(doc(db, "leaves", id), { status: "rejected" }); toast({ title: "Rejected", message: "Leave request rejected.", type: "success" }); }
+    try { await updateDoc(doc(db, "leaves", id), { status: "rejected", processed: false }); toast({ title: "Rejected", message: "Leave request rejected.", type: "success" }); }
+    catch (e) { confirm({ title: "Error", message: e.message, confirmText: "OK", type: "danger", onConfirm: () => {} }); }
+  };
+  const handleMarkProcessed = (l) => {
+    const s = staff.find(x => x.id === l.staff_id);
+    confirm({
+      title: "Mark Leave as Processed?",
+      message: `Tick <strong>${s?.name || "this leave"}</strong> · ${l.date} · ${l.type || "Leave"} as <strong>processed</strong>?<br/><br/>If this record shouldn't have been approved, hit Cancel and use the Delete (🗑) icon next to the tick instead.`,
+      confirmText: "Mark Processed",
+      cancelText: "Cancel",
+      type: "warning",
+      onConfirm: async () => {
+        try {
+          await updateDoc(doc(db, "leaves", l.id), {
+            processed: true,
+            processed_by: currentUser?.id || "admin",
+            processed_at: new Date().toISOString(),
+          });
+          toast({ title: "Processed", message: "Leave marked as processed.", type: "success" });
+        } catch (e) {
+          confirm({ title: "Error", message: e.message, confirmText: "OK", type: "danger", onConfirm: () => {} });
+        }
+      },
+    });
+  };
+  const handleUnmarkProcessed = async (id) => {
+    try { await updateDoc(doc(db, "leaves", id), { processed: false }); toast({ title: "Unmarked", message: "Processed flag removed.", type: "success" }); }
     catch (e) { confirm({ title: "Error", message: e.message, confirmText: "OK", type: "danger", onConfirm: () => {} }); }
   };
   const handleDelete = async (id) => {
@@ -240,14 +266,24 @@ export default function LeavesPage() {
     setSaving(true); setSaveMsg("");
     try {
       const batch = writeBatch(db);
+      const monthPrefix = (form.date || "").slice(0, 7);
       form.staff_ids.forEach(id => {
         const ref = doc(collection(db, "leaves"));
         batch.set(ref, {
           staff_id: id, date: form.date,
           days, type: effectiveLeaveTypeFor(id),
           reason: form.reason, status: "pending",
+          processed: false,
           applied_by: currentUser?.id || "admin",
           applied_at: new Date().toISOString(),
+        });
+        // A fresh application invalidates any tick already placed on that
+        // staff's existing approved leaves in the same month — accountant
+        // needs to re-process the salary period.
+        leaves.forEach(l => {
+          if (l.staff_id === id && l.processed && l.date?.startsWith(monthPrefix)) {
+            batch.update(doc(db, "leaves", l.id), { processed: false });
+          }
         });
       });
       await batch.commit();
@@ -646,8 +682,16 @@ export default function LeavesPage() {
                               <Icon name="close" size={12} /> Reject
                             </button>
                           </>
+                        ) : l.processed ? (
+                          <button onClick={() => handleUnmarkProcessed(l.id)} title="Click to untick (unmark processed)"
+                            style={{ display: "flex", alignItems: "center", gap: 4, padding: "5px 10px", borderRadius: 6, background: "rgba(74,222,128,0.18)", border: "1px solid rgba(74,222,128,0.45)", color: "var(--green)", cursor: "pointer", fontWeight: 700, fontSize: 11 }}>
+                            <Icon name="check" size={12} /> Processed
+                          </button>
                         ) : (
-                          <span style={{ fontSize: 11, color: "var(--text3)", marginRight: 4 }}>Processed</span>
+                          <button onClick={() => handleMarkProcessed(l)} title="Mark as processed"
+                            style={{ display: "flex", alignItems: "center", gap: 4, padding: "5px 10px", borderRadius: 6, background: "var(--bg4)", border: "1px dashed var(--border2)", color: "var(--text2)", cursor: "pointer", fontWeight: 700, fontSize: 11 }}>
+                            <Icon name="check" size={12} /> Tick
+                          </button>
                         )}
                         <IconBtn name="edit" title="Edit record" variant="secondary" onClick={() => setEditLeave({ id: l.id, staff_id: l.staff_id, date: l.date || "", days: l.days || 1, type: l.type || "Leave 1", reason: l.reason || "" })} />
                         {canAction && <IconBtn name="del" title="Delete record" variant="danger" onClick={() => handleDelete(l.id)} />}
