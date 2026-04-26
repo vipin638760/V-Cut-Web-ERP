@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { collection, onSnapshot, query, orderBy, addDoc, doc, writeBatch, deleteDoc, updateDoc, increment } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
@@ -43,6 +43,19 @@ export default function MaterialsPage() {
   // Transfer state
   const [selectedIds, setSelectedIds] = useState([]);
   const [transferModal, setTransferModal] = useState(null); // { branch_id, items }
+  const transferModalRef = useRef(null);
+
+  // When the inline transfer form opens it sits below the Transferred Materials
+  // listing, so users land on the table instead of the form they just asked
+  // for. Pull it into view (smooth) and align to top so the picker + cart are
+  // immediately usable without scrolling.
+  useEffect(() => {
+    if (!transferModal) return;
+    const id = requestAnimationFrame(() => {
+      transferModalRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+    return () => cancelAnimationFrame(id);
+  }, [transferModal]);
   const [rowCountPrompt, setRowCountPrompt] = useState(null); // { count }
   // Full-catalog transfer grid state
   const [catalogRows, setCatalogRows] = useState([]); // [{ material_id, name, unit, price_at_transfer, gst_pct, qty, branch_id, _uid }]
@@ -2241,10 +2254,15 @@ export default function MaterialsPage() {
                 return new Date(yr, (mo || 1) - 1, 1).toLocaleString("en-IN", { month: "long", year: "numeric" });
               })();
               // Keep only branches that had transfers this month so 13 empty cards don't clutter the page.
+              const allocLatestDate = (a) => a.date || (a.transferred_at || "").slice(0, 10) || "";
               const branchesWithData = branches
                 .map(b => ({ b, allocs: allocations.filter(a => a.branch_id === b.id && (a.date || (a.transferred_at || "")).startsWith(materialMonth)) }))
                 .filter(row => row.allocs.length > 0)
-                .sort((x, y) => y.allocs.reduce((s, a) => s + (Number(a.total) || 0), 0) - x.allocs.reduce((s, a) => s + (Number(a.total) || 0), 0));
+                .sort((x, y) => {
+                  const yLatest = y.allocs.reduce((m, a) => { const d = allocLatestDate(a); return d > m ? d : m; }, "");
+                  const xLatest = x.allocs.reduce((m, a) => { const d = allocLatestDate(a); return d > m ? d : m; }, "");
+                  return yLatest.localeCompare(xLatest);
+                });
               const monthGrand = branchesWithData.reduce((s, row) => s + row.allocs.reduce((ss, a) => ss + (Number(a.total) || 0), 0), 0);
               if (branchesWithData.length === 0) {
                 return (
@@ -2544,7 +2562,7 @@ export default function MaterialsPage() {
           openTransferModal / post-import / row-count-prompt all force tab="transfers" so this
           card always appears inside the Transfers tab context. */}
       {transferModal && (
-        <div style={{ margin: "0 0 20px", background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 16, overflow: "hidden" }}>
+        <div ref={transferModalRef} style={{ margin: "0 0 20px", background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 16, overflow: "hidden", scrollMarginTop: 16 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 20px", borderBottom: "1px solid var(--border)", background: "var(--bg3)" }}>
             <div style={{ fontSize: 13, fontWeight: 800, color: "var(--gold)", textTransform: "uppercase", letterSpacing: 1 }}>Transfer Materials to Branch</div>
             <button onClick={() => setTransferModal(null)}
