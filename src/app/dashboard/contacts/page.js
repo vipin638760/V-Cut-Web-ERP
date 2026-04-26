@@ -1,6 +1,6 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
-import { collection, onSnapshot, query, orderBy, addDoc, updateDoc, deleteDoc, doc } from "firebase/firestore";
+import { useEffect, useMemo, useState, useRef } from "react";
+import { collection, onSnapshot, query, orderBy, addDoc, updateDoc, deleteDoc, doc, writeBatch } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
 import { Card, Icon, IconBtn, Modal, useConfirm, useToast } from "@/components/ui";
@@ -11,6 +11,56 @@ const DEFAULT_TAGS = [
   "Vendor", "Service Provider", "Emergency", "Landlord",
   "Legal", "Utility", "Staff", "Other",
 ];
+
+// CSV import/export — the columns the template ships with and that the parser
+// expects. Header order is fixed so users can't break import by reordering.
+const CSV_HEADERS = ["name", "phone", "alt_phone", "email", "company", "tag", "notes"];
+
+const csvEscape = (v) => {
+  const s = (v ?? "").toString();
+  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+};
+
+function buildCSV(rows) {
+  const lines = [CSV_HEADERS.join(",")];
+  rows.forEach(r => lines.push(CSV_HEADERS.map(h => csvEscape(r[h])).join(",")));
+  return lines.join("\r\n");
+}
+
+// Minimal RFC-4180-ish parser: handles quoted fields, escaped quotes, CRLF.
+function parseCSV(text) {
+  const rows = [];
+  let row = [], field = "", inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (text[i + 1] === '"') { field += '"'; i++; }
+        else inQuotes = false;
+      } else field += ch;
+    } else if (ch === '"') inQuotes = true;
+    else if (ch === ",") { row.push(field); field = ""; }
+    else if (ch === "\n" || ch === "\r") {
+      if (ch === "\r" && text[i + 1] === "\n") i++;
+      row.push(field); rows.push(row); row = []; field = "";
+    } else field += ch;
+  }
+  if (field.length > 0 || row.length > 0) { row.push(field); rows.push(row); }
+  return rows.filter(r => r.some(v => v && v.trim() !== ""));
+}
+
+function downloadBlob(filename, body, mime) {
+  const blob = new Blob([body], { type: `${mime};charset=utf-8` });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+}
+
+// Phone is the de-facto unique key — strip everything except digits so
+// "+91 98765-43210" and "9876543210" collide as the same person.
+const normalizePhone = (p) => (p || "").toString().replace(/[^0-9]/g, "");
 
 // vCard 3.0 encoder — pure text so mobile phones recognise the .vcf file and
 // import every card in one go. Escapes commas/semicolons/newlines per RFC 2426.
@@ -56,6 +106,13 @@ export default function ContactsPage() {
   const [editId, setEditId] = useState(null);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ name: "", phone: "", alt_phone: "", email: "", company: "", tag: "", notes: "" });
+
+  const fileInputRef = useRef(null);
+  const [importPreview, setImportPreview] = useState(null); // { rows, errors, fileName } | null
+  const [importing, setImporting] = useState(false);
+  const [dupOpen, setDupOpen] = useState(false);
+  const [dupKeep, setDupKeep] = useState({}); // { groupKey: idToKeep }
+  const [dupRemoving, setDupRemoving] = useState(false);
 
   useEffect(() => {
     if (!db || !canAccess) return;
@@ -186,6 +243,142 @@ export default function ContactsPage() {
     toast({ title: "Downloaded", message: `${filtered.length} contact${filtered.length === 1 ? "" : "s"} exported as .vcf — open on phone to import.`, type: "success" });
   };
 
+  const downloadTemplate = () => {
+    const sample = [
+      { name: "Acme Plumbing", phone: "+91 98765 43210", alt_phone: "", email: "support@acme.example", company: "Acme Pvt Ltd", tag: "Vendor", notes: "Pipe leak guy — bill cycle 30 days" },
+      { name: "", phone: "", alt_phone: "", email: "", company: "", tag: "", notes: "" },
+    ];
+    downloadBlob("vcut_contacts_template.csv", buildCSV(sample), "text/csv");
+    toast({ title: "Template ready", message: "Fill the rows (keep the header row) and upload via Import CSV.", type: "success" });
+  };
+
+  const triggerUpload = () => fileInputRef.current?.click();
+
+  const handleFilePicked = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // allow re-picking same file
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const grid = parseCSV(text);
+      if (grid.length === 0) {
+        toast({ title: "Empty file", message: "No rows found in the CSV.", type: "warning" });
+        return;
+      }
+      const headerRow = grid[0].map(h => h.trim().toLowerCase());
+      const colIdx = Object.fromEntries(CSV_HEADERS.map(h => [h, headerRow.indexOf(h)]));
+      if (colIdx.name === -1 || colIdx.phone === -1) {
+        toast({ title: "Bad header", message: `CSV must include "name" and "phone" columns. Download the template for the right format.`, type: "warning" });
+        return;
+      }
+      const rows = [];
+      const errors = [];
+      const seenPhones = new Set();
+      for (let i = 1; i < grid.length; i++) {
+        const r = grid[i];
+        const get = (k) => (colIdx[k] >= 0 ? (r[colIdx[k]] || "").trim() : "");
+        const name = get("name");
+        const phone = get("phone");
+        if (!name && !phone) continue;
+        if (!name) { errors.push({ line: i + 1, reason: "Missing name" }); continue; }
+        if (!phone) { errors.push({ line: i + 1, reason: "Missing phone" }); continue; }
+        const np = normalizePhone(phone);
+        if (seenPhones.has(np)) { errors.push({ line: i + 1, reason: `Duplicate phone in file (${phone})` }); continue; }
+        seenPhones.add(np);
+        rows.push({
+          name, phone,
+          alt_phone: get("alt_phone"),
+          email: get("email"),
+          company: get("company"),
+          tag: get("tag"),
+          notes: get("notes"),
+        });
+      }
+      setImportPreview({ rows, errors, fileName: file.name });
+    } catch (err) {
+      toast({ title: "Read failed", message: err.message, type: "danger" });
+    }
+  };
+
+  const confirmImport = async () => {
+    if (!importPreview || importPreview.rows.length === 0) return;
+    setImporting(true);
+    try {
+      // Firestore batches cap at 500 writes; chunk to be safe for big imports.
+      const chunks = [];
+      for (let i = 0; i < importPreview.rows.length; i += 400) chunks.push(importPreview.rows.slice(i, i + 400));
+      const stamp = new Date().toISOString();
+      const author = currentUser?.name || "user";
+      for (const chunk of chunks) {
+        const batch = writeBatch(db);
+        chunk.forEach(r => {
+          const ref = doc(collection(db, "contacts"));
+          batch.set(ref, { ...r, created_at: stamp, created_by: author });
+        });
+        await batch.commit();
+      }
+      toast({ title: "Imported", message: `${importPreview.rows.length} contact${importPreview.rows.length === 1 ? "" : "s"} added.`, type: "success" });
+      setImportPreview(null);
+    } catch (err) {
+      confirm({ title: "Import failed", message: err.message, confirmText: "OK", type: "danger", onConfirm: () => {} });
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  // Group contacts by normalised phone; any group with 2+ entries is a duplicate set.
+  const duplicateGroups = useMemo(() => {
+    const map = new Map();
+    contacts.forEach(c => {
+      const k = normalizePhone(c.phone);
+      if (!k) return;
+      if (!map.has(k)) map.set(k, []);
+      map.get(k).push(c);
+    });
+    return [...map.entries()]
+      .filter(([, list]) => list.length >= 2)
+      .map(([k, list]) => ({
+        key: k,
+        list: [...list].sort((a, b) => (a.created_at || "").localeCompare(b.created_at || "")),
+      }));
+  }, [contacts]);
+
+  const openDuplicates = () => {
+    // Default: keep the oldest (first) record in each group.
+    const seed = {};
+    duplicateGroups.forEach(g => { seed[g.key] = g.list[0]?.id; });
+    setDupKeep(seed);
+    setDupOpen(true);
+  };
+
+  const removeDuplicates = async () => {
+    const toDelete = [];
+    duplicateGroups.forEach(g => {
+      const keepId = dupKeep[g.key];
+      g.list.forEach(c => { if (c.id !== keepId) toDelete.push(c.id); });
+    });
+    if (toDelete.length === 0) {
+      toast({ title: "Nothing to remove", message: "Pick which record to keep in each group.", type: "warning" });
+      return;
+    }
+    setDupRemoving(true);
+    try {
+      const chunks = [];
+      for (let i = 0; i < toDelete.length; i += 400) chunks.push(toDelete.slice(i, i + 400));
+      for (const chunk of chunks) {
+        const batch = writeBatch(db);
+        chunk.forEach(id => batch.delete(doc(db, "contacts", id)));
+        await batch.commit();
+      }
+      toast({ title: "Removed", message: `${toDelete.length} duplicate${toDelete.length === 1 ? "" : "s"} deleted.`, type: "success" });
+      setDupOpen(false);
+    } catch (err) {
+      confirm({ title: "Delete failed", message: err.message, confirmText: "OK", type: "danger", onConfirm: () => {} });
+    } finally {
+      setDupRemoving(false);
+    }
+  };
+
   if (!canAccess) {
     return (
       <Card style={{ padding: 40, textAlign: "center" }}>
@@ -213,6 +406,22 @@ export default function ContactsPage() {
           </div>
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button onClick={downloadTemplate}
+            title="Download a CSV template you can fill and re-upload"
+            style={{ padding: "10px 14px", borderRadius: 10, background: "var(--bg3)", border: "1px solid var(--border2)", color: "var(--text2)", fontWeight: 800, fontSize: 11, cursor: "pointer", textTransform: "uppercase", letterSpacing: 0.5, display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <Icon name="save" size={12} /> Template
+          </button>
+          <button onClick={triggerUpload}
+            title="Bulk-import contacts from a filled CSV"
+            style={{ padding: "10px 14px", borderRadius: 10, background: "var(--bg3)", border: "1px solid rgba(96,165,250,0.4)", color: "var(--blue, #60a5fa)", fontWeight: 800, fontSize: 11, cursor: "pointer", textTransform: "uppercase", letterSpacing: 0.5, display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <Icon name="edit" size={12} /> Import CSV
+          </button>
+          <input ref={fileInputRef} type="file" accept=".csv,text/csv" style={{ display: "none" }} onChange={handleFilePicked} />
+          <button onClick={openDuplicates} disabled={duplicateGroups.length === 0}
+            title={duplicateGroups.length === 0 ? "No duplicates detected" : `Review ${duplicateGroups.length} duplicate group${duplicateGroups.length === 1 ? "" : "s"}`}
+            style={{ padding: "10px 14px", borderRadius: 10, background: duplicateGroups.length === 0 ? "var(--bg4)" : "var(--bg3)", border: `1px solid ${duplicateGroups.length === 0 ? "var(--border)" : "rgba(248,113,113,0.4)"}`, color: duplicateGroups.length === 0 ? "var(--text3)" : "var(--red)", fontWeight: 800, fontSize: 11, cursor: duplicateGroups.length === 0 ? "not-allowed" : "pointer", textTransform: "uppercase", letterSpacing: 0.5, display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <Icon name="del" size={12} /> Duplicates {duplicateGroups.length > 0 ? `(${duplicateGroups.length})` : ""}
+          </button>
           <button onClick={downloadAll} disabled={filtered.length === 0}
             title={filtered.length === 0 ? "No contacts to export" : `Export ${filtered.length} contact${filtered.length === 1 ? "" : "s"} as .vcf (import into your phone)`}
             style={{ padding: "10px 16px", borderRadius: 10, background: filtered.length === 0 ? "var(--bg4)" : "var(--bg3)", border: `1px solid ${filtered.length === 0 ? "var(--border)" : "rgba(74,222,128,0.4)"}`, color: filtered.length === 0 ? "var(--text3)" : "var(--green)", fontWeight: 800, fontSize: 11, cursor: filtered.length === 0 ? "not-allowed" : "pointer", textTransform: "uppercase", letterSpacing: 0.5, display: "inline-flex", alignItems: "center", gap: 6 }}>
@@ -367,6 +576,124 @@ export default function ContactsPage() {
               {editId ? "Save Changes" : "Add Contact"}
             </button>
           </div>
+        </div>
+      </Modal>
+
+      {/* CSV Import Preview */}
+      <Modal isOpen={!!importPreview} onClose={() => !importing && setImportPreview(null)} title="Review Import" width={620}>
+        <div style={{ padding: 20 }}>
+          {importPreview && (
+            <>
+              <div style={{ fontSize: 12, color: "var(--text2)", marginBottom: 10 }}>
+                <strong style={{ color: "var(--text)" }}>{importPreview.fileName}</strong> · {importPreview.rows.length} ready · {importPreview.errors.length} skipped
+              </div>
+              {importPreview.errors.length > 0 && (
+                <div style={{ marginBottom: 12, padding: 10, borderRadius: 8, background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.3)", maxHeight: 120, overflowY: "auto" }}>
+                  <div style={{ fontSize: 10, fontWeight: 800, color: "var(--red)", textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 }}>Skipped rows</div>
+                  {importPreview.errors.map((er, i) => (
+                    <div key={i} style={{ fontSize: 11, color: "var(--text2)" }}>Line {er.line}: {er.reason}</div>
+                  ))}
+                </div>
+              )}
+              {importPreview.rows.length > 0 ? (
+                <div style={{ maxHeight: 280, overflowY: "auto", border: "1px solid var(--border2)", borderRadius: 8 }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}>
+                    <thead>
+                      <tr style={{ background: "var(--bg4)" }}>
+                        {["Name", "Phone", "Company", "Tag"].map(h => (
+                          <th key={h} style={{ padding: "8px 10px", textAlign: "left", fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 0.8, fontSize: 10, borderBottom: "1px solid var(--border2)" }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {importPreview.rows.slice(0, 50).map((r, i) => (
+                        <tr key={i} style={{ borderBottom: "1px solid var(--border2)" }}>
+                          <td style={{ padding: "6px 10px", color: "var(--text)", fontWeight: 600 }}>{r.name}</td>
+                          <td style={{ padding: "6px 10px", color: "var(--text2)" }}>{r.phone}</td>
+                          <td style={{ padding: "6px 10px", color: "var(--text3)" }}>{r.company}</td>
+                          <td style={{ padding: "6px 10px", color: "var(--text3)" }}>{r.tag}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {importPreview.rows.length > 50 && (
+                    <div style={{ padding: "8px 10px", fontSize: 11, color: "var(--text3)", textAlign: "center", background: "var(--bg4)" }}>
+                      … +{importPreview.rows.length - 50} more rows
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div style={{ padding: 20, textAlign: "center", color: "var(--text3)", fontSize: 12 }}>No valid rows to import.</div>
+              )}
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 16 }}>
+                <button onClick={() => setImportPreview(null)} disabled={importing}
+                  style={{ padding: "10px 18px", borderRadius: 10, background: "var(--bg4)", color: "var(--text2)", border: "1px solid var(--border2)", fontWeight: 600, fontSize: 12, cursor: importing ? "not-allowed" : "pointer" }}>Cancel</button>
+                <button onClick={confirmImport} disabled={importing || importPreview.rows.length === 0}
+                  style={{ padding: "10px 22px", borderRadius: 10, background: importPreview.rows.length === 0 ? "var(--bg4)" : "linear-gradient(135deg,var(--accent),var(--gold2))", color: importPreview.rows.length === 0 ? "var(--text3)" : "#000", border: "none", fontWeight: 800, fontSize: 12, cursor: importing || importPreview.rows.length === 0 ? "not-allowed" : "pointer", textTransform: "uppercase", letterSpacing: 0.5 }}>
+                  {importing ? "Importing…" : `Import ${importPreview.rows.length}`}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      </Modal>
+
+      {/* Duplicate review */}
+      <Modal isOpen={dupOpen} onClose={() => !dupRemoving && setDupOpen(false)} title={`Duplicates (${duplicateGroups.length} group${duplicateGroups.length === 1 ? "" : "s"})`} width={680}>
+        <div style={{ padding: 20 }}>
+          {duplicateGroups.length === 0 ? (
+            <div style={{ padding: 20, textAlign: "center", color: "var(--text3)", fontSize: 13 }}>No duplicates detected.</div>
+          ) : (
+            <>
+              <div style={{ fontSize: 12, color: "var(--text2)", marginBottom: 12, lineHeight: 1.5 }}>
+                Records sharing the same phone number. Pick which one to <strong style={{ color: "var(--green)" }}>keep</strong> in each group; the others will be deleted.
+              </div>
+              <div style={{ maxHeight: 380, overflowY: "auto", display: "flex", flexDirection: "column", gap: 12 }}>
+                {duplicateGroups.map(g => (
+                  <div key={g.key} style={{ border: "1px solid rgba(248,113,113,0.3)", borderRadius: 10, padding: 10, background: "rgba(248,113,113,0.04)" }}>
+                    <div style={{ fontSize: 10, fontWeight: 800, color: "var(--red)", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 }}>
+                      Phone {g.list[0].phone} · {g.list.length} records
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      {g.list.map(c => {
+                        const keep = dupKeep[g.key] === c.id;
+                        return (
+                          <label key={c.id} style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: 8, borderRadius: 8, background: keep ? "rgba(74,222,128,0.08)" : "var(--bg3)", border: `1px solid ${keep ? "rgba(74,222,128,0.4)" : "var(--border2)"}`, cursor: "pointer" }}>
+                            <input type="radio" name={`keep-${g.key}`} checked={keep}
+                              onChange={() => setDupKeep(s => ({ ...s, [g.key]: c.id }))}
+                              style={{ marginTop: 3, accentColor: "var(--green)" }} />
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text)" }}>{c.name}</div>
+                              <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 2 }}>
+                                {[c.company, c.tag, c.email].filter(Boolean).join(" · ") || <em style={{ opacity: 0.6 }}>no extra info</em>}
+                              </div>
+                              <div style={{ fontSize: 10, color: "var(--text3)", marginTop: 3 }}>
+                                Added {c.created_at ? new Date(c.created_at).toLocaleString() : "—"}{c.created_by ? ` · ${c.created_by}` : ""}
+                              </div>
+                            </div>
+                            {keep && <span style={{ fontSize: 10, fontWeight: 800, color: "var(--green)", textTransform: "uppercase", letterSpacing: 0.5 }}>Keep</span>}
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 16, gap: 10 }}>
+                <div style={{ fontSize: 11, color: "var(--text3)" }}>
+                  Will delete <strong style={{ color: "var(--red)" }}>{duplicateGroups.reduce((n, g) => n + g.list.filter(c => c.id !== dupKeep[g.key]).length, 0)}</strong> record(s)
+                </div>
+                <div style={{ display: "flex", gap: 10 }}>
+                  <button onClick={() => setDupOpen(false)} disabled={dupRemoving}
+                    style={{ padding: "10px 18px", borderRadius: 10, background: "var(--bg4)", color: "var(--text2)", border: "1px solid var(--border2)", fontWeight: 600, fontSize: 12, cursor: dupRemoving ? "not-allowed" : "pointer" }}>Cancel</button>
+                  <button onClick={removeDuplicates} disabled={dupRemoving}
+                    style={{ padding: "10px 22px", borderRadius: 10, background: "linear-gradient(135deg,#ef4444,#b91c1c)", color: "#fff", border: "none", fontWeight: 800, fontSize: 12, cursor: dupRemoving ? "not-allowed" : "pointer", textTransform: "uppercase", letterSpacing: 0.5 }}>
+                    {dupRemoving ? "Removing…" : "Remove Duplicates"}
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
         </div>
       </Modal>
 
