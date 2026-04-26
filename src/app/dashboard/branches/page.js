@@ -802,14 +802,6 @@ export default function BranchesPage() {
           return 10;
         };
 
-        const getDailyExp = async (date) => {
-          try {
-            const q = query(collection(db, "daily_expenses"), where("branch_id", "==", branchId), where("date", "==", date));
-            const sn = await getDocs(q);
-            return sn.docs.reduce((s, d) => s + (Number(d.data().amount) || 0), 0);
-          } catch { return 0; }
-        };
-
         const getMatExp = (date) => {
           return materialAllocations
             .filter(a => a.branch_id === branchId && a.date === date)
@@ -872,12 +864,13 @@ export default function BranchesPage() {
             details.push(`material: ${INR(Number(entry.mat_expense) || 0)} → ${INR(matExp)}`);
           }
 
-          const dailyExp = await getDailyExp(entry.date);
-          if (dailyExp > 0 && dailyExp !== (Number(entry.others) || 0)) {
-            changes.others = dailyExp;
-            changed = true;
-            details.push(`expenses: ${INR(Number(entry.others) || 0)} → ${INR(dailyExp)}`);
-          }
+          // Intentionally NO sync from daily_expenses into entry.others.
+          // entry.others = Other Expenses paid out of branch cash on the day.
+          // daily_expenses = HO-paid operational expenses, tracked centrally.
+          // Older versions copied daily_expenses → entry.others which double-counted
+          // the same money in P&L (variable cost + branch cash deduction). The
+          // Daily Expenses card on the form is informational only; its total flows
+          // through Operational Expenses, not through entry.others.
 
           // Recompute cash-in-hand against the canonical form formula.
           // Mirrors computeCashInHand in lib/calculations.js; kept inline
