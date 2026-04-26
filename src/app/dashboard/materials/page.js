@@ -2207,6 +2207,253 @@ export default function MaterialsPage() {
             </div>
             {/* End legacy catalog UI (dead branch — never renders). */}
 
+            {/* Transfer form — rendered above the listing so when openTransferModal
+                fires the user lands on the picker + cart, not on the historical
+                allocations table. (Form is conditional, so when closed the table
+                takes the top slot as usual.) */}
+            {transferModal && (
+              <div ref={transferModalRef} style={{ margin: "0 0 20px", background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 16, overflow: "hidden", scrollMarginTop: 16 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 20px", borderBottom: "1px solid var(--border)", background: "var(--bg3)" }}>
+                  <div style={{ fontSize: 13, fontWeight: 800, color: "var(--gold)", textTransform: "uppercase", letterSpacing: 1 }}>Transfer Materials to Branch</div>
+                  <button onClick={() => setTransferModal(null)}
+                    style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 12px", borderRadius: 8, background: "var(--bg4)", border: "1px solid var(--border2)", color: "var(--text2)", fontSize: 11, fontWeight: 700, cursor: "pointer", textTransform: "uppercase", letterSpacing: 0.5 }}>
+                    ✕ Close
+                  </button>
+                </div>
+                <div style={{ padding: 20 }}>
+                  {(() => {
+                const cartIds = new Set(transferModal.items.map(i => i.material_id).filter(Boolean));
+                const q = (pickerSearch || "").trim().toLowerCase();
+                const catalog = materials
+                  .filter(m => !m.archived)
+                  .map(m => {
+                    const stock = purchasedFor(m.id) - (transferredQtyByMaterial[m.id] || 0);
+                    return { m, stock };
+                  })
+                  .filter(({ m }) => !q || (m.name || "").toLowerCase().includes(q) || (m.group || "").toLowerCase().includes(q))
+                  .sort((a, b) => (a.m.name || "").localeCompare(b.m.name || ""))
+                  .slice(0, 120);
+
+                const subtotal = transferModal.items.reduce((s, i) => s + (Number(i.qty) || 0) * (Number(i.price_at_transfer) || 0), 0);
+                const opsPct = Math.max(0, Number(transferModal.operation_cost_pct) || 0);
+                const operationCost = Math.round(subtotal * opsPct / 100);
+                const total = subtotal + operationCost;
+
+                const addToCart = (m) => {
+                  const stock = purchasedFor(m.id) - (transferredQtyByMaterial[m.id] || 0);
+                  if (stock <= 0) return;
+                  setTransferModal(t => {
+                    const existingIdx = t.items.findIndex(i => i.material_id === m.id);
+                    if (existingIdx >= 0) {
+                      return { ...t, items: t.items.map((x, idx) => idx === existingIdx ? { ...x, qty: Math.min(stock, (Number(x.qty) || 0) + 1) } : x) };
+                    }
+                    return { ...t, items: [...t.items, { material_id: m.id, name: m.name, unit: m.unit || "pcs", qty: 1, price_at_transfer: m.current_price || 0 }] };
+                  });
+                  setPickerSearch("");
+                };
+                const updateItem = (idx, patch) => setTransferModal(t => ({ ...t, items: t.items.map((x, i) => i === idx ? { ...x, ...patch } : x) }));
+                const removeItem = (idx) => setTransferModal(t => ({ ...t, items: t.items.filter((_, i) => i !== idx) }));
+
+                const hasBranch = !!transferModal.branch_id;
+                const hasDate = !!transferModal.date;
+                const hasItems = transferModal.items.some(i => i.material_id && Number(i.qty) > 0);
+                const canConfirm = hasBranch && hasDate && hasItems;
+                const blockReason = !hasBranch ? "Pick a destination branch"
+                  : !hasDate ? "Set the transfer date"
+                  : !hasItems ? "Add at least one material with qty > 0"
+                  : null;
+
+                return (
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }}>
+                    <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 12 }}>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                        <label style={{ fontSize: 11, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Destination Branch <span style={{ color: "var(--red)" }}>*</span></label>
+                        <BranchSelect
+                          value={transferModal.branch_id}
+                          onChange={(v) => setTransferModal(t => ({ ...t, branch_id: v }))}
+                          branches={branches}
+                          placeholder="Select branch..."
+                          minWidth={0}
+                        />
+                      </div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                        <label style={{ fontSize: 11, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Transfer Date</label>
+                        <input type="date" value={transferModal.date || ""} onChange={e => setTransferModal(t => ({ ...t, date: e.target.value }))}
+                          style={{ padding: "10px 14px", borderRadius: 10, background: "var(--bg3)", border: "1px solid var(--border2)", color: "var(--text)", fontSize: 13, outline: "none" }} />
+                      </div>
+                    </div>
+
+                    <div style={{ display: "grid", gridTemplateColumns: "1.3fr 1fr", gap: 14, alignItems: "start" }}>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 10, minWidth: 0 }}>
+                        <input
+                          autoFocus
+                          value={pickerSearch}
+                          onChange={e => setPickerSearch(e.target.value)}
+                          placeholder="Search material master…"
+                          style={{ padding: "10px 14px", borderRadius: 10, background: "var(--bg3)", border: "1px solid var(--border2)", color: "var(--text)", fontSize: 13, outline: "none" }}
+                        />
+                        <div style={{ border: "1px solid var(--border)", borderRadius: 10, padding: 8, maxHeight: 460, overflowY: "auto", background: "var(--bg3)" }}>
+                          {catalog.length === 0 ? (
+                            <div style={{ padding: 24, textAlign: "center", color: "var(--text3)", fontSize: 12 }}>
+                              {q ? <>No materials match <strong style={{ color: "var(--text2)" }}>{pickerSearch}</strong>.</> : "No materials in master yet."}
+                            </div>
+                          ) : (
+                            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 8 }}>
+                              {catalog.map(({ m, stock }) => {
+                                const outOfStock = stock <= 0;
+                                const inCart = cartIds.has(m.id);
+                                return (
+                                  <button key={m.id} type="button" disabled={outOfStock}
+                                    onClick={() => addToCart(m)}
+                                    title={outOfStock ? "No stock available" : inCart ? "Already in cart — click to add one more" : "Add to transfer"}
+                                    style={{
+                                      textAlign: "left", padding: 10, borderRadius: 10,
+                                      background: outOfStock ? "rgba(248,113,113,0.06)" : inCart ? "rgba(74,222,128,0.10)" : "var(--bg4)",
+                                      border: outOfStock ? "1px solid rgba(248,113,113,0.35)" : inCart ? "1px solid rgba(74,222,128,0.4)" : "1px solid var(--border2)",
+                                      color: "var(--text)",
+                                      cursor: outOfStock ? "not-allowed" : "pointer",
+                                      opacity: outOfStock ? 0.65 : 1,
+                                      display: "flex", flexDirection: "column", gap: 4, minWidth: 0,
+                                      transition: "transform .1s, border-color .15s",
+                                    }}
+                                    onMouseEnter={e => { if (!outOfStock) e.currentTarget.style.transform = "translateY(-1px)"; }}
+                                    onMouseLeave={e => { e.currentTarget.style.transform = "none"; }}>
+                                    <div style={{ fontWeight: 700, fontSize: 12, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{m.name}</div>
+                                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "var(--text3)" }}>
+                                      <span>{m.group || "—"}</span>
+                                      <span>{m.unit || "pcs"}</span>
+                                    </div>
+                                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 2 }}>
+                                      <span style={{ fontSize: 11, fontWeight: 800, color: outOfStock ? "var(--red)" : stock < 5 ? "var(--orange)" : "var(--green)" }}>
+                                        {outOfStock ? "OUT OF STOCK" : `${stock} in stock`}
+                                      </span>
+                                      <span style={{ fontSize: 12, fontWeight: 800, color: "var(--accent)" }}>{INR(m.current_price || 0)}</span>
+                                    </div>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                        <div style={{ fontSize: 10, color: "var(--text3)" }}>
+                          {catalog.length} shown · click a card to add to transfer · low-stock cards are orange, out-of-stock are red and disabled.
+                        </div>
+                      </div>
+
+                      <div style={{ display: "flex", flexDirection: "column", gap: 10, minWidth: 0 }}>
+                        <div style={{ fontSize: 11, color: "var(--text3)", fontWeight: 800, textTransform: "uppercase", letterSpacing: 1 }}>Cart · {transferModal.items.filter(i => i.material_id).length} item{transferModal.items.filter(i => i.material_id).length === 1 ? "" : "s"}</div>
+                        <div style={{ border: "1px solid var(--border)", borderRadius: 10, maxHeight: 360, overflowY: "auto", background: "var(--bg3)" }}>
+                          {transferModal.items.filter(i => i.material_id).length === 0 ? (
+                            <div style={{ padding: 28, textAlign: "center", color: "var(--text3)", fontSize: 12 }}>
+                              Cart is empty. Pick materials from the left to add.
+                            </div>
+                          ) : (
+                            <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
+                              <thead style={{ position: "sticky", top: 0, background: "var(--bg4)", zIndex: 1 }}>
+                                <tr><TH>Material</TH><TH right>Qty</TH><TH right>Price</TH><TH right>Line</TH><TH></TH></tr>
+                              </thead>
+                              <tbody>
+                                {transferModal.items.map((it, idx) => {
+                                  if (!it.material_id) return null;
+                                  const stock = purchasedFor(it.material_id) - (transferredQtyByMaterial[it.material_id] || 0);
+                                  const lineTotal = (Number(it.qty) || 0) * (Number(it.price_at_transfer) || 0);
+                                  const overStock = Number(it.qty) > stock;
+                                  return (
+                                    <tr key={it.material_id}>
+                                      <TD>
+                                        <div style={{ fontWeight: 700 }}>{it.name}</div>
+                                        <div style={{ fontSize: 10, color: overStock ? "var(--red)" : "var(--text3)" }}>
+                                          {overStock ? `Only ${stock} in stock` : `${stock} avail · ${it.unit || "pcs"}`}
+                                        </div>
+                                      </TD>
+                                      <TD right>
+                                        <input type="number" min="0" step="1" max={stock} value={it.qty}
+                                          onChange={e => updateItem(idx, { qty: Math.max(0, Math.min(stock, Number(e.target.value) || 0)) })}
+                                          style={{ padding: "4px 8px", borderRadius: 6, background: "var(--bg2)", border: `1px solid ${overStock ? "rgba(248,113,113,0.6)" : "var(--border2)"}`, color: "var(--text)", fontSize: 12, width: 64, textAlign: "right", outline: "none" }} />
+                                      </TD>
+                                      <TD right style={{ color: "var(--text3)" }}>{INR(it.price_at_transfer)}</TD>
+                                      <TD right style={{ fontWeight: 800, color: "var(--green)" }}>{INR(lineTotal)}</TD>
+                                      <TD>
+                                        <button onClick={() => removeItem(idx)} title="Remove"
+                                          style={{ padding: "2px 6px", borderRadius: 4, background: "var(--red-bg)", color: "var(--red)", border: "1px solid rgba(248,113,113,0.3)", cursor: "pointer", fontSize: 11, fontWeight: 800 }}>×</button>
+                                      </TD>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          )}
+                        </div>
+
+                        <div style={{ padding: 12, borderRadius: 10, background: "var(--bg3)", border: "1px solid var(--border2)" }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                            <label style={{ fontSize: 11, color: "var(--text3)", fontWeight: 800, textTransform: "uppercase", letterSpacing: 1 }}>Operation Cost %</label>
+                            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                              <input type="number" min="0" max="100" step="0.5"
+                                value={transferModal.operation_cost_pct}
+                                onChange={e => setTransferModal(t => ({ ...t, operation_cost_pct: Math.max(0, Number(e.target.value) || 0) }))}
+                                style={{ padding: "4px 8px", borderRadius: 6, background: "var(--bg4)", border: "1px solid var(--border2)", color: "var(--accent)", fontSize: 13, width: 60, textAlign: "right", outline: "none", fontWeight: 800 }} />
+                              <span style={{ fontSize: 12, color: "var(--text3)", fontWeight: 700 }}>%</span>
+                            </div>
+                          </div>
+                          <div style={{ fontSize: 10, color: "var(--text3)", lineHeight: 1.4 }}>
+                            Markup on subtotal to recover delivery & handling. Charged to the branch's daily entry along with the material cost.
+                          </div>
+                        </div>
+
+                        <div style={{ padding: 12, borderRadius: 10, background: "var(--bg4)", border: "1px solid var(--border)", display: "flex", flexDirection: "column", gap: 6 }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "var(--text3)" }}>
+                            <span>Subtotal</span><span style={{ fontWeight: 700, color: "var(--text2)" }}>{INR(subtotal)}</span>
+                          </div>
+                          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "var(--text3)" }}>
+                            <span>Operation Cost ({opsPct}%)</span><span style={{ fontWeight: 700, color: "var(--orange)" }}>{INR(operationCost)}</span>
+                          </div>
+                          <div style={{ borderTop: "1px dashed var(--border2)", margin: "4px 0" }} />
+                          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14 }}>
+                            <span style={{ color: "var(--text2)", fontWeight: 800 }}>GRAND TOTAL</span>
+                            <span style={{ color: "var(--accent)", fontWeight: 900, fontSize: 18, fontFamily: "var(--font-headline, var(--font-outfit))" }}>{INR(total)}</span>
+                          </div>
+                        </div>
+
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", borderRadius: 8, background: "rgba(74,222,128,0.08)", border: "1px solid rgba(74,222,128,0.25)", fontSize: 10, color: "var(--green)" }}>
+                          <input type="checkbox" checked={!!transferModal.auto_entry_update} onChange={e => setTransferModal(t => ({ ...t, auto_entry_update: e.target.checked }))} />
+                          <span>Auto-add ₹{total.toLocaleString("en-IN")} to the branch's daily entry on this date</span>
+                        </div>
+
+                        <input value={transferModal.note} onChange={e => setTransferModal(t => ({ ...t, note: e.target.value }))}
+                          placeholder="Note (optional)"
+                          style={{ padding: "8px 12px", borderRadius: 8, background: "var(--bg3)", border: "1px solid var(--border2)", color: "var(--text)", fontSize: 12, outline: "none" }} />
+                      </div>
+                    </div>
+
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, borderTop: "1px solid var(--border)", paddingTop: 12, flexWrap: "wrap" }}>
+                      <button onClick={() => openTransferSlip({ autoPrint: false })} disabled={!canConfirm}
+                        title={blockReason || "Open printable transfer slip"}
+                        style={{ padding: "10px 18px", borderRadius: 10, background: "var(--bg4)", color: canConfirm ? "var(--accent)" : "var(--text3)", border: "1px solid var(--border2)", fontWeight: 700, fontSize: 12, cursor: canConfirm ? "pointer" : "not-allowed", display: "inline-flex", alignItems: "center", gap: 6 }}>
+                        <Icon name="save" size={13} /> Preview / Print Slip
+                      </button>
+                      <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                        {blockReason && (
+                          <span style={{ fontSize: 10.5, fontWeight: 700, color: "var(--red)", background: "rgba(248,113,113,0.12)", border: "1px solid rgba(248,113,113,0.3)", padding: "4px 10px", borderRadius: 6 }}>
+                            ⚠ {blockReason}
+                          </span>
+                        )}
+                        <button onClick={() => setTransferModal(null)}
+                          style={{ padding: "10px 18px", borderRadius: 10, background: "var(--bg4)", color: "var(--text2)", border: "1px solid var(--border2)", fontWeight: 600, fontSize: 12, cursor: "pointer" }}>Cancel</button>
+                        <button onClick={commitTransfer} disabled={!canConfirm}
+                          title={blockReason || "Save this transfer"}
+                          style={{ padding: "10px 22px", borderRadius: 10, background: canConfirm ? "linear-gradient(135deg,var(--accent),var(--gold2))" : "var(--bg4)", color: canConfirm ? "#000" : "var(--text3)", border: "none", fontWeight: 800, fontSize: 12, cursor: canConfirm ? "pointer" : "not-allowed", opacity: canConfirm ? 1 : 0.6 }}>
+                          Confirm Transfer
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+                  })()}
+                </div>
+              </div>
+            )}
+
             {/* Branch-wise history with date-wise material rollup */}
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 10 }}>
               <div style={{ fontSize: 13, fontWeight: 800, color: "var(--gold)", textTransform: "uppercase", letterSpacing: 1 }}>
@@ -2546,263 +2793,6 @@ export default function MaterialsPage() {
         )}
       </Modal>
 
-      {/* Transfer form — rendered inline (not as an overlay) so it feels like a normal form.
-          openTransferModal / post-import / row-count-prompt all force tab="transfers" so this
-          card always appears inside the Transfers tab context. */}
-      {transferModal && (
-        <div ref={transferModalRef} style={{ margin: "0 0 20px", background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 16, overflow: "hidden", scrollMarginTop: 16 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 20px", borderBottom: "1px solid var(--border)", background: "var(--bg3)" }}>
-            <div style={{ fontSize: 13, fontWeight: 800, color: "var(--gold)", textTransform: "uppercase", letterSpacing: 1 }}>Transfer Materials to Branch</div>
-            <button onClick={() => setTransferModal(null)}
-              style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 12px", borderRadius: 8, background: "var(--bg4)", border: "1px solid var(--border2)", color: "var(--text2)", fontSize: 11, fontWeight: 700, cursor: "pointer", textTransform: "uppercase", letterSpacing: 0.5 }}>
-              ✕ Close
-            </button>
-          </div>
-          <div style={{ padding: 20 }}>
-            {(() => {
-          const cartIds = new Set(transferModal.items.map(i => i.material_id).filter(Boolean));
-          const q = (pickerSearch || "").trim().toLowerCase();
-          // Catalog shown in the left panel: un-archived master records, filtered
-          // by the search term. Stock = total purchased − total transferred so far.
-          const catalog = materials
-            .filter(m => !m.archived)
-            .map(m => {
-              const stock = purchasedFor(m.id) - (transferredQtyByMaterial[m.id] || 0);
-              return { m, stock };
-            })
-            .filter(({ m }) => !q || (m.name || "").toLowerCase().includes(q) || (m.group || "").toLowerCase().includes(q))
-            .sort((a, b) => (a.m.name || "").localeCompare(b.m.name || ""))
-            .slice(0, 120);
-
-          const subtotal = transferModal.items.reduce((s, i) => s + (Number(i.qty) || 0) * (Number(i.price_at_transfer) || 0), 0);
-          const opsPct = Math.max(0, Number(transferModal.operation_cost_pct) || 0);
-          const operationCost = Math.round(subtotal * opsPct / 100);
-          const total = subtotal + operationCost;
-
-          const addToCart = (m) => {
-            const stock = purchasedFor(m.id) - (transferredQtyByMaterial[m.id] || 0);
-            if (stock <= 0) return;
-            setTransferModal(t => {
-              const existingIdx = t.items.findIndex(i => i.material_id === m.id);
-              if (existingIdx >= 0) {
-                return { ...t, items: t.items.map((x, idx) => idx === existingIdx ? { ...x, qty: Math.min(stock, (Number(x.qty) || 0) + 1) } : x) };
-              }
-              return { ...t, items: [...t.items, { material_id: m.id, name: m.name, unit: m.unit || "pcs", qty: 1, price_at_transfer: m.current_price || 0 }] };
-            });
-            setPickerSearch("");
-          };
-          const updateItem = (idx, patch) => setTransferModal(t => ({ ...t, items: t.items.map((x, i) => i === idx ? { ...x, ...patch } : x) }));
-          const removeItem = (idx) => setTransferModal(t => ({ ...t, items: t.items.filter((_, i) => i !== idx) }));
-
-          const hasBranch = !!transferModal.branch_id;
-          const hasDate = !!transferModal.date;
-          const hasItems = transferModal.items.some(i => i.material_id && Number(i.qty) > 0);
-          const canConfirm = hasBranch && hasDate && hasItems;
-          const blockReason = !hasBranch ? "Pick a destination branch"
-            : !hasDate ? "Set the transfer date"
-            : !hasItems ? "Add at least one material with qty > 0"
-            : null;
-
-          return (
-            <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }}>
-              {/* Header: branch + date */}
-              <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 12 }}>
-                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                  <label style={{ fontSize: 11, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Destination Branch <span style={{ color: "var(--red)" }}>*</span></label>
-                  <BranchSelect
-                    value={transferModal.branch_id}
-                    onChange={(v) => setTransferModal(t => ({ ...t, branch_id: v }))}
-                    branches={branches}
-                    placeholder="Select branch..."
-                    minWidth={0}
-                  />
-                </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                  <label style={{ fontSize: 11, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Transfer Date</label>
-                  <input type="date" value={transferModal.date || ""} onChange={e => setTransferModal(t => ({ ...t, date: e.target.value }))}
-                    style={{ padding: "10px 14px", borderRadius: 10, background: "var(--bg3)", border: "1px solid var(--border2)", color: "var(--text)", fontSize: 13, outline: "none" }} />
-                </div>
-              </div>
-
-              {/* Two-pane body: catalog picker + cart */}
-              <div style={{ display: "grid", gridTemplateColumns: "1.3fr 1fr", gap: 14, alignItems: "start" }}>
-                {/* LEFT — catalog */}
-                <div style={{ display: "flex", flexDirection: "column", gap: 10, minWidth: 0 }}>
-                  <input
-                    autoFocus
-                    value={pickerSearch}
-                    onChange={e => setPickerSearch(e.target.value)}
-                    placeholder="Search material master…"
-                    style={{ padding: "10px 14px", borderRadius: 10, background: "var(--bg3)", border: "1px solid var(--border2)", color: "var(--text)", fontSize: 13, outline: "none" }}
-                  />
-                  <div style={{ border: "1px solid var(--border)", borderRadius: 10, padding: 8, maxHeight: 460, overflowY: "auto", background: "var(--bg3)" }}>
-                    {catalog.length === 0 ? (
-                      <div style={{ padding: 24, textAlign: "center", color: "var(--text3)", fontSize: 12 }}>
-                        {q ? <>No materials match <strong style={{ color: "var(--text2)" }}>{pickerSearch}</strong>.</> : "No materials in master yet."}
-                      </div>
-                    ) : (
-                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 8 }}>
-                        {catalog.map(({ m, stock }) => {
-                          const outOfStock = stock <= 0;
-                          const inCart = cartIds.has(m.id);
-                          return (
-                            <button key={m.id} type="button" disabled={outOfStock}
-                              onClick={() => addToCart(m)}
-                              title={outOfStock ? "No stock available" : inCart ? "Already in cart — click to add one more" : "Add to transfer"}
-                              style={{
-                                textAlign: "left", padding: 10, borderRadius: 10,
-                                background: outOfStock ? "rgba(248,113,113,0.06)" : inCart ? "rgba(74,222,128,0.10)" : "var(--bg4)",
-                                border: outOfStock ? "1px solid rgba(248,113,113,0.35)" : inCart ? "1px solid rgba(74,222,128,0.4)" : "1px solid var(--border2)",
-                                color: "var(--text)",
-                                cursor: outOfStock ? "not-allowed" : "pointer",
-                                opacity: outOfStock ? 0.65 : 1,
-                                display: "flex", flexDirection: "column", gap: 4, minWidth: 0,
-                                transition: "transform .1s, border-color .15s",
-                              }}
-                              onMouseEnter={e => { if (!outOfStock) e.currentTarget.style.transform = "translateY(-1px)"; }}
-                              onMouseLeave={e => { e.currentTarget.style.transform = "none"; }}>
-                              <div style={{ fontWeight: 700, fontSize: 12, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{m.name}</div>
-                              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "var(--text3)" }}>
-                                <span>{m.group || "—"}</span>
-                                <span>{m.unit || "pcs"}</span>
-                              </div>
-                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 2 }}>
-                                <span style={{ fontSize: 11, fontWeight: 800, color: outOfStock ? "var(--red)" : stock < 5 ? "var(--orange)" : "var(--green)" }}>
-                                  {outOfStock ? "OUT OF STOCK" : `${stock} in stock`}
-                                </span>
-                                <span style={{ fontSize: 12, fontWeight: 800, color: "var(--accent)" }}>{INR(m.current_price || 0)}</span>
-                              </div>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                  <div style={{ fontSize: 10, color: "var(--text3)" }}>
-                    {catalog.length} shown · click a card to add to transfer · low-stock cards are orange, out-of-stock are red and disabled.
-                  </div>
-                </div>
-
-                {/* RIGHT — cart */}
-                <div style={{ display: "flex", flexDirection: "column", gap: 10, minWidth: 0 }}>
-                  <div style={{ fontSize: 11, color: "var(--text3)", fontWeight: 800, textTransform: "uppercase", letterSpacing: 1 }}>Cart · {transferModal.items.filter(i => i.material_id).length} item{transferModal.items.filter(i => i.material_id).length === 1 ? "" : "s"}</div>
-                  <div style={{ border: "1px solid var(--border)", borderRadius: 10, maxHeight: 360, overflowY: "auto", background: "var(--bg3)" }}>
-                    {transferModal.items.filter(i => i.material_id).length === 0 ? (
-                      <div style={{ padding: 28, textAlign: "center", color: "var(--text3)", fontSize: 12 }}>
-                        Cart is empty. Pick materials from the left to add.
-                      </div>
-                    ) : (
-                      <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
-                        <thead style={{ position: "sticky", top: 0, background: "var(--bg4)", zIndex: 1 }}>
-                          <tr><TH>Material</TH><TH right>Qty</TH><TH right>Price</TH><TH right>Line</TH><TH></TH></tr>
-                        </thead>
-                        <tbody>
-                          {transferModal.items.map((it, idx) => {
-                            if (!it.material_id) return null;
-                            const stock = purchasedFor(it.material_id) - (transferredQtyByMaterial[it.material_id] || 0);
-                            // Stock from materials/allocations is the *current* position; items
-                            // already in the cart have been drawn down, so the user can enter
-                            // up to `stock` for this line without going negative.
-                            const lineTotal = (Number(it.qty) || 0) * (Number(it.price_at_transfer) || 0);
-                            const overStock = Number(it.qty) > stock;
-                            return (
-                              <tr key={it.material_id}>
-                                <TD>
-                                  <div style={{ fontWeight: 700 }}>{it.name}</div>
-                                  <div style={{ fontSize: 10, color: overStock ? "var(--red)" : "var(--text3)" }}>
-                                    {overStock ? `Only ${stock} in stock` : `${stock} avail · ${it.unit || "pcs"}`}
-                                  </div>
-                                </TD>
-                                <TD right>
-                                  <input type="number" min="0" step="1" max={stock} value={it.qty}
-                                    onChange={e => updateItem(idx, { qty: Math.max(0, Math.min(stock, Number(e.target.value) || 0)) })}
-                                    style={{ padding: "4px 8px", borderRadius: 6, background: "var(--bg2)", border: `1px solid ${overStock ? "rgba(248,113,113,0.6)" : "var(--border2)"}`, color: "var(--text)", fontSize: 12, width: 64, textAlign: "right", outline: "none" }} />
-                                </TD>
-                                <TD right style={{ color: "var(--text3)" }}>{INR(it.price_at_transfer)}</TD>
-                                <TD right style={{ fontWeight: 800, color: "var(--green)" }}>{INR(lineTotal)}</TD>
-                                <TD>
-                                  <button onClick={() => removeItem(idx)} title="Remove"
-                                    style={{ padding: "2px 6px", borderRadius: 4, background: "var(--red-bg)", color: "var(--red)", border: "1px solid rgba(248,113,113,0.3)", cursor: "pointer", fontSize: 11, fontWeight: 800 }}>×</button>
-                                </TD>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    )}
-                  </div>
-
-                  {/* Operation cost slider */}
-                  <div style={{ padding: 12, borderRadius: 10, background: "var(--bg3)", border: "1px solid var(--border2)" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 6 }}>
-                      <label style={{ fontSize: 11, color: "var(--text3)", fontWeight: 800, textTransform: "uppercase", letterSpacing: 1 }}>Operation Cost %</label>
-                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        <input type="number" min="0" max="100" step="0.5"
-                          value={transferModal.operation_cost_pct}
-                          onChange={e => setTransferModal(t => ({ ...t, operation_cost_pct: Math.max(0, Number(e.target.value) || 0) }))}
-                          style={{ padding: "4px 8px", borderRadius: 6, background: "var(--bg4)", border: "1px solid var(--border2)", color: "var(--accent)", fontSize: 13, width: 60, textAlign: "right", outline: "none", fontWeight: 800 }} />
-                        <span style={{ fontSize: 12, color: "var(--text3)", fontWeight: 700 }}>%</span>
-                      </div>
-                    </div>
-                    <div style={{ fontSize: 10, color: "var(--text3)", lineHeight: 1.4 }}>
-                      Markup on subtotal to recover delivery & handling. Charged to the branch's daily entry along with the material cost.
-                    </div>
-                  </div>
-
-                  {/* Totals */}
-                  <div style={{ padding: 12, borderRadius: 10, background: "var(--bg4)", border: "1px solid var(--border)", display: "flex", flexDirection: "column", gap: 6 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "var(--text3)" }}>
-                      <span>Subtotal</span><span style={{ fontWeight: 700, color: "var(--text2)" }}>{INR(subtotal)}</span>
-                    </div>
-                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "var(--text3)" }}>
-                      <span>Operation Cost ({opsPct}%)</span><span style={{ fontWeight: 700, color: "var(--orange)" }}>{INR(operationCost)}</span>
-                    </div>
-                    <div style={{ borderTop: "1px dashed var(--border2)", margin: "4px 0" }} />
-                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14 }}>
-                      <span style={{ color: "var(--text2)", fontWeight: 800 }}>GRAND TOTAL</span>
-                      <span style={{ color: "var(--accent)", fontWeight: 900, fontSize: 18, fontFamily: "var(--font-headline, var(--font-outfit))" }}>{INR(total)}</span>
-                    </div>
-                  </div>
-
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", borderRadius: 8, background: "rgba(74,222,128,0.08)", border: "1px solid rgba(74,222,128,0.25)", fontSize: 10, color: "var(--green)" }}>
-                    <input type="checkbox" checked={!!transferModal.auto_entry_update} onChange={e => setTransferModal(t => ({ ...t, auto_entry_update: e.target.checked }))} />
-                    <span>Auto-add ₹{total.toLocaleString("en-IN")} to the branch's daily entry on this date</span>
-                  </div>
-
-                  <input value={transferModal.note} onChange={e => setTransferModal(t => ({ ...t, note: e.target.value }))}
-                    placeholder="Note (optional)"
-                    style={{ padding: "8px 12px", borderRadius: 8, background: "var(--bg3)", border: "1px solid var(--border2)", color: "var(--text)", fontSize: 12, outline: "none" }} />
-                </div>
-              </div>
-
-              {/* Footer actions */}
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, borderTop: "1px solid var(--border)", paddingTop: 12, flexWrap: "wrap" }}>
-                <button onClick={() => openTransferSlip({ autoPrint: false })} disabled={!canConfirm}
-                  title={blockReason || "Open printable transfer slip"}
-                  style={{ padding: "10px 18px", borderRadius: 10, background: "var(--bg4)", color: canConfirm ? "var(--accent)" : "var(--text3)", border: "1px solid var(--border2)", fontWeight: 700, fontSize: 12, cursor: canConfirm ? "pointer" : "not-allowed", display: "inline-flex", alignItems: "center", gap: 6 }}>
-                  <Icon name="save" size={13} /> Preview / Print Slip
-                </button>
-                <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-                  {blockReason && (
-                    <span style={{ fontSize: 10.5, fontWeight: 700, color: "var(--red)", background: "rgba(248,113,113,0.12)", border: "1px solid rgba(248,113,113,0.3)", padding: "4px 10px", borderRadius: 6 }}>
-                      ⚠ {blockReason}
-                    </span>
-                  )}
-                  <button onClick={() => setTransferModal(null)}
-                    style={{ padding: "10px 18px", borderRadius: 10, background: "var(--bg4)", color: "var(--text2)", border: "1px solid var(--border2)", fontWeight: 600, fontSize: 12, cursor: "pointer" }}>Cancel</button>
-                  <button onClick={commitTransfer} disabled={!canConfirm}
-                    title={blockReason || "Save this transfer"}
-                    style={{ padding: "10px 22px", borderRadius: 10, background: canConfirm ? "linear-gradient(135deg,var(--accent),var(--gold2))" : "var(--bg4)", color: canConfirm ? "#000" : "var(--text3)", border: "none", fontWeight: 800, fontSize: 12, cursor: canConfirm ? "pointer" : "not-allowed", opacity: canConfirm ? 1 : 0.6 }}>
-                    Confirm Transfer
-                  </button>
-                </div>
-              </div>
-            </div>
-          );
-            })()}
-          </div>
-        </div>
-      )}
 
       {/* Add / Edit Material Modal */}
       <Modal isOpen={!!addMaterialModal} onClose={() => setAddMaterialModal(null)} title={addMaterialModal?.editingId ? "Record Purchase" : "Add Material / Record Purchase"} width={560}>
