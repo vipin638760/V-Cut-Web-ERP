@@ -809,10 +809,33 @@ export default function StaffPage() {
                         <TD right style={{ color: "var(--orange)", fontWeight: 700 }}>{INR(s.salary || 0)}</TD>
                         <TD right style={{ color: "var(--orange)", fontWeight: 700 }}>{s.incentive_pct || 10}%</TD>
                         <TD sticky right>
-                          <button onClick={() => handleEdit(s)}
-                            style={{ padding: "6px 14px", borderRadius: 8, background: "linear-gradient(135deg,var(--accent),var(--gold2))", color: "#000", border: "none", fontWeight: 800, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 }}>
-                            <Icon name="edit" size={12} /> Setup Now
-                          </button>
+                          <div style={{ display: "inline-flex", gap: 6, justifyContent: "flex-end" }}>
+                            <button onClick={() => handleEdit(s)}
+                              title="Open the staff form to fill in the missing fields and accept this entry"
+                              style={{ padding: "6px 14px", borderRadius: 8, background: "linear-gradient(135deg,var(--accent),var(--gold2))", color: "#000", border: "none", fontWeight: 800, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 }}>
+                              <Icon name="edit" size={12} /> Setup Now
+                            </button>
+                            <button
+                              onClick={() => confirm({
+                                title: "Reject Staff Entry",
+                                message: `Reject <strong>${toTitleCase(s.name)}</strong> added by the accountant? The record will be deleted and the accountant will need to re-add the employee.`,
+                                confirmText: "Reject & Delete",
+                                cancelText: "Keep",
+                                type: "danger",
+                                onConfirm: async () => {
+                                  try {
+                                    await deleteDoc(doc(db, "staff", s.id));
+                                    toast({ title: "Rejected", message: `${toTitleCase(s.name)} removed.`, type: "warning" });
+                                  } catch (err) {
+                                    confirm({ title: "Error", message: err.message, confirmText: "OK", type: "danger", onConfirm: () => {} });
+                                  }
+                                },
+                              })}
+                              title="Delete this pending staff entry — accountant will need to re-add"
+                              style={{ padding: "6px 14px", borderRadius: 8, background: "rgba(248,113,113,0.1)", color: "var(--red)", border: "1px solid rgba(248,113,113,0.4)", fontWeight: 800, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 }}>
+                              <Icon name="close" size={12} /> Reject
+                            </button>
+                          </div>
                         </TD>
                       </tr>
                     );
