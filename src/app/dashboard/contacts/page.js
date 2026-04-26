@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState, useRef } from "react";
 import { collection, onSnapshot, query, orderBy, addDoc, updateDoc, deleteDoc, doc, writeBatch } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
-import { Card, Icon, IconBtn, Modal, useConfirm, useToast } from "@/components/ui";
+import { Card, Icon, IconBtn, Modal, SearchSelect, useConfirm, useToast } from "@/components/ui";
 import VLoader from "@/components/VLoader";
 
 // Canonical tag list — editable via the inline "Add tag" input in the form.
@@ -100,12 +100,16 @@ export default function ContactsPage() {
   const canAccess = ["admin", "accountant"].includes(currentUser.role);
 
   const [contacts, setContacts] = useState([]);
+  const [tagDocs, setTagDocs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [tagFilter, setTagFilter] = useState("");
+  const [view, setView] = useState("cards"); // "cards" | "table"
   const [editId, setEditId] = useState(null);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ name: "", phone: "", alt_phone: "", email: "", company: "", tag: "", notes: "" });
+  const [addingTag, setAddingTag] = useState(false);
+  const [newTagText, setNewTagText] = useState("");
 
   const fileInputRef = useRef(null);
   const [importPreview, setImportPreview] = useState(null); // { rows, errors, fileName } | null
@@ -116,17 +120,46 @@ export default function ContactsPage() {
 
   useEffect(() => {
     if (!db || !canAccess) return;
-    const unsub = onSnapshot(query(collection(db, "contacts"), orderBy("name", "asc")),
-      sn => { setContacts(sn.docs.map(d => ({ ...d.data(), id: d.id }))); setLoading(false); },
-      () => setLoading(false));
-    return () => unsub();
+    const unsubs = [
+      onSnapshot(query(collection(db, "contacts"), orderBy("name", "asc")),
+        sn => { setContacts(sn.docs.map(d => ({ ...d.data(), id: d.id }))); setLoading(false); },
+        () => setLoading(false)),
+      onSnapshot(collection(db, "contact_tags"),
+        sn => setTagDocs(sn.docs.map(d => ({ ...d.data(), id: d.id }))),
+        () => {}),
+    ];
+    return () => unsubs.forEach(u => u());
   }, [canAccess]);
 
+  // Three sources roll up into the master tag list: defaults, persisted tags
+  // (added via the "+ Add new" UI), and any tag already in use on a contact.
   const allTags = useMemo(() => {
     const set = new Set(DEFAULT_TAGS);
+    tagDocs.forEach(t => { if (t.name) set.add(t.name); });
     contacts.forEach(c => { if (c.tag) set.add(c.tag); });
-    return [...set].sort();
-  }, [contacts]);
+    return [...set].sort((a, b) => a.localeCompare(b));
+  }, [contacts, tagDocs]);
+
+  const addNewTag = async (raw) => {
+    const name = (raw || "").trim();
+    if (!name) return null;
+    if (allTags.some(t => t.toLowerCase() === name.toLowerCase())) {
+      toast({ title: "Already exists", message: `Tag "${name}" is already in the list.`, type: "warning" });
+      return name;
+    }
+    try {
+      await addDoc(collection(db, "contact_tags"), {
+        name,
+        created_at: new Date().toISOString(),
+        created_by: currentUser?.name || "user",
+      });
+      toast({ title: "Tag added", message: `"${name}" is now in the tag list and CSV template.`, type: "success" });
+      return name;
+    } catch (e) {
+      confirm({ title: "Could not add tag", message: e.message, confirmText: "OK", type: "danger", onConfirm: () => {} });
+      return null;
+    }
+  };
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -244,12 +277,21 @@ export default function ContactsPage() {
   };
 
   const downloadTemplate = () => {
-    const sample = [
-      { name: "Acme Plumbing", phone: "+91 98765 43210", alt_phone: "", email: "support@acme.example", company: "Acme Pvt Ltd", tag: "Vendor", notes: "Pipe leak guy — bill cycle 30 days" },
-      { name: "", phone: "", alt_phone: "", email: "", company: "", tag: "", notes: "" },
-    ];
-    downloadBlob("vcut_contacts_template.csv", buildCSV(sample), "text/csv");
-    toast({ title: "Template ready", message: "Fill the rows (keep the header row) and upload via Import CSV.", type: "success" });
+    // Top of the file is one reference row per known tag — gives the user a
+    // copy-pasteable list of every valid tag (CSVs can't do real dropdowns).
+    // Followed by blank rows for actual data entry.
+    const tagList = allTags.length > 0 ? allTags : DEFAULT_TAGS;
+    const refRows = tagList.map((t, i) => ({
+      name: i === 0 ? "Acme Plumbing (sample — replace or delete)" : `Sample for tag: ${t}`,
+      phone: i === 0 ? "+91 98765 43210" : "",
+      alt_phone: "", email: i === 0 ? "support@acme.example" : "",
+      company: i === 0 ? "Acme Pvt Ltd" : "",
+      tag: t,
+      notes: i === 0 ? "Pipe leak guy — bill cycle 30 days" : `Use this tag for ${t.toLowerCase()} contacts`,
+    }));
+    const blanks = Array.from({ length: 5 }, () => ({ name: "", phone: "", alt_phone: "", email: "", company: "", tag: "", notes: "" }));
+    downloadBlob("vcut_contacts_template.csv", buildCSV([...refRows, ...blanks]), "text/csv");
+    toast({ title: "Template ready", message: `Includes ${tagList.length} reference row${tagList.length === 1 ? "" : "s"} for every available tag. Replace or delete them, then upload.`, type: "success" });
   };
 
   const triggerUpload = () => fileInputRef.current?.click();
@@ -464,21 +506,97 @@ export default function ContactsPage() {
         </div>
       )}
 
-      {/* Search */}
+      {/* Search + view toggle */}
       <Card style={{ padding: 14, marginBottom: 16, overflow: "visible" }}>
-        <input value={search} onChange={e => setSearch(e.target.value)}
-          placeholder="Search by name, phone, company, tag, note…"
-          style={{ ...inp, fontSize: 13.5 }} />
+        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+          <input value={search} onChange={e => setSearch(e.target.value)}
+            placeholder="Search by name, phone number, company, group/tag, note…"
+            style={{ ...inp, fontSize: 13.5, flex: 1, minWidth: 240 }} />
+          <div style={{ display: "inline-flex", gap: 2, padding: 3, borderRadius: 8, background: "var(--bg4)" }}>
+            {[["cards", "Cards"], ["table", "Table by Group"]].map(([v, l]) => (
+              <button key={v} onClick={() => setView(v)}
+                style={{ padding: "8px 14px", borderRadius: 6, fontSize: 11, fontWeight: 800, border: "none", cursor: "pointer", textTransform: "uppercase", letterSpacing: 0.5,
+                  background: view === v ? "linear-gradient(135deg,var(--accent),var(--gold2))" : "transparent",
+                  color: view === v ? "#000" : "var(--text3)" }}>
+                {l}
+              </button>
+            ))}
+          </div>
+        </div>
       </Card>
 
-      {/* Contact cards */}
+      {/* Contact cards / table-by-group */}
       {filtered.length === 0 ? (
         <Card style={{ padding: 40, textAlign: "center", color: "var(--text3)", fontSize: 13 }}>
           {contacts.length === 0
             ? <>No contacts yet. Click <strong style={{ color: "var(--accent)" }}>Add Contact</strong> to save your first number.</>
             : <>No matches for your search.</>}
         </Card>
-      ) : (
+      ) : view === "table" ? (() => {
+        // Group filtered list by tag (uses "Untagged" bucket for blanks).
+        const grouped = new Map();
+        filtered.forEach(c => {
+          const k = (c.tag || "").trim() || "Untagged";
+          if (!grouped.has(k)) grouped.set(k, []);
+          grouped.get(k).push(c);
+        });
+        const groups = [...grouped.entries()]
+          .sort((a, b) => {
+            if (a[0] === "Untagged") return 1;
+            if (b[0] === "Untagged") return -1;
+            return a[0].localeCompare(b[0]);
+          });
+        return (
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            {groups.map(([tag, list]) => (
+              <Card key={tag} style={{ padding: 0, overflow: "hidden" }}>
+                <div style={{ padding: "10px 14px", background: "linear-gradient(90deg, rgba(var(--accent-rgb),0.12), transparent)", borderBottom: "1px solid var(--border2)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontSize: 11, fontWeight: 800, color: tag === "Untagged" ? "var(--text3)" : "var(--accent)", textTransform: "uppercase", letterSpacing: 1 }}>{tag}</span>
+                    <span style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700 }}>{list.length} contact{list.length === 1 ? "" : "s"}</span>
+                  </div>
+                </div>
+                <div style={{ overflowX: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
+                    <thead>
+                      <tr style={{ background: "var(--bg4)" }}>
+                        {["Name", "Phone", "Alt Phone", "Company", "Email", "Notes", ""].map((h, i) => (
+                          <th key={h + i} style={{ padding: "8px 10px", textAlign: i === 6 ? "center" : "left", fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 0.8, fontSize: 10, borderBottom: "1px solid var(--border2)", whiteSpace: "nowrap" }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {list.map(c => (
+                        <tr key={c.id} style={{ borderBottom: "1px solid var(--border)" }}>
+                          <td style={{ padding: "8px 10px", fontWeight: 700, color: "var(--text)", whiteSpace: "nowrap" }}>{c.name}</td>
+                          <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>
+                            {c.phone ? <a href={`tel:${c.phone}`} style={{ color: "var(--green)", textDecoration: "none", fontWeight: 700 }}>{c.phone}</a> : "—"}
+                          </td>
+                          <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>
+                            {c.alt_phone ? <a href={`tel:${c.alt_phone}`} style={{ color: "var(--blue, #60a5fa)", textDecoration: "none" }}>{c.alt_phone}</a> : "—"}
+                          </td>
+                          <td style={{ padding: "8px 10px", color: "var(--text2)" }}>{c.company || "—"}</td>
+                          <td style={{ padding: "8px 10px", color: "var(--text3)" }}>
+                            {c.email ? <a href={`mailto:${c.email}`} style={{ color: "var(--text2)", textDecoration: "none" }}>{c.email}</a> : "—"}
+                          </td>
+                          <td style={{ padding: "8px 10px", color: "var(--text3)", maxWidth: 240, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={c.notes || ""}>{c.notes || "—"}</td>
+                          <td style={{ padding: "8px 10px", textAlign: "center", whiteSpace: "nowrap" }}>
+                            <div style={{ display: "inline-flex", gap: 4 }}>
+                              <IconBtn name="save" variant="secondary" title="Download vCard" onClick={() => downloadOne(c)} />
+                              <IconBtn name="edit" variant="secondary" title="Edit" onClick={() => openEdit(c)} />
+                              <IconBtn name="del" variant="danger" title="Delete" onClick={() => handleDelete(c)} />
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </Card>
+            ))}
+          </div>
+        );
+      })() : (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(300px,1fr))", gap: 12 }}>
           {filtered.map(c => (
             <Card key={c.id} style={{ padding: 16 }}>
@@ -548,13 +666,49 @@ export default function ContactsPage() {
               <input value={form.company} onChange={e => setForm(f => ({ ...f, company: e.target.value }))} style={inp} placeholder="Optional" />
             </div>
             <div>
-              <label style={{ fontSize: 10, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, marginBottom: 6, display: "block" }}>Tag</label>
-              <input value={form.tag} onChange={e => setForm(f => ({ ...f, tag: e.target.value }))}
-                list="contact-tag-options"
-                placeholder="Vendor / Emergency / custom…" style={inp} />
-              <datalist id="contact-tag-options">
-                {allTags.map(t => <option key={t} value={t} />)}
-              </datalist>
+              <label style={{ fontSize: 10, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, marginBottom: 6, display: "block" }}>Tag / Group</label>
+              {!addingTag ? (
+                <div style={{ display: "flex", gap: 6, alignItems: "stretch" }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <SearchSelect
+                      value={form.tag}
+                      onChange={(v) => setForm(f => ({ ...f, tag: v }))}
+                      options={allTags.map(t => ({ value: t, label: t }))}
+                      placeholder="Select tag…"
+                      minWidth={0}
+                      buttonStyle={{ padding: "10px 12px", borderRadius: 10, background: "var(--bg4)", color: "var(--text)", fontSize: 13 }}
+                    />
+                  </div>
+                  <button type="button" onClick={() => { setNewTagText(""); setAddingTag(true); }}
+                    title="Add a new tag — it'll persist for future contacts and the CSV template"
+                    style={{ padding: "8px 12px", borderRadius: 10, background: "rgba(34,211,238,0.12)", color: "var(--accent)", border: "1px solid rgba(34,211,238,0.4)", cursor: "pointer", fontSize: 11, fontWeight: 800, whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: 4 }}>
+                    <Icon name="plus" size={11} /> New
+                  </button>
+                </div>
+              ) : (
+                <div style={{ display: "flex", gap: 6, alignItems: "stretch" }}>
+                  <input autoFocus value={newTagText} onChange={e => setNewTagText(e.target.value)}
+                    onKeyDown={async (e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        const saved = await addNewTag(newTagText);
+                        if (saved) { setForm(f => ({ ...f, tag: saved })); setAddingTag(false); setNewTagText(""); }
+                      } else if (e.key === "Escape") { setAddingTag(false); setNewTagText(""); }
+                    }}
+                    placeholder="New tag name (e.g. Insurance)…" style={{ ...inp, flex: 1 }} />
+                  <button type="button" onClick={async () => {
+                    const saved = await addNewTag(newTagText);
+                    if (saved) { setForm(f => ({ ...f, tag: saved })); setAddingTag(false); setNewTagText(""); }
+                  }}
+                    style={{ padding: "8px 14px", borderRadius: 10, background: "var(--green)", color: "#000", border: "none", cursor: "pointer", fontSize: 11, fontWeight: 800, whiteSpace: "nowrap" }}>
+                    Save
+                  </button>
+                  <button type="button" onClick={() => { setAddingTag(false); setNewTagText(""); }}
+                    style={{ padding: "8px 12px", borderRadius: 10, background: "var(--bg4)", color: "var(--text3)", border: "1px solid var(--border2)", cursor: "pointer", fontSize: 11, fontWeight: 700 }}>
+                    ×
+                  </button>
+                </div>
+              )}
             </div>
           </div>
           <div>
