@@ -2411,6 +2411,11 @@ export default function MaterialsPage() {
                                 const outOfStock = stock <= 0;
                                 const inCart = cartIds.has(m.id);
                                 const curQty = Math.max(1, Math.min(stock || 1, Number(pickerQty[m.id]) || 1));
+                                // Raw value bound to the input so an empty
+                                // string survives mid-edit (otherwise the
+                                // user can never clear "4" to type "3" — the
+                                // first keystroke gets re-clamped to max).
+                                const inputQty = pickerQty[m.id] === "" ? "" : curQty;
                                 const stop = (e) => { e.stopPropagation(); };
                                 return (
                                   <div key={m.id}
@@ -2442,9 +2447,24 @@ export default function MaterialsPage() {
                                         <div style={{ display: "inline-flex", alignItems: "center", border: "1px solid var(--border2)", borderRadius: 6, background: "var(--bg2)", overflow: "hidden" }}>
                                           <button type="button" onClick={(e) => { stop(e); bumpPickerQty(m.id, -1, stock); }} disabled={curQty <= 1}
                                             style={{ padding: "2px 8px", background: "transparent", color: curQty <= 1 ? "var(--text3)" : "var(--text)", border: "none", cursor: curQty <= 1 ? "not-allowed" : "pointer", fontSize: 14, fontWeight: 800, lineHeight: 1 }}>−</button>
-                                          <input type="number" min="1" max={stock} value={curQty}
-                                            onClick={stop}
+                                          <input type="number" min="1" max={stock} value={inputQty}
+                                            onClick={(e) => { stop(e); e.currentTarget.select(); }}
+                                            onFocus={(e) => e.currentTarget.select()}
                                             onChange={(e) => {
+                                              // Allow the field to be empty mid-typing so the user can
+                                              // overwrite from scratch without their first keystroke being
+                                              // re-clamped to the existing max.
+                                              const raw = e.target.value;
+                                              if (raw === "") {
+                                                setPickerQty(q => ({ ...q, [m.id]: "" }));
+                                                return;
+                                              }
+                                              const n = Number(raw);
+                                              if (!Number.isFinite(n)) return;
+                                              const v = Math.max(1, Math.min(stock, n));
+                                              setPickerQty(q => ({ ...q, [m.id]: v }));
+                                            }}
+                                            onBlur={(e) => {
                                               const v = Math.max(1, Math.min(stock, Number(e.target.value) || 1));
                                               setPickerQty(q => ({ ...q, [m.id]: v }));
                                             }}
@@ -2655,7 +2675,6 @@ export default function MaterialsPage() {
                     const allExpanded = expandedHere === allocIds.length;
                     const noneExpanded = expandedHere === 0;
                     const colCount = 8 + (canDeleteAllocation ? 1 : 0);
-                    let runningItemIdx = 0;
                     return (
                       <Card key={b.id} style={{ padding: 0 }}>
                         <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--border)", background: "var(--bg4)", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
@@ -2666,8 +2685,8 @@ export default function MaterialsPage() {
                           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                             <button onClick={() => allExpanded ? collapseAllocIds(allocIds) : expandAllocIds(allocIds)}
                               title={allExpanded ? "Collapse every date for this branch" : "Expand every date for this branch"}
-                              style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 12px", borderRadius: 8, fontSize: 10, fontWeight: 800, letterSpacing: 0.5, background: "var(--bg3)", color: "var(--text2)", border: "1px solid var(--border2)", cursor: "pointer", textTransform: "uppercase" }}>
-                              <span style={{ fontSize: 9 }}>{allExpanded ? "▴" : "▾"}</span> {allExpanded ? "Collapse all" : noneExpanded ? "Expand all" : `Expand all (${allocIds.length - expandedHere})`}
+                              style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: 8, fontSize: 11, fontWeight: 800, letterSpacing: 0.5, background: allExpanded ? "rgba(248,113,113,0.12)" : "rgba(34,211,238,0.12)", color: allExpanded ? "var(--red)" : "var(--accent)", border: `1px solid ${allExpanded ? "rgba(248,113,113,0.4)" : "rgba(34,211,238,0.4)"}`, cursor: "pointer", textTransform: "uppercase" }}>
+                              {allExpanded ? "Collapse All Dates" : noneExpanded ? "Expand All Dates" : `Expand All (${allocIds.length - expandedHere} left)`}
                             </button>
                             <div style={{ fontSize: 16, color: "var(--green)", fontWeight: 800 }}>{INR(branchTotal)}</div>
                             <button onClick={() => openBranchMaterialBill(b, allocs, monthLabel)}
@@ -2680,7 +2699,7 @@ export default function MaterialsPage() {
                         <div style={{ padding: "2px 0 4px" }}>
                           <table className="pill-table" style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
                             <thead><tr>
-                              <TH style={{ width: 30 }}> </TH>
+                              <TH style={{ width: 110 }}> </TH>
                               <TH right style={{ width: 40 }}>#</TH>
                               <TH>Date</TH>
                               <TH right>Items</TH>
@@ -2704,8 +2723,12 @@ export default function MaterialsPage() {
                                     {/* Summary row — always visible. Click anywhere on it to toggle. */}
                                     <tr onClick={() => toggleAllocExpand(alloc.id)}
                                       style={{ cursor: "pointer", background: isOpen ? "rgba(34,211,238,0.06)" : "transparent" }}>
-                                      <TD style={{ textAlign: "center", color: "var(--text3)", fontSize: 11, userSelect: "none" }}>
-                                        {isOpen ? "▾" : "▸"}
+                                      <TD style={{ textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
+                                        <button type="button" onClick={() => toggleAllocExpand(alloc.id)}
+                                          title={isOpen ? "Hide item details" : `Show ${items.length} item${items.length === 1 ? "" : "s"}`}
+                                          style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "4px 10px", borderRadius: 6, fontSize: 10, fontWeight: 800, letterSpacing: 0.5, background: isOpen ? "rgba(248,113,113,0.12)" : "rgba(34,211,238,0.12)", color: isOpen ? "var(--red)" : "var(--accent)", border: `1px solid ${isOpen ? "rgba(248,113,113,0.4)" : "rgba(34,211,238,0.4)"}`, cursor: "pointer", textTransform: "uppercase", whiteSpace: "nowrap" }}>
+                                          {isOpen ? "Hide" : `Show (${items.length})`}
+                                        </button>
                                       </TD>
                                       <TD right style={{ color: "var(--text3)", fontVariantNumeric: "tabular-nums" }}>{allocIdx + 1}</TD>
                                       <TD style={{ whiteSpace: "nowrap", color: "var(--text)", fontWeight: 700 }}>{date || "—"}</TD>
@@ -2728,24 +2751,30 @@ export default function MaterialsPage() {
                                         </TD>
                                       )}
                                     </tr>
-                                    {/* Expanded item detail rows. */}
+                                    {/* Expanded item detail rows — visually nested under the parent transfer. */}
                                     {isOpen && items.map((it, i) => {
-                                      runningItemIdx += 1;
+                                      const isLast = i === items.length - 1;
+                                      const itemBg = "linear-gradient(90deg, rgba(34,211,238,0.08) 0%, rgba(34,211,238,0.02) 100%)";
+                                      const baseCell = {
+                                        background: itemBg,
+                                        borderTop: i === 0 ? "1px dashed rgba(34,211,238,0.35)" : "none",
+                                        borderBottom: isLast ? "1px solid rgba(34,211,238,0.25)" : "none",
+                                      };
                                       return (
-                                      <tr key={`${alloc.id}-${i}`} style={{ background: "var(--bg3)" }}>
-                                        <TD> </TD>
-                                        <TD right style={{ color: "var(--accent)", fontWeight: 700, fontSize: 11, fontVariantNumeric: "tabular-nums" }}>{runningItemIdx}</TD>
-                                        <TD colSpan={2} style={{ paddingLeft: 28, color: "var(--text3)", fontSize: 11 }}>
+                                      <tr key={`${alloc.id}-${i}`}>
+                                        <TD style={{ ...baseCell, borderLeft: "3px solid var(--accent)", textAlign: "center", color: "var(--accent)", fontSize: 14 }}>↳</TD>
+                                        <TD right style={{ ...baseCell, color: "var(--accent)", fontWeight: 800, fontSize: 12, fontVariantNumeric: "tabular-nums" }}>{i + 1}</TD>
+                                        <TD colSpan={2} style={{ ...baseCell, paddingLeft: 24, fontSize: 11.5 }}>
                                           <span style={{ color: "var(--text)", fontWeight: 600 }}>{it.name}</span>
                                           <span style={{ color: "var(--text3)", marginLeft: 8 }}>· {it.qty} {it.unit}</span>
                                         </TD>
-                                        <TD right colSpan={2} style={{ color: "var(--text3)", fontSize: 11 }}>
+                                        <TD right colSpan={2} style={{ ...baseCell, color: "var(--text3)", fontSize: 11 }}>
                                           @ {INR(Number(it.price_at_transfer) || 0)}
                                         </TD>
-                                        <TD right style={{ fontWeight: 700, color: "var(--green)", fontSize: 11 }}>
+                                        <TD right style={{ ...baseCell, fontWeight: 700, color: "var(--green)", fontSize: 11.5 }}>
                                           {INR(Number(it.line_total) || (Number(it.qty) * Number(it.price_at_transfer)) || 0)}
                                         </TD>
-                                        <TD colSpan={canDeleteAllocation ? 2 : 1}> </TD>
+                                        <TD colSpan={canDeleteAllocation ? 2 : 1} style={baseCell}> </TD>
                                       </tr>
                                       );
                                     })}

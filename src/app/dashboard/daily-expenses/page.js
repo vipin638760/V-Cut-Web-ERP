@@ -733,7 +733,7 @@ export default function DailyExpensesPage() {
                   <TH right style={{ minWidth: 110 }}>Amount (₹)</TH>
                   <TH style={{ minWidth: 220 }}>Paid By</TH>
                   <TH style={{ minWidth: 200 }}>Note</TH>
-                  <TH style={{ width: 96, textAlign: "center" }}>Row</TH>
+                  <TH style={{ width: 180, textAlign: "center" }}>Row</TH>
                 </tr>
               </thead>
               <tbody>
@@ -747,7 +747,7 @@ export default function DailyExpensesPage() {
                         <TD colSpan={4} style={{ color: "var(--text3)", fontStyle: "italic", fontSize: 11 }}>No row — click + to add an entry for this branch.</TD>
                         <TD style={{ textAlign: "center" }}>
                           <button type="button" onClick={() => addRowFor(b.id)} title={`Add a row for ${b.name}`}
-                            style={{ padding: "4px 10px", borderRadius: 6, background: "rgba(34,211,238,0.12)", color: "var(--accent)", border: "1px solid rgba(34,211,238,0.4)", cursor: "pointer", fontSize: 11, fontWeight: 800 }}>+ Add</button>
+                            style={{ padding: "6px 14px", borderRadius: 6, background: "rgba(34,211,238,0.12)", color: "var(--accent)", border: "1px solid rgba(34,211,238,0.4)", cursor: "pointer", fontSize: 11, fontWeight: 800, textTransform: "uppercase", letterSpacing: 0.5 }}>+ Add Row</button>
                         </TD>
                       </tr>
                     );
@@ -816,10 +816,10 @@ export default function DailyExpensesPage() {
                         </TD>
                         <TD style={{ textAlign: "center" }}>
                           <div style={{ display: "inline-flex", gap: 4 }}>
-                            <button type="button" onClick={() => addRowFor(b.id, r.id)} title={`Add another row for ${b.name}`}
-                              style={{ padding: "4px 8px", borderRadius: 6, background: "rgba(34,211,238,0.12)", color: "var(--accent)", border: "1px solid rgba(34,211,238,0.4)", cursor: "pointer", fontSize: 12, fontWeight: 800, lineHeight: 1 }}>+</button>
-                            <button type="button" onClick={() => removeRow(r.id)} title="Remove this row"
-                              style={{ padding: "4px 8px", borderRadius: 6, background: "var(--bg3)", color: "var(--text3)", border: "1px solid var(--border2)", cursor: "pointer", fontSize: 11, fontWeight: 700, lineHeight: 1 }}>×</button>
+                            <button type="button" onClick={() => addRowFor(b.id, r.id)} title={`Add another expense row for ${b.name}`}
+                              style={{ padding: "6px 10px", borderRadius: 6, background: "rgba(34,211,238,0.12)", color: "var(--accent)", border: "1px solid rgba(34,211,238,0.4)", cursor: "pointer", fontSize: 10, fontWeight: 800, lineHeight: 1, textTransform: "uppercase", letterSpacing: 0.5 }}>+ Add Row</button>
+                            <button type="button" onClick={() => removeRow(r.id)} title="Delete this expense row"
+                              style={{ padding: "6px 10px", borderRadius: 6, background: "rgba(248,113,113,0.12)", color: "var(--red)", border: "1px solid rgba(248,113,113,0.4)", cursor: "pointer", fontSize: 10, fontWeight: 800, lineHeight: 1, textTransform: "uppercase", letterSpacing: 0.5 }}>Delete</button>
                           </div>
                         </TD>
                       </tr>
