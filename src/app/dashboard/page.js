@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState, useRef, useMemo } from "react";
+import { useEffect, useState, useRef, useMemo, Fragment } from "react";
 import { collection, onSnapshot, query, orderBy, doc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
@@ -1761,6 +1761,8 @@ function MiniKPI({ label, value, sub, color }) {
 // on, the stack shows them as two colours so the mix is visible.
 function DailyMaterialChart({ entries, allocations, branches = [], filterYear, filterMonth, useAllocations, useLumpsum }) {
   const [hover, setHover] = useState(null);
+  // Independent hover state for the per-branch leaderboard rows.
+  const [branchHover, setBranchHover] = useState(null);
   const prefix = `${filterYear}-${String(filterMonth).padStart(2, "0")}`;
   const daysInMonth = new Date(filterYear, filterMonth, 0).getDate();
   const NOW = new Date();
@@ -1776,7 +1778,7 @@ function DailyMaterialChart({ entries, allocations, branches = [], filterYear, f
   const dayBreakdown = Array.from({ length: daysInMonth }, () => new Map());
 
   const bumpBranch = (id, key, amt) => {
-    const row = byBranch.get(id) || { name: branches.find(b => b.id === id)?.name || "—", alloc: 0, lump: 0, total: 0 };
+    const row = byBranch.get(id) || { id, name: branches.find(b => b.id === id)?.name || "—", alloc: 0, lump: 0, total: 0 };
     row[key] += amt;
     row.total += amt;
     byBranch.set(id, row);
@@ -1789,6 +1791,11 @@ function DailyMaterialChart({ entries, allocations, branches = [], filterYear, f
     dayMap.set(id, row);
   };
 
+  // Per-branch item rollup — Map<branchId, Map<itemKey, { name, unit, qty, value }>>
+  // Only allocation records carry per-item details, so this is allocations-only.
+  // Lumpsum entries can't break down beyond a total, and that's surfaced separately.
+  const branchItems = new Map();
+
   if (useAllocations) {
     allocations.forEach(a => {
       const date = a.date || (a.transferred_at || "").slice(0, 10);
@@ -1800,6 +1807,18 @@ function DailyMaterialChart({ entries, allocations, branches = [], filterYear, f
       if (a.branch_id) {
         bumpBranch(a.branch_id, "alloc", total);
         bumpDayBranch(dIdx, a.branch_id, "alloc", total);
+        // Track each line item under the branch.
+        if (!branchItems.has(a.branch_id)) branchItems.set(a.branch_id, new Map());
+        const itemMap = branchItems.get(a.branch_id);
+        (a.items || []).forEach(it => {
+          const key = it.material_id || (it.name || "").toLowerCase();
+          if (!key) return;
+          const value = Number(it.line_total) || (Number(it.qty) * Number(it.price_at_transfer)) || 0;
+          const row = itemMap.get(key) || { name: it.name || "—", unit: it.unit || "pcs", qty: 0, value: 0 };
+          row.qty += Number(it.qty) || 0;
+          row.value += value;
+          itemMap.set(key, row);
+        });
       }
     });
   }
@@ -1820,7 +1839,7 @@ function DailyMaterialChart({ entries, allocations, branches = [], filterYear, f
   // Ensure every branch shows up — even ones with zero consumption.
   // Heaviest first; zero-spend branches sort to the bottom alphabetically.
   branches.forEach(b => {
-    if (!byBranch.has(b.id)) byBranch.set(b.id, { name: b.name, alloc: 0, lump: 0, total: 0 });
+    if (!byBranch.has(b.id)) byBranch.set(b.id, { id: b.id, name: b.name, alloc: 0, lump: 0, total: 0 });
   });
   const branchRows = Array.from(byBranch.values())
     .sort((a, b) => (b.total - a.total) || a.name.localeCompare(b.name));
@@ -2101,7 +2120,7 @@ function DailyMaterialChart({ entries, allocations, branches = [], filterYear, f
               {branchRows.length} branch{branchRows.length === 1 ? "" : "es"} · heaviest first
             </span>
           </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, position: "relative" }}>
             {branchRows.map((r, i) => {
               const topTotal = branchRows[0].total;
               const pct = topTotal > 0 ? (r.total / topTotal) * 100 : 0;
@@ -2113,8 +2132,12 @@ function DailyMaterialChart({ entries, allocations, branches = [], filterYear, f
               // regardless of how short the filled portion is. Right-floats when the bar
               // is long enough to host it inline without collisions.
               const pctLabel = shareOfTotal >= 0.05 ? `${shareOfTotal.toFixed(1)}%` : isZero ? "" : "<0.1%";
+              const isHovered = branchHover && branchHover.id === r.id;
               return (
-                <div key={r.name + i} style={{ display: "grid", gridTemplateColumns: "22px minmax(120px, 170px) 1fr 48px auto", alignItems: "center", gap: 10, opacity: isZero ? 0.55 : 1 }}>
+                <div key={(r.id || r.name) + "-" + i}
+                  onMouseEnter={() => !isZero && setBranchHover({ id: r.id, name: r.name, total: r.total, alloc: r.alloc, lump: r.lump })}
+                  onMouseLeave={() => setBranchHover(null)}
+                  style={{ display: "grid", gridTemplateColumns: "22px minmax(120px, 170px) 1fr 48px auto", alignItems: "center", gap: 10, opacity: isZero ? 0.55 : 1, padding: "4px 8px", borderRadius: 8, background: isHovered ? "rgba(192,132,252,0.06)" : "transparent", transition: "background 0.15s", cursor: isZero ? "default" : "pointer" }}>
                   <div style={{ width: 20, height: 20, borderRadius: 6, background: isZero ? "var(--bg4)" : i < 3 ? "rgba(192,132,252,0.12)" : "var(--bg4)", border: `1px solid ${isZero ? "var(--border)" : i < 3 ? "rgba(192,132,252,0.35)" : "var(--border)"}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 900, color: rankColor }}>
                     {i + 1}
                   </div>
@@ -2138,6 +2161,68 @@ function DailyMaterialChart({ entries, allocations, branches = [], filterYear, f
                 </div>
               );
             })}
+
+            {/* Hover popover — lists the material items procured by the hovered
+                branch in this period, sorted by spend. Allocation-only since
+                lumpsum entries don't carry per-item details. */}
+            {branchHover && (() => {
+              const itemMap = branchItems.get(branchHover.id);
+              const items = itemMap ? Array.from(itemMap.values()).sort((a, b) => b.value - a.value) : [];
+              const topItems = items.slice(0, 12);
+              return (
+                <div style={{
+                  position: "absolute", right: 0, top: "100%", marginTop: 6,
+                  width: 360, maxWidth: "calc(100% - 8px)",
+                  background: "var(--bg2)", border: "1px solid rgba(192,132,252,0.4)",
+                  borderRadius: 10, boxShadow: "0 12px 32px rgba(0,0,0,0.55)",
+                  padding: "12px 14px", zIndex: 50, pointerEvents: "none",
+                }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10, marginBottom: 8 }}>
+                    <div>
+                      <div style={{ fontSize: 9, fontWeight: 800, color: "#d7a6ff", textTransform: "uppercase", letterSpacing: 1.2 }}>Procured by</div>
+                      <div style={{ fontSize: 13, fontWeight: 800, color: "var(--text)", fontFamily: "var(--font-headline, var(--font-outfit))", marginTop: 1 }}>{branchHover.name.replace("V-CUT ", "")}</div>
+                    </div>
+                    <div style={{ textAlign: "right" }}>
+                      <div style={{ fontSize: 9, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Total</div>
+                      <div style={{ fontSize: 14, fontWeight: 800, color: "#d7a6ff", fontFamily: "var(--font-headline, var(--font-outfit))" }}>{INR(branchHover.total)}</div>
+                    </div>
+                  </div>
+                  {items.length === 0 ? (
+                    <div style={{ fontSize: 11, color: "var(--text3)", fontStyle: "italic", padding: "8px 0" }}>
+                      {useLumpsum && branchHover.lump > 0
+                        ? `Lumpsum entry only (${INR(branchHover.lump)}) — no per-item breakdown available.`
+                        : "No allocation records for this branch in the period."}
+                    </div>
+                  ) : (
+                    <>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr auto auto", columnGap: 10, rowGap: 4, fontSize: 11 }}>
+                        <span style={{ fontSize: 9, color: "var(--text3)", fontWeight: 800, textTransform: "uppercase", letterSpacing: 1 }}>Material</span>
+                        <span style={{ fontSize: 9, color: "var(--text3)", fontWeight: 800, textTransform: "uppercase", letterSpacing: 1, textAlign: "right" }}>Qty</span>
+                        <span style={{ fontSize: 9, color: "var(--text3)", fontWeight: 800, textTransform: "uppercase", letterSpacing: 1, textAlign: "right" }}>Value</span>
+                        {topItems.map((it, idx) => (
+                          <Fragment key={idx}>
+                            <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={it.name}>{it.name}</span>
+                            <span style={{ fontSize: 11, color: "var(--text2)", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{it.qty} {it.unit}</span>
+                            <span style={{ fontSize: 11, fontWeight: 700, color: "#d7a6ff", textAlign: "right", fontFamily: "var(--font-headline, var(--font-outfit))" }}>{INR(it.value)}</span>
+                          </Fragment>
+                        ))}
+                      </div>
+                      {items.length > 12 && (
+                        <div style={{ marginTop: 8, fontSize: 10, color: "var(--text3)", fontStyle: "italic", textAlign: "right" }}>
+                          +{items.length - 12} more material{items.length - 12 === 1 ? "" : "s"}
+                        </div>
+                      )}
+                      {useLumpsum && branchHover.lump > 0 && (
+                        <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px dashed rgba(255,255,255,0.08)", fontSize: 10, color: "var(--accent)", display: "flex", justifyContent: "space-between" }}>
+                          <span style={{ fontWeight: 700 }}>Lumpsum (no item detail)</span>
+                          <span style={{ fontWeight: 800 }}>{INR(branchHover.lump)}</span>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              );
+            })()}
           </div>
         </div>
       )}
