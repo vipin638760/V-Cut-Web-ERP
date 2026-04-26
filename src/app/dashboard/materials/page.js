@@ -357,6 +357,8 @@ export default function MaterialsPage() {
   const [addMaterialModal, setAddMaterialModal] = useState(null); // { name, unit, group, gst_pct, price_inc_gst, editingId }
   // In-transfer picker: search master to append a row
   const [pickerSearch, setPickerSearch] = useState("");
+  // Per-material qty entered on the picker card before adding to cart (keyed by material id)
+  const [pickerQty, setPickerQty] = useState({});
 
   // Add-Material grid state
   const addBlankRow = () => ({ name: "", unit: "pcs", group: "", gst_pct: 18, price_inc_gst: "", qty: 1, purchase_date: new Date().toISOString().slice(0, 10), existingId: null });
@@ -2239,18 +2241,25 @@ export default function MaterialsPage() {
                 const operationCost = Math.round(subtotal * opsPct / 100);
                 const total = subtotal + operationCost;
 
-                const addToCart = (m) => {
+                const addToCart = (m, addQty) => {
                   const stock = purchasedFor(m.id) - (transferredQtyByMaterial[m.id] || 0);
                   if (stock <= 0) return;
+                  const wantQty = Math.max(1, Math.min(stock, Number(addQty) || 1));
                   setTransferModal(t => {
                     const existingIdx = t.items.findIndex(i => i.material_id === m.id);
                     if (existingIdx >= 0) {
-                      return { ...t, items: t.items.map((x, idx) => idx === existingIdx ? { ...x, qty: Math.min(stock, (Number(x.qty) || 0) + 1) } : x) };
+                      return { ...t, items: t.items.map((x, idx) => idx === existingIdx ? { ...x, qty: Math.min(stock, (Number(x.qty) || 0) + wantQty) } : x) };
                     }
-                    return { ...t, items: [...t.items, { material_id: m.id, name: m.name, unit: m.unit || "pcs", qty: 1, price_at_transfer: m.current_price || 0 }] };
+                    return { ...t, items: [...t.items, { material_id: m.id, name: m.name, unit: m.unit || "pcs", qty: wantQty, price_at_transfer: m.current_price || 0 }] };
                   });
+                  setPickerQty(q => ({ ...q, [m.id]: 1 }));
                   setPickerSearch("");
                 };
+                const bumpPickerQty = (id, delta, max) => setPickerQty(q => {
+                  const cur = Math.max(1, Number(q[id]) || 1);
+                  const next = Math.max(1, Math.min(max, cur + delta));
+                  return { ...q, [id]: next };
+                });
                 const updateItem = (idx, patch) => setTransferModal(t => ({ ...t, items: t.items.map((x, i) => i === idx ? { ...x, ...patch } : x) }));
                 const removeItem = (idx) => setTransferModal(t => ({ ...t, items: t.items.filter((_, i) => i !== idx) }));
 
@@ -2302,18 +2311,18 @@ export default function MaterialsPage() {
                               {catalog.map(({ m, stock }) => {
                                 const outOfStock = stock <= 0;
                                 const inCart = cartIds.has(m.id);
+                                const curQty = Math.max(1, Math.min(stock || 1, Number(pickerQty[m.id]) || 1));
+                                const stop = (e) => { e.stopPropagation(); };
                                 return (
-                                  <button key={m.id} type="button" disabled={outOfStock}
-                                    onClick={() => addToCart(m)}
-                                    title={outOfStock ? "No stock available" : inCart ? "Already in cart — click to add one more" : "Add to transfer"}
+                                  <div key={m.id}
+                                    title={outOfStock ? "No stock available" : inCart ? "Already in cart — adds more" : "Set quantity, then click Add"}
                                     style={{
                                       textAlign: "left", padding: 10, borderRadius: 10,
                                       background: outOfStock ? "rgba(248,113,113,0.06)" : inCart ? "rgba(74,222,128,0.10)" : "var(--bg4)",
                                       border: outOfStock ? "1px solid rgba(248,113,113,0.35)" : inCart ? "1px solid rgba(74,222,128,0.4)" : "1px solid var(--border2)",
                                       color: "var(--text)",
-                                      cursor: outOfStock ? "not-allowed" : "pointer",
                                       opacity: outOfStock ? 0.65 : 1,
-                                      display: "flex", flexDirection: "column", gap: 4, minWidth: 0,
+                                      display: "flex", flexDirection: "column", gap: 6, minWidth: 0,
                                       transition: "transform .1s, border-color .15s",
                                     }}
                                     onMouseEnter={e => { if (!outOfStock) e.currentTarget.style.transform = "translateY(-1px)"; }}
@@ -2329,14 +2338,35 @@ export default function MaterialsPage() {
                                       </span>
                                       <span style={{ fontSize: 12, fontWeight: 800, color: "var(--accent)" }}>{INR(m.current_price || 0)}</span>
                                     </div>
-                                  </button>
+                                    {!outOfStock && (
+                                      <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 2 }}>
+                                        <div style={{ display: "inline-flex", alignItems: "center", border: "1px solid var(--border2)", borderRadius: 6, background: "var(--bg2)", overflow: "hidden" }}>
+                                          <button type="button" onClick={stop} onMouseDown={(e) => { stop(e); bumpPickerQty(m.id, -1, stock); }} disabled={curQty <= 1}
+                                            style={{ padding: "2px 8px", background: "transparent", color: curQty <= 1 ? "var(--text3)" : "var(--text)", border: "none", cursor: curQty <= 1 ? "not-allowed" : "pointer", fontSize: 14, fontWeight: 800, lineHeight: 1 }}>−</button>
+                                          <input type="number" min="1" max={stock} value={curQty}
+                                            onClick={stop}
+                                            onChange={(e) => {
+                                              const v = Math.max(1, Math.min(stock, Number(e.target.value) || 1));
+                                              setPickerQty(q => ({ ...q, [m.id]: v }));
+                                            }}
+                                            style={{ width: 38, padding: "2px 4px", background: "transparent", color: "var(--text)", border: "none", borderLeft: "1px solid var(--border2)", borderRight: "1px solid var(--border2)", fontSize: 12, fontWeight: 700, textAlign: "center", outline: "none" }} />
+                                          <button type="button" onClick={stop} onMouseDown={(e) => { stop(e); bumpPickerQty(m.id, +1, stock); }} disabled={curQty >= stock}
+                                            style={{ padding: "2px 8px", background: "transparent", color: curQty >= stock ? "var(--text3)" : "var(--text)", border: "none", cursor: curQty >= stock ? "not-allowed" : "pointer", fontSize: 14, fontWeight: 800, lineHeight: 1 }}>+</button>
+                                        </div>
+                                        <button type="button" onClick={(e) => { stop(e); addToCart(m, curQty); }}
+                                          style={{ flex: 1, padding: "4px 8px", borderRadius: 6, background: inCart ? "rgba(74,222,128,0.18)" : "var(--accent)", color: inCart ? "var(--green)" : "var(--bg)", border: inCart ? "1px solid rgba(74,222,128,0.45)" : "1px solid var(--accent)", cursor: "pointer", fontSize: 11, fontWeight: 800, letterSpacing: 0.3 }}>
+                                          {inCart ? "+ Add more" : "+ Add"}
+                                        </button>
+                                      </div>
+                                    )}
+                                  </div>
                                 );
                               })}
                             </div>
                           )}
                         </div>
                         <div style={{ fontSize: 10, color: "var(--text3)" }}>
-                          {catalog.length} shown · click a card to add to transfer · low-stock cards are orange, out-of-stock are red and disabled.
+                          {catalog.length} shown · set quantity then click <strong style={{ color: "var(--text2)" }}>+ Add</strong> · low-stock cards are orange, out-of-stock are red and disabled.
                         </div>
                       </div>
 
