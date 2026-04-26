@@ -59,13 +59,14 @@ export default function DailyExpensesPage() {
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState(null);
   const [form, setForm] = useState({ date: new Date().toISOString().slice(0, 10), branch_id: "", expense_type: "", amount: "", note: "", paid_by_role: "accountant", paid_by: "Pravesh" });
-  // Multi-branch form: each branch row carries its own expense_type / amount /
-  // paid_by / note. `defaults` is a shortcut block — typing into it and clicking
-  // "Fill all" copies those values into every branch row at once.
+  // Multi-branch form: rows is an array so a single branch can have several
+  // entries in one save (different expense types, etc.). `defaults` is a
+  // shortcut block — its values flow into rows that haven't been customised
+  // yet (display fallback) and Fill All copies them in explicitly.
   const [multiForm, setMultiForm] = useState({
     date: new Date().toISOString().slice(0, 10),
     defaults: { expense_type: "", note: "", paid_by_role: "accountant", paid_by: "Pravesh" },
-    rows: {}, // { [branch_id]: { expense_type, amount, paid_by_role, paid_by, note } }
+    rows: [], // [{ id, branch_id, expense_type, amount, paid_by_role, paid_by, note }]
   });
   const [multiSaving, setMultiSaving] = useState(false);
 
@@ -235,54 +236,61 @@ export default function DailyExpensesPage() {
     }
   };
 
-  // Multi-branch save — fires one daily_expenses doc per branch row that has
-  // both an expense_type and a non-zero amount. Each row carries its own
-  // type/paid_by/note so the user can record different expenses across
-  // branches in a single pass.
+  // Multi-branch save — fires one daily_expenses doc per row that has both an
+  // expense_type and a non-zero amount. Each row picks up missing values from
+  // multiForm.defaults so a top-level "Pravesh" choice flows down to every row
+  // until the user overrides it explicitly.
   const handleMultiSave = async () => {
     if (!multiForm.date) {
       toast({ title: "Incomplete", message: "Pick a date.", type: "warning" });
       return;
     }
-    const ready = branches
-      .map(b => ({ b, r: multiForm.rows[b.id] || {} }))
-      .filter(({ r }) => Number(r.amount) > 0 && (r.expense_type || "").trim());
+    const d = multiForm.defaults || {};
+    const resolve = (r) => ({
+      branch_id: r.branch_id,
+      expense_type: (r.expense_type || d.expense_type || "").trim(),
+      amount: Number(r.amount) || 0,
+      note: (r.note || d.note || "").trim(),
+      paid_by: r.paid_by || d.paid_by || defaultPaidBy.name,
+      paid_by_role: r.paid_by_role || d.paid_by_role || defaultPaidBy.role,
+    });
+    const resolved = (multiForm.rows || []).map(resolve);
+    const ready = resolved.filter(r => r.branch_id && r.amount > 0 && r.expense_type);
     if (ready.length === 0) {
-      toast({ title: "Nothing to save", message: "Add an expense type and amount on at least one branch.", type: "warning" });
+      toast({ title: "Nothing to save", message: "Add an expense type and amount on at least one row.", type: "warning" });
       return;
     }
-    const missingType = branches
-      .map(b => ({ b, r: multiForm.rows[b.id] || {} }))
-      .filter(({ r }) => Number(r.amount) > 0 && !(r.expense_type || "").trim());
-    if (missingType.length > 0) {
-      toast({ title: "Missing expense type", message: `${missingType.length} row(s) have an amount but no expense type.`, type: "warning" });
+    const missingType = resolved.filter(r => r.branch_id && r.amount > 0 && !r.expense_type).length;
+    if (missingType > 0) {
+      toast({ title: "Missing expense type", message: `${missingType} row(s) have an amount but no expense type.`, type: "warning" });
       return;
     }
     setMultiSaving(true);
     try {
       const stamp = new Date().toISOString();
       const by = currentUser?.name || "user";
-      await Promise.all(ready.map(({ b, r }) =>
-        addDoc(collection(db, "daily_expenses"), {
+      await Promise.all(ready.map(r => {
+        const b = branchesById.get(r.branch_id);
+        return addDoc(collection(db, "daily_expenses"), {
           date: multiForm.date,
-          branch_id: b.id,
-          branch_name: b.name || "",
+          branch_id: r.branch_id,
+          branch_name: b?.name || "",
           expense_type: r.expense_type,
-          amount: Number(r.amount) || 0,
-          note: (r.note || "").trim(),
-          paid_by: r.paid_by || defaultPaidBy.name,
-          paid_by_role: r.paid_by_role || defaultPaidBy.role,
+          amount: r.amount,
+          note: r.note,
+          paid_by: r.paid_by,
+          paid_by_role: r.paid_by_role,
           created_at: stamp,
           created_by: by,
-        })
-      ));
-      const total = ready.reduce((s, x) => s + (Number(x.r.amount) || 0), 0);
-      const types = Array.from(new Set(ready.map(x => x.r.expense_type)));
+        });
+      }));
+      const total = ready.reduce((s, r) => s + r.amount, 0);
+      const types = Array.from(new Set(ready.map(r => r.expense_type)));
       toast({ title: "Saved", message: `${ready.length} entries · ${types.length === 1 ? types[0] : `${types.length} types`} · ${INR(total)} total`, type: "success" });
       setMultiForm({
         date: multiForm.date,
         defaults: multiForm.defaults,
-        rows: {},
+        rows: [],
       });
       setShowForm(false);
     } catch (err) {
@@ -552,7 +560,11 @@ export default function DailyExpensesPage() {
                     paid_by_role: m.defaults?.paid_by_role || defaultPaidBy.role,
                     paid_by: m.defaults?.paid_by || defaultPaidBy.name,
                   },
-                  rows: {},
+                  rows: branches.map(b => ({
+                    id: `${b.id}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+                    branch_id: b.id,
+                    expense_type: "", amount: "", paid_by: "", paid_by_role: "", note: "",
+                  })),
                 }));
                 setShowForm(true);
               } else {
@@ -572,10 +584,24 @@ export default function DailyExpensesPage() {
           top copies its values into every row at once for the common case
           where the same expense applies across many branches. */}
       {canEdit && entryMode === "multi" && showForm && !editId && (() => {
-        const setRow = (bid, patch) => setMultiForm(f => ({
+        const newRowId = (bid) => `${bid}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+        const setRow = (id, patch) => setMultiForm(f => ({
           ...f,
-          rows: { ...f.rows, [bid]: { ...(f.rows[bid] || {}), ...patch } },
+          rows: f.rows.map(r => r.id === id ? { ...r, ...patch } : r),
         }));
+        const removeRow = (id) => setMultiForm(f => ({
+          ...f,
+          rows: f.rows.filter(r => r.id !== id),
+        }));
+        const addRowFor = (bid, after = null) => setMultiForm(f => {
+          const next = { id: newRowId(bid), branch_id: bid, expense_type: "", amount: "", paid_by: "", paid_by_role: "", note: "" };
+          if (!after) return { ...f, rows: [...f.rows, next] };
+          const idx = f.rows.findIndex(r => r.id === after);
+          if (idx < 0) return { ...f, rows: [...f.rows, next] };
+          const copy = f.rows.slice();
+          copy.splice(idx + 1, 0, next);
+          return { ...f, rows: copy };
+        });
         const setDefaults = (patch) => setMultiForm(f => ({
           ...f,
           defaults: { ...f.defaults, ...patch },
@@ -584,28 +610,35 @@ export default function DailyExpensesPage() {
           const d = multiForm.defaults || {};
           setMultiForm(f => ({
             ...f,
-            rows: branches.reduce((acc, b) => {
-              const cur = f.rows[b.id] || {};
-              acc[b.id] = {
-                ...cur,
-                expense_type: d.expense_type || cur.expense_type || "",
-                paid_by: d.paid_by || cur.paid_by || defaultPaidBy.name,
-                paid_by_role: d.paid_by_role || cur.paid_by_role || defaultPaidBy.role,
-                note: d.note || cur.note || "",
-                amount: cur.amount || "",
-              };
-              return acc;
-            }, {}),
+            rows: f.rows.map(r => ({
+              ...r,
+              expense_type: r.expense_type || d.expense_type || "",
+              paid_by: r.paid_by || d.paid_by || defaultPaidBy.name,
+              paid_by_role: r.paid_by_role || d.paid_by_role || defaultPaidBy.role,
+              note: r.note || d.note || "",
+            })),
           }));
         };
-        const clearAll = () => setMultiForm(f => ({ ...f, rows: {} }));
-        const ready = branches
-          .map(b => ({ b, r: multiForm.rows[b.id] || {} }))
-          .filter(({ r }) => Number(r.amount) > 0 && (r.expense_type || "").trim());
-        const totalReady = ready.reduce((s, x) => s + (Number(x.r.amount) || 0), 0);
-        const missingType = branches
-          .map(b => ({ b, r: multiForm.rows[b.id] || {} }))
-          .filter(({ r }) => Number(r.amount) > 0 && !(r.expense_type || "").trim()).length;
+        // Reset rows to one per branch with empty values.
+        const clearAll = () => setMultiForm(f => ({
+          ...f,
+          rows: branches.map(b => ({
+            id: newRowId(b.id),
+            branch_id: b.id,
+            expense_type: "", amount: "", paid_by: "", paid_by_role: "", note: "",
+          })),
+        }));
+        const d = multiForm.defaults || {};
+        const ready = (multiForm.rows || []).filter(r => Number(r.amount) > 0 && (r.expense_type || d.expense_type || "").trim());
+        const totalReady = ready.reduce((s, r) => s + (Number(r.amount) || 0), 0);
+        const missingType = (multiForm.rows || []).filter(r => Number(r.amount) > 0 && !(r.expense_type || d.expense_type || "").trim()).length;
+        // Group rows by branch_id for rendering, preserving branches array order.
+        const rowsByBranch = new Map();
+        (multiForm.rows || []).forEach(r => {
+          const list = rowsByBranch.get(r.branch_id) || [];
+          list.push(r);
+          rowsByBranch.set(r.branch_id, list);
+        });
 
         return (
         <Card style={{ marginBottom: 16, padding: 18, border: "1px solid rgba(34,211,238,0.3)", overflow: "visible" }}>
@@ -688,8 +721,10 @@ export default function DailyExpensesPage() {
             </div>
           </div>
 
-          {/* Per-branch rows table */}
-          <div style={{ border: "1px solid var(--border)", borderRadius: 10, overflow: "auto", maxHeight: 460, marginBottom: 14 }}>
+          {/* Per-branch rows table — branches grouped, multiple rows per branch
+              allowed. Empty fields fall back to the Quick Fill defaults shown
+              dimmed; typing in a row overrides the default for that row only. */}
+          <div style={{ border: "1px solid var(--border)", borderRadius: 10, overflow: "auto", maxHeight: 520, marginBottom: 14 }}>
             <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
               <thead style={{ position: "sticky", top: 0, background: "var(--bg4)", zIndex: 1 }}>
                 <tr>
@@ -698,74 +733,98 @@ export default function DailyExpensesPage() {
                   <TH right style={{ minWidth: 110 }}>Amount (₹)</TH>
                   <TH style={{ minWidth: 220 }}>Paid By</TH>
                   <TH style={{ minWidth: 200 }}>Note</TH>
-                  <TH style={{ width: 56, textAlign: "center" }}>Clear</TH>
+                  <TH style={{ width: 96, textAlign: "center" }}>Row</TH>
                 </tr>
               </thead>
               <tbody>
                 {branches.map(b => {
-                  const r = multiForm.rows[b.id] || {};
-                  const amt = r.amount || "";
-                  const active = Number(amt) > 0;
-                  const role = r.paid_by_role || multiForm.defaults?.paid_by_role || defaultPaidBy.role;
-                  return (
-                    <tr key={b.id} style={{ background: active ? "rgba(74,222,128,0.06)" : "transparent", borderBottom: "1px solid var(--border)" }}>
-                      <TD style={{ fontWeight: 700, color: "var(--text)" }}>{(b.name || "—").replace("V-CUT ", "")}</TD>
-                      <TD>
-                        <SearchSelect
-                          value={r.expense_type || ""}
-                          onChange={(v) => setRow(b.id, { expense_type: v })}
-                          options={activeTypes.map(t => ({ value: t, label: t }))}
-                          placeholder="Select type…"
-                          minWidth={0}
-                          buttonStyle={{ padding: "6px 10px", borderRadius: 6, background: "var(--bg3)", color: "var(--text)", fontSize: 12 }}
-                        />
-                      </TD>
-                      <TD right>
-                        <input type="number" min="0" step="1" placeholder="0" value={amt}
-                          onChange={e => setRow(b.id, { amount: e.target.value })}
-                          style={{ width: 100, padding: "6px 8px", borderRadius: 6, background: "var(--bg3)", border: `1px solid ${active ? "var(--accent)" : "var(--border2)"}`, color: active ? "var(--accent)" : "var(--text)", fontSize: 12, fontWeight: 700, textAlign: "right", outline: "none" }} />
-                      </TD>
-                      <TD>
-                        <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-                          <div style={{ display: "inline-flex", gap: 1, background: "var(--bg3)", padding: 2, borderRadius: 6 }}>
-                            {[["accountant", "Acct"], ["admin", "Admin"]].map(([val, lbl]) => (
-                              <button key={val} type="button" onClick={() => {
-                                const list = usersByRole[val] || [];
-                                const cur = r.paid_by;
-                                setRow(b.id, { paid_by_role: val, paid_by: list.includes(cur) ? cur : (list[0] || "") });
-                              }}
-                                style={{ padding: "4px 8px", borderRadius: 4, fontSize: 10, fontWeight: 700, border: "none", cursor: "pointer",
-                                  background: role === val ? (val === "admin" ? "var(--orange)" : "var(--green)") : "transparent",
-                                  color: role === val ? "#000" : "var(--text3)" }}>
-                                {lbl}
-                              </button>
-                            ))}
-                          </div>
+                  const list = rowsByBranch.get(b.id) || [];
+                  if (list.length === 0) {
+                    // No row for this branch — show a placeholder + add button.
+                    return (
+                      <tr key={`empty-${b.id}`} style={{ borderBottom: "1px solid var(--border)" }}>
+                        <TD style={{ fontWeight: 700, color: "var(--text2)" }}>{(b.name || "—").replace("V-CUT ", "")}</TD>
+                        <TD colSpan={4} style={{ color: "var(--text3)", fontStyle: "italic", fontSize: 11 }}>No row — click + to add an entry for this branch.</TD>
+                        <TD style={{ textAlign: "center" }}>
+                          <button type="button" onClick={() => addRowFor(b.id)} title={`Add a row for ${b.name}`}
+                            style={{ padding: "4px 10px", borderRadius: 6, background: "rgba(34,211,238,0.12)", color: "var(--accent)", border: "1px solid rgba(34,211,238,0.4)", cursor: "pointer", fontSize: 11, fontWeight: 800 }}>+ Add</button>
+                        </TD>
+                      </tr>
+                    );
+                  }
+                  return list.map((r, i) => {
+                    const amt = r.amount || "";
+                    const active = Number(amt) > 0;
+                    const role = r.paid_by_role || d.paid_by_role || defaultPaidBy.role;
+                    const effExpenseType = r.expense_type || d.expense_type || "";
+                    const effPaidBy = r.paid_by || d.paid_by || defaultPaidBy.name;
+                    const effNote = r.note;
+                    const isFirstForBranch = i === 0;
+                    const isLastForBranch = i === list.length - 1;
+                    const showsDefaultType = !r.expense_type && !!d.expense_type;
+                    const showsDefaultPaidBy = !r.paid_by && !!d.paid_by;
+                    return (
+                      <tr key={r.id} style={{ background: active ? "rgba(74,222,128,0.06)" : "transparent", borderBottom: isLastForBranch ? "2px solid var(--border2)" : "1px dashed var(--border)" }}>
+                        <TD style={{ fontWeight: isFirstForBranch ? 700 : 500, color: isFirstForBranch ? "var(--text)" : "var(--text3)" }}>
+                          {isFirstForBranch ? (b.name || "—").replace("V-CUT ", "") : <span style={{ paddingLeft: 12, fontSize: 11 }}>↳ same branch</span>}
+                        </TD>
+                        <TD>
                           <SearchSelect
-                            value={r.paid_by || (usersByRole[role] || [])[0] || ""}
-                            onChange={(v) => setRow(b.id, { paid_by: v })}
-                            options={(usersByRole[role] || []).map(n => ({ value: n, label: n }))}
-                            placeholder="Name…"
+                            value={effExpenseType}
+                            onChange={(v) => setRow(r.id, { expense_type: v })}
+                            options={activeTypes.map(t => ({ value: t, label: t }))}
+                            placeholder="Select type…"
                             minWidth={0}
-                            buttonStyle={{ padding: "6px 8px", borderRadius: 6, background: "var(--bg3)", color: "var(--text)", fontSize: 11 }}
+                            buttonStyle={{ padding: "6px 10px", borderRadius: 6, background: "var(--bg3)", color: showsDefaultType ? "var(--text3)" : "var(--text)", fontSize: 12, fontStyle: showsDefaultType ? "italic" : "normal" }}
                           />
-                        </div>
-                      </TD>
-                      <TD>
-                        <input type="text" placeholder="Optional…" value={r.note || ""}
-                          onChange={e => setRow(b.id, { note: e.target.value })}
-                          style={{ width: "100%", padding: "6px 8px", borderRadius: 6, background: "var(--bg3)", border: "1px solid var(--border2)", color: "var(--text)", fontSize: 12, outline: "none" }} />
-                      </TD>
-                      <TD style={{ textAlign: "center" }}>
-                        <button type="button" onClick={() => setMultiForm(f => {
-                          const next = { ...f.rows };
-                          delete next[b.id];
-                          return { ...f, rows: next };
-                        })} title="Clear this row"
-                          style={{ padding: "4px 8px", borderRadius: 6, background: "var(--bg3)", color: "var(--text3)", border: "1px solid var(--border2)", cursor: "pointer", fontSize: 11, fontWeight: 700 }}>×</button>
-                      </TD>
-                    </tr>
-                  );
+                        </TD>
+                        <TD right>
+                          <input type="number" min="0" step="1" placeholder="0" value={amt}
+                            onChange={e => setRow(r.id, { amount: e.target.value })}
+                            style={{ width: 100, padding: "6px 8px", borderRadius: 6, background: "var(--bg3)", border: `1px solid ${active ? "var(--accent)" : "var(--border2)"}`, color: active ? "var(--accent)" : "var(--text)", fontSize: 12, fontWeight: 700, textAlign: "right", outline: "none" }} />
+                        </TD>
+                        <TD>
+                          <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                            <div style={{ display: "inline-flex", gap: 1, background: "var(--bg3)", padding: 2, borderRadius: 6 }}>
+                              {[["accountant", "Acct"], ["admin", "Admin"]].map(([val, lbl]) => (
+                                <button key={val} type="button" onClick={() => {
+                                  const list2 = usersByRole[val] || [];
+                                  const cur = r.paid_by || d.paid_by;
+                                  setRow(r.id, { paid_by_role: val, paid_by: list2.includes(cur) ? cur : (list2[0] || "") });
+                                }}
+                                  style={{ padding: "4px 8px", borderRadius: 4, fontSize: 10, fontWeight: 700, border: "none", cursor: "pointer",
+                                    background: role === val ? (val === "admin" ? "var(--orange)" : "var(--green)") : "transparent",
+                                    color: role === val ? "#000" : "var(--text3)" }}>
+                                  {lbl}
+                                </button>
+                              ))}
+                            </div>
+                            <SearchSelect
+                              value={effPaidBy}
+                              onChange={(v) => setRow(r.id, { paid_by: v })}
+                              options={(usersByRole[role] || []).map(n => ({ value: n, label: n }))}
+                              placeholder="Name…"
+                              minWidth={0}
+                              buttonStyle={{ padding: "6px 8px", borderRadius: 6, background: "var(--bg3)", color: showsDefaultPaidBy ? "var(--text3)" : "var(--text)", fontSize: 11, fontStyle: showsDefaultPaidBy ? "italic" : "normal" }}
+                            />
+                          </div>
+                        </TD>
+                        <TD>
+                          <input type="text" placeholder={d.note ? `(default: ${d.note})` : "Optional…"} value={effNote || ""}
+                            onChange={e => setRow(r.id, { note: e.target.value })}
+                            style={{ width: "100%", padding: "6px 8px", borderRadius: 6, background: "var(--bg3)", border: "1px solid var(--border2)", color: "var(--text)", fontSize: 12, outline: "none" }} />
+                        </TD>
+                        <TD style={{ textAlign: "center" }}>
+                          <div style={{ display: "inline-flex", gap: 4 }}>
+                            <button type="button" onClick={() => addRowFor(b.id, r.id)} title={`Add another row for ${b.name}`}
+                              style={{ padding: "4px 8px", borderRadius: 6, background: "rgba(34,211,238,0.12)", color: "var(--accent)", border: "1px solid rgba(34,211,238,0.4)", cursor: "pointer", fontSize: 12, fontWeight: 800, lineHeight: 1 }}>+</button>
+                            <button type="button" onClick={() => removeRow(r.id)} title="Remove this row"
+                              style={{ padding: "4px 8px", borderRadius: 6, background: "var(--bg3)", color: "var(--text3)", border: "1px solid var(--border2)", cursor: "pointer", fontSize: 11, fontWeight: 700, lineHeight: 1 }}>×</button>
+                          </div>
+                        </TD>
+                      </tr>
+                    );
+                  });
                 })}
               </tbody>
             </table>
