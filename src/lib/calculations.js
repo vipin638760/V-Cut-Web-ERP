@@ -16,27 +16,53 @@ export const MASK = '•••••';
 export const parseLocalDate = (ymd) => (ymd ? new Date(ymd + "T00:00") : null);
 
 // Fixed-cost resolver — returns per-month fixed-cost figures for a branch.
-// If a row exists in `monthly_expenses` (keyed by branch_id + month), its
-// fields override the branch master defaults. Missing fields fall back to
-// the branch master so a partial override (say, just shop_rent bumped up
+// Override priority per field, highest wins:
+//   1. `fixedExpenses` row from the Operational Expenses page (typed by name)
+//   2. `monthlyExpenses` row from Master Setup → Fixed Exp tab (named field)
+//   3. branch master default
+// Missing fields fall back so a partial override (just shop_rent bumped up
 // for one month) still uses defaults for everything else.
 // Shape: { shop_rent, room_rent, shop_elec, room_elec, wifi, water, petrol, maid, dust }
 // Shared by the Dashboard, P&L page, and branch-detail view so a bump
-// entered in Master Setup → Fixed Expenses is honored everywhere.
-export function getMonthlyFixed(branch, monthStr, monthlyExpenses = []) {
+// entered on either expenses surface is honoured everywhere.
+const FIXED_TYPE_TO_FIELD = {
+  "Shop Rent": "shop_rent",
+  "Room Rent": "room_rent",
+  "Electricity Shop": "shop_elec",
+  "Electricity Room": "room_elec",
+  "WiFi Bill": "wifi",
+  "Water Bill": "water",
+};
+export function getMonthlyFixed(branch, monthStr, monthlyExpenses = [], fixedExpenses = []) {
   const b = branch || {};
   const rec = (monthlyExpenses || []).find(m => m.branch_id === b.id && m.month === monthStr);
-  const fv = (recVal, branchVal) => (recVal !== undefined && recVal !== null) ? Number(recVal) || 0 : (Number(branchVal) || 0);
+  // Build a per-field override map from `fixed_expenses` rows that match this
+  // branch + month. Sums duplicate type rows so two entries for the same type
+  // in one month accumulate instead of clobbering.
+  const fxByField = {};
+  (fixedExpenses || []).forEach(fx => {
+    if (!fx || fx.branch_id !== b.id) return;
+    if (!fx.date || fx.date.slice(0, 7) !== monthStr) return;
+    const field = FIXED_TYPE_TO_FIELD[fx.type];
+    if (!field) return;
+    fxByField[field] = (fxByField[field] || 0) + (Number(fx.amount) || 0);
+  });
+  const fv = (field, branchVal) => {
+    if (fxByField[field] !== undefined) return fxByField[field];
+    const recVal = rec?.[field];
+    if (recVal !== undefined && recVal !== null) return Number(recVal) || 0;
+    return Number(branchVal) || 0;
+  };
   return {
-    shop_rent: fv(rec?.shop_rent, b.shop_rent),
-    room_rent: fv(rec?.room_rent, b.room_rent),
-    shop_elec: fv(rec?.shop_elec, b.shop_elec),
-    room_elec: fv(rec?.room_elec, b.room_elec),
-    wifi:      fv(rec?.wifi,      b.wifi),
-    water:     fv(rec?.water,     b.water),
-    petrol:    fv(rec?.petrol,    b.petrol),
-    maid:      fv(rec?.maid,      b.maid),
-    dust:      fv(rec?.dust,      b.dust),
+    shop_rent: fv("shop_rent", b.shop_rent),
+    room_rent: fv("room_rent", b.room_rent),
+    shop_elec: fv("shop_elec", b.shop_elec),
+    room_elec: fv("room_elec", b.room_elec),
+    wifi:      fv("wifi",      b.wifi),
+    water:     fv("water",     b.water),
+    petrol:    fv("petrol",    b.petrol),
+    maid:      fv("maid",      b.maid),
+    dust:      fv("dust",      b.dust),
   };
 }
 

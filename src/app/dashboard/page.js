@@ -82,6 +82,7 @@ export default function DashboardPage() {
   const [globalSettings, setGlobalSettings] = useState(null);
   const [materialAllocations, setMaterialAllocations] = useState([]);
   const [monthlyExpenses, setMonthlyExpenses] = useState([]);
+  const [fixedExpenses, setFixedExpenses] = useState([]);
   const [loading, setLoading]     = useState(true);
 
   // Period
@@ -171,6 +172,9 @@ export default function DashboardPage() {
       onSnapshot(collection(db, "monthly_expenses"),
         sn => setMonthlyExpenses(sn.docs.map(d => ({ ...d.data(), id: d.id }))),
         err("monthly_expenses")),
+      onSnapshot(collection(db, "fixed_expenses"),
+        sn => setFixedExpenses(sn.docs.map(d => ({ ...d.data(), id: d.id }))),
+        err("fixed_expenses")),
     ];
     return () => unsubs.forEach(u => u());
   }, [subTick]);
@@ -231,7 +235,7 @@ export default function DashboardPage() {
       const endFM   = isYearly ? factor : filterMonth;
       for (let m = startFM; m <= endFM; m++) {
         const mPrefix = `${filterYear}-${String(m).padStart(2, '0')}`;
-        const mf = getMonthlyFixed(b, mPrefix, monthlyExpenses);
+        const mf = getMonthlyFixed(b, mPrefix, monthlyExpenses, fixedExpenses);
         fShopRent += mf.shop_rent;
         fRoomRent += mf.room_rent;
         fShopElec += mf.shop_elec;

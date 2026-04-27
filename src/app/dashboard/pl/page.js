@@ -20,6 +20,7 @@ export default function PLReportPage() {
   const [entries, setEntries] = useState([]);
   const [transactions, setTransactions] = useState([]);
   const [monthlyExpenses, setMonthlyExpenses] = useState([]);
+  const [fixedExpenses, setFixedExpenses] = useState([]);
   const [costCenters, setCostCenters] = useState([]);
   const [salaryHistory, setSalaryHistory] = useState([]);
   const [materialAllocations, setMaterialAllocations] = useState([]);
@@ -43,6 +44,7 @@ export default function PLReportPage() {
       onSnapshot(query(collection(db, "entries"), orderBy("date", "desc")), s => setEntries(s.docs.map(d => ({ ...d.data(), id: d.id })))),
       onSnapshot(collection(db, "transactions"), s => setTransactions(s.docs.map(d => ({ ...d.data(), id: d.id })))),
       onSnapshot(collection(db, "monthly_expenses"), s => setMonthlyExpenses(s.docs.map(d => ({ ...d.data(), id: d.id })))),
+      onSnapshot(collection(db, "fixed_expenses"), s => setFixedExpenses(s.docs.map(d => ({ ...d.data(), id: d.id })))),
       onSnapshot(collection(db, "cost_centers"), s => setCostCenters(s.docs.map(d => ({ ...d.data(), id: d.id })))),
       onSnapshot(collection(db, "salary_history"), s => setSalaryHistory(s.docs.map(d => ({ ...d.data(), id: d.id })))),
       onSnapshot(collection(db, "material_allocations"), s => setMaterialAllocations(s.docs.map(d => ({ ...d.data(), id: d.id })))),
@@ -108,7 +110,7 @@ export default function PLReportPage() {
     // Setup → Fixed Expenses); branch master fills in the gaps. Both
     // Dashboard and P&L now go through the same `getMonthlyFixed` helper
     // so a rent bump entered in one place is reflected in both totals.
-    const mf = getMonthlyFixed(b, month, monthlyExpenses);
+    const mf = getMonthlyFixed(b, month, monthlyExpenses, fixedExpenses);
     const fixedCost = mf.shop_rent + mf.room_rent + mf.shop_elec + mf.room_elec + mf.wifi;
 
     // Salary
