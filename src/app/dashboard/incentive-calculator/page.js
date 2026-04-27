@@ -703,6 +703,26 @@ export default function IncentiveCalculatorPage() {
                   <TD right style={{ color: "var(--gold)", fontWeight: 800 }}>{INR(breakdownTotalInc)}</TD>
                   <TD></TD>
                 </tr>
+                {/* Taken / Pending split — surfaces the remaining balance to be paid right next to the TOTAL row. */}
+                {breakdownTotalInc > 0 && (
+                  <tr style={{ background: "var(--bg4)", fontSize: 11 }}>
+                    {canEdit && sorted.some(e => !e.taken) && <TD></TD>}
+                    <TD style={{ color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Settlement</TD>
+                    <TD colSpan={5} style={{ color: "var(--text3)" }}>
+                      Taken <strong style={{ color: "var(--green)" }}>{INR(breakdownTakenInc)}</strong>
+                      <span style={{ margin: "0 10px", color: "var(--border2)" }}>·</span>
+                      Pending <strong style={{ color: breakdownPendingInc > 0 ? "var(--orange)" : "var(--text3)" }}>{INR(breakdownPendingInc)}</strong>
+                    </TD>
+                    <TD right style={{ color: breakdownPendingInc > 0 ? "var(--orange)" : "var(--text3)", fontWeight: 800 }} title="Remaining incentive balance to be paid">{INR(breakdownPendingInc)}</TD>
+                    <TD>
+                      {breakdownPendingInc > 0 ? (
+                        <span style={{ padding: "2px 8px", borderRadius: 6, fontSize: 9, fontWeight: 700, background: "rgba(251,146,60,0.12)", color: "var(--orange)" }}>BALANCE</span>
+                      ) : (
+                        <span style={{ padding: "2px 8px", borderRadius: 6, fontSize: 9, fontWeight: 700, background: "rgba(74,222,128,0.12)", color: "var(--green)" }}>SETTLED</span>
+                      )}
+                    </TD>
+                  </tr>
+                )}
               </tbody>
             </table>
           </Card>
