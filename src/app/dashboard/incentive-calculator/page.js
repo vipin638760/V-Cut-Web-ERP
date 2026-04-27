@@ -22,6 +22,7 @@ export default function IncentiveCalculatorPage() {
 
   const [mode, setMode] = useState("period");
   const [branchFilter, setBranchFilter] = useState("");
+  const [employeeSearch, setEmployeeSearch] = useState("");
   const [dateFrom, setDateFrom] = useState(() => {
     const d = new Date(); d.setDate(1);
     return d.toISOString().slice(0, 10);
@@ -141,7 +142,11 @@ export default function IncentiveCalculatorPage() {
 
   const periodCollectors = incentiveData.filter(d => d.pendingIncentive > 0);
   const dailyCollectors = incentiveData.filter(d => d.pendingIncentive === 0 && d.takenIncentive > 0);
-  const displayed = mode === "daily" ? dailyCollectors : periodCollectors;
+  const baseDisplayed = mode === "daily" ? dailyCollectors : periodCollectors;
+  const empQ = employeeSearch.trim().toLowerCase();
+  const displayed = empQ
+    ? baseDisplayed.filter(d => (d.name || "").toLowerCase().includes(empQ) || (d.role || "").toLowerCase().includes(empQ))
+    : baseDisplayed;
   const totalPending = displayed.reduce((s, d) => s + d.pendingIncentive, 0);
   const totalTaken = displayed.reduce((s, d) => s + d.takenIncentive, 0);
   const totalAll = displayed.reduce((s, d) => s + d.totalIncentive, 0);
@@ -407,6 +412,16 @@ export default function IncentiveCalculatorPage() {
             <span style={{ fontSize: 11, color: "var(--text3)", fontWeight: 600 }}>To:</span>
             <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
               style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid var(--border2)", background: "var(--bg3)", color: "var(--text)", fontSize: 12 }} />
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, flex: 1, minWidth: 220 }}>
+            <input type="text" value={employeeSearch} onChange={e => { setEmployeeSearch(e.target.value); setSelected(new Set()); }}
+              placeholder="Search employee by name or role…"
+              style={{ flex: 1, padding: "8px 12px", borderRadius: 8, border: "1px solid var(--border2)", background: "var(--bg3)", color: "var(--text)", fontSize: 12, outline: "none" }} />
+            {employeeSearch && (
+              <button onClick={() => setEmployeeSearch("")}
+                title="Clear search"
+                style={{ padding: "6px 10px", borderRadius: 6, background: "var(--bg4)", color: "var(--text3)", border: "1px solid var(--border2)", cursor: "pointer", fontSize: 11, fontWeight: 700 }}>×</button>
+            )}
           </div>
         </div>
       </Card>
