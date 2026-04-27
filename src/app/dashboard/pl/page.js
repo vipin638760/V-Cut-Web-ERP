@@ -102,7 +102,8 @@ export default function PLReportPage() {
     // rounding surplus is added.
     const monthReleases = incentiveReleases.filter(r => r.branch_id === bid && (r.period_from || (r.released_at || "").slice(0, 10)).startsWith(month));
     const staffByIdMap = new Map(staff.map(s => [s.id, s]));
-    const incentives = computeIncentiveExpense(periodEnts, staffByIdMap, monthReleases);
+    const branchesByIdMap = new Map(branches.map(br => [br.id, br]));
+    const incentives = computeIncentiveExpense(periodEnts, staffByIdMap, monthReleases, branchesByIdMap, globalSettings);
 
     const matUseAllocations = globalSettings?.mat_use_allocations !== false;
     const matUseLumpsum = globalSettings?.mat_use_lumpsum === true;

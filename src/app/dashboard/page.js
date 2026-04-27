@@ -201,8 +201,9 @@ export default function DashboardPage() {
   // Prorata Factor for Fixed Costs
   const isYearly = filterMode === "year";
   const factor = (isYearly && filterYear === NOW.getFullYear()) ? (NOW.getMonth() + 1) : (isYearly ? 12 : 1);
-  // Staff lookup for the per-staff incentive_pct used by computeIncentiveExpense.
+  // Staff + branch lookups for computeIncentiveExpense's rate fallback chain.
   const staffByIdMap = new Map(staff.map(s => [s.id, s]));
+  const branchesByIdMap = new Map(branches.map(b => [b.id, b]));
 
   // Network totals are derived from branchData below so Operating Cost =
   // Full Net P&L's expense side: vInc + vMatE + vOther + fixed + actual
@@ -227,7 +228,7 @@ export default function DashboardPage() {
     // any release that paid out in this period for this branch. Pending
     // entries count as raw; once paid the rounding surplus shows up too.
     const branchReleases = incentiveReleases.filter(r => r.branch_id === b.id && inPeriod(r.period_from || (r.released_at || "").slice(0, 10)));
-    const vInc = computeIncentiveExpense(bEntries, staffByIdMap, branchReleases);
+    const vInc = computeIncentiveExpense(bEntries, staffByIdMap, branchReleases, branchesByIdMap, globalSettings);
     // Material cost respects Master Setup → Material Expense Source toggles.
     const vMatAlloc = allocsTotal(materialAllocations.filter(a => a.branch_id === b.id && inPeriod(a.date || (a.transferred_at || "").slice(0, 10))));
     const vMatLump = bEntries.reduce((s, e) => s + (Number(e.mat_expense) || 0), 0);

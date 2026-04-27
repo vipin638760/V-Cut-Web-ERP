@@ -692,9 +692,11 @@ export default function BranchesPage() {
   //   1. `fixed_expenses` row (Operational Expenses page) for this type
   //   2. `monthly_expenses` row (Master Setup → Fixed Exp) for this field
   //   3. branches master default
-  // Staff lookup keyed by id — needed for the per-staff incentive_pct used in
-  // computeIncentiveExpense's raw-5% calculation.
+  // Staff + branch lookups for computeIncentiveExpense — passing branches and
+  // globalSettings lets it fall back to the mens/unisex rate when a staff
+  // record doesn't have an explicit incentive_pct (mirrors entry/page.js).
   const staffByIdMap = new Map(staff.map(s => [s.id, s]));
+  const branchesByIdMap = new Map(branches.map(b => [b.id, b]));
   const resolveFixed = (b, type, perMonthDefault, isYearly, filterYear, filterMonth) => {
     const startM = isYearly ? 1 : filterMonth;
     const endM = isYearly ? (filterYear === NOW.getFullYear() ? NOW.getMonth() + 1 : 12) : filterMonth;
@@ -733,7 +735,7 @@ export default function BranchesPage() {
     // count as raw; once paid out, the rounding surplus also lands here so
     // the total matches what was actually disbursed.
     const branchReleases = incentiveReleases.filter(r => r.branch_id === b.id && inPeriod(r.period_from || (r.released_at || "").slice(0, 10)));
-    const vInc = computeIncentiveExpense(bEntries, staffByIdMap, branchReleases);
+    const vInc = computeIncentiveExpense(bEntries, staffByIdMap, branchReleases, branchesByIdMap, globalSettings);
     // Material cost honours Master Setup → Material Expense Source toggles
     // so card/table/Summary use the same source as the branch detail + P&L
     // pages. Default (allocations only) matches the dashboard's Operating

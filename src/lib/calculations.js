@@ -28,13 +28,29 @@ export const parseLocalDate = (ymd) => (ymd ? new Date(ymd + "T00:00") : null);
 //
 // **How to apply:** Filter entries + releases to the period/branch you care
 // about, then call this. Pre-filtering keeps the helper period-agnostic.
-export function computeIncentiveExpense(entries = [], staffById, releases = []) {
+export function computeIncentiveExpense(entries = [], staffById, releases = [], branchesById, globalSettings) {
   const MAT_PCT = 0.05;
+  // Mirrors `staffIncRate` in entry/page.js: prefer per-staff override, then
+  // global mens/unisex rate keyed off the branch type, then 10% default.
+  // Without this fallback, staff records that never set incentive_pct drop
+  // to 0% silently — which made expense plunge and the network P&L spike.
+  const rateFor = (sb, entry) => {
+    const s = staffById && (staffById.get ? staffById.get(sb.staff_id) : null);
+    if (s?.incentive_pct !== undefined && s?.incentive_pct !== null && s.incentive_pct !== "") {
+      return Number(s.incentive_pct) || 0;
+    }
+    const b = branchesById && (branchesById.get ? branchesById.get(entry.branch_id) : null);
+    if (b && globalSettings) {
+      return b.type === "unisex"
+        ? Number(globalSettings.unisex_inc ?? 10) || 10
+        : Number(globalSettings.mens_inc ?? 10) || 10;
+    }
+    return 10;
+  };
   let raw = 0;
   entries.forEach(e => {
     (e.staff_billing || []).forEach(sb => {
-      const s = staffById && (staffById.get ? staffById.get(sb.staff_id) : null);
-      const incPct = (Number(s?.incentive_pct) || 0) / 100;
+      const incPct = rateFor(sb, e) / 100;
       raw += (Number(sb.billing) || 0) * incPct;
       raw += (Number(sb.material) || 0) * MAT_PCT;
     });
