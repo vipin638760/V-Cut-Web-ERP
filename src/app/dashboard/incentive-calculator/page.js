@@ -13,8 +13,12 @@ export default function IncentiveCalculatorPage() {
   const [branches, setBranches] = useState([]);
   const [staff, setStaff] = useState([]);
   const [releases, setReleases] = useState([]);
+  const [globalSettings, setGlobalSettings] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  // Toggles the "incentive_pct audit" panel that flags staff who fall back
+  // to the global mens/unisex rate.
+  const [showRateAudit, setShowRateAudit] = useState(false);
 
   const currentUser = useCurrentUser() || {};
   const canEdit = ["admin", "accountant"].includes(currentUser.role);
@@ -39,6 +43,7 @@ export default function IncentiveCalculatorPage() {
     const unsubs = [
       onSnapshot(collection(db, "branches"), sn => setBranches(sn.docs.map(d => ({ ...d.data(), id: d.id })))),
       onSnapshot(collection(db, "staff"), sn => { setStaff(sn.docs.map(d => ({ ...d.data(), id: d.id }))); setLoading(false); }),
+      onSnapshot(doc(db, "settings", "global"), sn => setGlobalSettings(sn.data() || {})),
     ];
     return () => unsubs.forEach(u => u());
   }, []);
@@ -80,6 +85,45 @@ export default function IncentiveCalculatorPage() {
 
   const branchesById = useMemo(() => new Map(branches.map(b => [b.id, b])), [branches]);
   const staffById = useMemo(() => new Map(staff.map(s => [s.id, s])), [staff]);
+
+  // Audit which staff don't have an explicit incentive_pct on their profile,
+  // grouping into "explicit 0%" (probably a mistake) vs "missing → falls back
+  // to global rate". Inactive staff are excluded so the list stays actionable.
+  // Branch resolution uses the staff master branch_id; a staff with no branch
+  // shows up under "no branch resolved" so the user knows the global fallback
+  // can't even be applied.
+  const incRateAudit = useMemo(() => {
+    const mensRate = Number(globalSettings?.mens_inc ?? 10) || 10;
+    const unisexRate = Number(globalSettings?.unisex_inc ?? 10) || 10;
+    const explicitZero = [];
+    const fallback = [];
+    staff.forEach(s => {
+      if (s.status === "inactive") return;
+      const br = branchesById.get(s.branch_id);
+      const branchName = br?.name?.replace("V-CUT ", "") || "—";
+      const branchType = br?.type || null;
+      const fallbackRate = branchType === "unisex" ? unisexRate : (branchType === "mens" ? mensRate : null);
+      const row = {
+        id: s.id,
+        name: s.name || s.id,
+        role: s.role || "",
+        branch: branchName,
+        branchType,
+        fallbackRate,
+      };
+      const v = s.incentive_pct;
+      if (v === undefined || v === null || v === "") {
+        fallback.push(row);
+      } else if (Number(v) === 0) {
+        explicitZero.push(row);
+      }
+    });
+    return {
+      mensRate, unisexRate,
+      explicitZero: explicitZero.sort((a, b) => a.name.localeCompare(b.name)),
+      fallback: fallback.sort((a, b) => a.name.localeCompare(b.name)),
+    };
+  }, [staff, branchesById, globalSettings]);
 
   const filtered = useMemo(() => {
     if (!branchFilter) return entries;
@@ -418,6 +462,74 @@ export default function IncentiveCalculatorPage() {
       {error && (
         <div style={{ padding: 14, borderRadius: 10, background: "rgba(248,113,113,0.1)", border: "1px solid rgba(248,113,113,0.3)", color: "var(--red)", fontSize: 12, marginBottom: 16 }}>
           Query error: {error}. Entries may not load until a Firestore index is created.
+        </div>
+      )}
+
+      {/* Incentive rate audit — admin/accountant only. Surfaces staff whose
+          incentive_pct is unset (uses global fallback) or set to 0 (no
+          incentive). Click the chip to expand the per-staff list. */}
+      {canEdit && (incRateAudit.fallback.length > 0 || incRateAudit.explicitZero.length > 0) && (
+        <div style={{ marginBottom: 16, borderRadius: 10, border: "1px solid rgba(251,146,60,0.3)", background: "linear-gradient(135deg, rgba(251,146,60,0.08), rgba(251,146,60,0.02))", overflow: "hidden" }}>
+          <button onClick={() => setShowRateAudit(v => !v)}
+            style={{ width: "100%", padding: "12px 16px", background: "transparent", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, color: "var(--text)", fontFamily: "inherit" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 11, fontWeight: 800, color: "var(--orange)", textTransform: "uppercase", letterSpacing: 1.5 }}>Incentive Rate Audit</span>
+              <span style={{ fontSize: 11, color: "var(--text3)" }}>
+                {incRateAudit.fallback.length} fallback · {incRateAudit.explicitZero.length} zero ·
+                global mens {incRateAudit.mensRate}% / unisex {incRateAudit.unisexRate}%
+              </span>
+            </div>
+            <span style={{ fontSize: 11, color: "var(--text3)" }}>{showRateAudit ? "▲ Hide" : "▼ Show"}</span>
+          </button>
+          {showRateAudit && (
+            <div style={{ padding: "0 16px 16px", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 16 }}>
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 800, color: "var(--orange)", textTransform: "uppercase", letterSpacing: 1.5, marginBottom: 8 }}>
+                  Falls back to global rate ({incRateAudit.fallback.length})
+                </div>
+                {incRateAudit.fallback.length === 0 ? (
+                  <div style={{ fontSize: 11, color: "var(--text3)", fontStyle: "italic" }}>None — every active staff has an explicit incentive_pct.</div>
+                ) : (
+                  <div style={{ borderRadius: 8, border: "1px solid var(--border)", maxHeight: 240, overflowY: "auto", background: "var(--bg3)" }}>
+                    {incRateAudit.fallback.map(r => (
+                      <div key={r.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 12px", borderBottom: "1px solid var(--border)", fontSize: 11 }}>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
+                          <span style={{ fontWeight: 700, color: "var(--text)" }}>{r.name}</span>
+                          <span style={{ color: "var(--text3)", fontSize: 10 }}>{r.branch}{r.role ? ` · ${r.role}` : ""}</span>
+                        </div>
+                        <span style={{ fontWeight: 700, color: r.fallbackRate != null ? "var(--orange)" : "var(--red)", whiteSpace: "nowrap", fontSize: 11 }}>
+                          {r.fallbackRate != null ? `${r.fallbackRate}%` : "no branch"}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 800, color: "var(--red)", textTransform: "uppercase", letterSpacing: 1.5, marginBottom: 8 }}>
+                  Explicitly set to 0% ({incRateAudit.explicitZero.length})
+                </div>
+                {incRateAudit.explicitZero.length === 0 ? (
+                  <div style={{ fontSize: 11, color: "var(--text3)", fontStyle: "italic" }}>None — no active staff has incentive_pct = 0.</div>
+                ) : (
+                  <div style={{ borderRadius: 8, border: "1px solid var(--border)", maxHeight: 240, overflowY: "auto", background: "var(--bg3)" }}>
+                    {incRateAudit.explicitZero.map(r => (
+                      <div key={r.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 12px", borderBottom: "1px solid var(--border)", fontSize: 11 }}>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
+                          <span style={{ fontWeight: 700, color: "var(--text)" }}>{r.name}</span>
+                          <span style={{ color: "var(--text3)", fontSize: 10 }}>{r.branch}{r.role ? ` · ${r.role}` : ""}</span>
+                        </div>
+                        <span style={{ fontWeight: 700, color: "var(--red)", fontSize: 11 }}>0%</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div style={{ gridColumn: "1 / -1", fontSize: 11, color: "var(--text3)", lineHeight: 1.5 }}>
+                <strong style={{ color: "var(--text2)" }}>What to do:</strong> open <Link href="/dashboard/staff" style={{ color: "var(--accent)", fontWeight: 700 }}>Staff Master</Link> and set <em>Incentive %</em> on the rows above. Until you do, the calculator and expense rollups apply the branch-type fallback shown next to each name.
+              </div>
+            </div>
+          )}
         </div>
       )}
 
