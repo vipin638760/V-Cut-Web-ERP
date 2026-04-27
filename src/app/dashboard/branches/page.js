@@ -425,6 +425,13 @@ export default function BranchesPage() {
   // **How to apply:** Used in the branchData factor loop to override the
   // master default per (branch, YYYY-MM, expense_type).
   const [fixedExpenses, setFixedExpenses] = useState([]);
+  // Older per-month override store written by Master Setup → Fixed Exp tab.
+  // **Why:** Some branches still use this surface; without reading it, the
+  // Summary view drifts whenever the user updated values there instead of in
+  // Operational Expenses.
+  // **How to apply:** Resolver consults this when no `fixed_expenses` row
+  // exists for the (branch, month, type).
+  const [monthlyExpenses, setMonthlyExpenses] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedBranch, setSelectedBranch] = useState(null);
   const [logView, setLogView] = useState(null);
@@ -549,6 +556,7 @@ export default function BranchesPage() {
         setMaterialAllocations(sn.docs.map(d => ({ ...d.data(), id: d.id })));
       }),
       onSnapshot(collection(db, "fixed_expenses"), sn => setFixedExpenses(sn.docs.map(d => ({ ...d.data(), id: d.id })))),
+      onSnapshot(collection(db, "monthly_expenses"), sn => setMonthlyExpenses(sn.docs.map(d => ({ ...d.data(), id: d.id })))),
     ];
     return () => unsubs.forEach(u => u());
   }, []);
@@ -643,8 +651,8 @@ export default function BranchesPage() {
     }, 0);
   };
 
-  // Override lookup from `fixed_expenses` — keyed by `${branchId}|${YYYY-MM}|${type}`.
-  // Same map every branch reuses, so build it once outside the .map.
+  // Override lookup from `fixed_expenses` (Operational Expenses page) — keyed
+  // by `${branchId}|${YYYY-MM}|${type}`.
   const fixedOverride = (() => {
     const m = new Map();
     fixedExpenses.forEach(fx => {
@@ -654,18 +662,48 @@ export default function BranchesPage() {
     });
     return m;
   })();
+  // Older override store: `monthly_expenses` keyed by `${branchId}|${YYYY-MM}`,
+  // each row holds shop_rent / room_rent / shop_elec / room_elec / wifi / water
+  // as named fields (Master Setup → Fixed Exp tab writes here).
+  const monthlyOverride = (() => {
+    const m = new Map();
+    monthlyExpenses.forEach(rec => {
+      if (!rec.branch_id || !rec.month) return;
+      m.set(`${rec.branch_id}|${rec.month}`, rec);
+    });
+    return m;
+  })();
+  // Maps the Operational Expenses type-name into the matching field on a
+  // `monthly_expenses` doc so the resolver can fall back to the older store.
+  const typeToMonthlyField = {
+    "Shop Rent": "shop_rent",
+    "Room Rent": "room_rent",
+    "Electricity Shop": "shop_elec",
+    "Electricity Room": "room_elec",
+    "WiFi Bill": "wifi",
+    "Water Bill": "water",
+  };
   // Resolve a fixed-cost line for a (branch, type, master-default) tuple
-  // across the active period, summing per-month and preferring the override
-  // when an Operational Expenses row exists for that month.
+  // across the active period, summing per-month. Override priority per month:
+  //   1. `fixed_expenses` row (Operational Expenses page) for this type
+  //   2. `monthly_expenses` row (Master Setup → Fixed Exp) for this field
+  //   3. branches master default
   const resolveFixed = (b, type, perMonthDefault, isYearly, filterYear, filterMonth) => {
     const startM = isYearly ? 1 : filterMonth;
     const endM = isYearly ? (filterYear === NOW.getFullYear() ? NOW.getMonth() + 1 : 12) : filterMonth;
+    const monthlyField = typeToMonthlyField[type];
     let total = 0;
     for (let m = startM; m <= endM; m++) {
       const ymKey = `${filterYear}-${String(m).padStart(2, "0")}`;
-      const k = `${b.id}|${ymKey}|${type}`;
-      const ovr = fixedOverride.get(k);
-      total += ovr != null ? ovr : (Number(perMonthDefault) || 0);
+      const fxKey = `${b.id}|${ymKey}|${type}`;
+      const fxOvr = fixedOverride.get(fxKey);
+      if (fxOvr != null) { total += fxOvr; continue; }
+      if (monthlyField) {
+        const mRow = monthlyOverride.get(`${b.id}|${ymKey}`);
+        const mOvr = mRow?.[monthlyField];
+        if (mOvr !== undefined && mOvr !== null) { total += Number(mOvr) || 0; continue; }
+      }
+      total += Number(perMonthDefault) || 0;
     }
     return total;
   };
