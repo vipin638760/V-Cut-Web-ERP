@@ -1,4 +1,5 @@
 "use client";
+import Link from "next/link";
 import { useEffect, useState, useMemo } from "react";
 import { collection, onSnapshot, query, where, orderBy, addDoc, writeBatch, doc, deleteDoc, getDocs } from "firebase/firestore";
 import { db } from "@/lib/firebase";
@@ -658,7 +659,22 @@ export default function IncentiveCalculatorPage() {
                           ) : null}
                         </TD>
                       )}
-                      <TD>{e.date}</TD>
+                      <TD>
+                        {(() => {
+                          const [yy, mm] = (e.date || "").split("-");
+                          const ymQS = yy && mm ? `&year=${yy}&month=${Number(mm)}` : "";
+                          const href = e.entry_id
+                            ? `/dashboard/entry?edit=${encodeURIComponent(e.entry_id)}${ymQS}`
+                            : `/dashboard/entry?date=${encodeURIComponent(e.date)}${e.branch_id ? `&branch=${encodeURIComponent(e.branch_id)}` : ""}`;
+                          return (
+                            <Link href={href} title={`Open Daily Entry for ${e.date}`}
+                              style={{ color: "var(--accent)", textDecoration: "none", fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 4 }}>
+                              {e.date}
+                              <span style={{ fontSize: 9, opacity: 0.7 }}>↗</span>
+                            </Link>
+                          );
+                        })()}
+                      </TD>
                       <TD>{(e.branch || "—").replace("V-CUT ", "")}</TD>
                       <TD right>{INR(e.billing)}</TD>
                       <TD right style={{ color: "var(--accent)" }}>{e.matSale > 0 ? INR(e.matSale) : "—"}</TD>
