@@ -3293,7 +3293,10 @@ function SummaryView({ summaryTab, setSummaryTab, branchData, branches, entries,
     const matSale = bEntries.reduce((s, e) => s + (e.staff_billing || []).reduce((ss, sb) => ss + (sb.material || 0), 0), 0);
     const incomeTotal = online + cash + matSale;
     const cashExp = bEntries.reduce((s, e) => s + (e.others || 0), 0); // misc cash spent at branch
-    const gst = Math.round((online * gstPct) / 100);
+    // Keep GST as float (no per-branch round). Dashboard's Net P&L sums raw
+    // floats and rounds once at INR() display, so per-branch rounding here was
+    // drifting the grand P&L by a few rupees vs the Dashboard.
+    const gst = (online * gstPct) / 100;
     const totalExp = d.vInc + d.vMatE + d.vPetrol + d.fShopRent + d.fRoomRent + d.fElec + d.fWifi + d.actualSalary + cashExp + gst;
     return { b, online, cash, matSale, incomeTotal, cashExp, gst, totalExp, d };
   });
