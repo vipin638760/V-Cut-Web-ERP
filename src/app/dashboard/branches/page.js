@@ -782,7 +782,7 @@ export default function BranchesPage() {
       n: net,
       staffCount: staff.filter(s => s.branch_id === b.id).length,
       vInc, vMatE, vOther, vPetrol,
-      fShopRent, fRoomRent, fWifi, fElec,
+      fShopRent, fRoomRent, fWifi, fElec, fShopElec, fRoomElec,
       actualSalary, actualLeaves,
       totalGst, factor,
       totalDeficit, totalExcess, netDiff, reconciledDays,
@@ -3307,6 +3307,8 @@ function SummaryView({ summaryTab, setSummaryTab, branchData, branches, entries,
     vInc: acc.vInc + r.d.vInc,
     actualSalary: acc.actualSalary + r.d.actualSalary,
     fElec: acc.fElec + r.d.fElec,
+    fShopElec: acc.fShopElec + (r.d.fShopElec || 0),
+    fRoomElec: acc.fRoomElec + (r.d.fRoomElec || 0),
     fWifi: acc.fWifi + r.d.fWifi,
     fShopRent: acc.fShopRent + r.d.fShopRent,
     fRoomRent: acc.fRoomRent + r.d.fRoomRent,
@@ -3314,7 +3316,7 @@ function SummaryView({ summaryTab, setSummaryTab, branchData, branches, entries,
     vMatE: acc.vMatE + r.d.vMatE,
     gst: acc.gst + r.gst,
     totalExp: acc.totalExp + r.totalExp,
-  }), { online: 0, cash: 0, matSale: 0, incomeTotal: 0, cashExp: 0, vInc: 0, actualSalary: 0, fElec: 0, fWifi: 0, fShopRent: 0, fRoomRent: 0, vPetrol: 0, vMatE: 0, gst: 0, totalExp: 0 });
+  }), { online: 0, cash: 0, matSale: 0, incomeTotal: 0, cashExp: 0, vInc: 0, actualSalary: 0, fElec: 0, fShopElec: 0, fRoomElec: 0, fWifi: 0, fShopRent: 0, fRoomRent: 0, vPetrol: 0, vMatE: 0, gst: 0, totalExp: 0 });
 
   // Per-branch salary stays masked to hide the breakdown, but the salary
   // subtotal cell + all totals show the full figure (including salary) so
@@ -3428,8 +3430,8 @@ function SummaryView({ summaryTab, setSummaryTab, branchData, branches, entries,
                       <TD right style={{ color: "var(--red)" }}>{INR(r.cashExp)}</TD>
                       <TD right style={{ color: "var(--red)" }}>{INR(r.d.vInc)}</TD>
                       <TD right style={{ color: "var(--blue)" }}>{isAdmin ? INR(r.d.actualSalary) : MASK}</TD>
-                      <TD right style={{ color: "var(--orange)" }}>{INR(r.d.fElec)}</TD>
-                      <TD right style={{ color: "var(--orange)" }}>—</TD>
+                      <TD right style={{ color: "var(--orange)" }}>{INR(r.d.fShopElec)}</TD>
+                      <TD right style={{ color: "var(--orange)" }}>{r.d.fRoomElec > 0 ? INR(r.d.fRoomElec) : "—"}</TD>
                       <TD right style={{ color: "var(--orange)" }}>{INR(r.d.fWifi)}</TD>
                       <TD right style={{ color: "var(--orange)" }}>{INR(r.d.fShopRent)}</TD>
                       <TD right style={{ color: "var(--orange)" }}>{INR(r.d.fRoomRent)}</TD>
@@ -3445,8 +3447,8 @@ function SummaryView({ summaryTab, setSummaryTab, branchData, branches, entries,
                     <TD right style={{ fontWeight: 800, color: "var(--red)" }}>{INR(totals.cashExp)}</TD>
                     <TD right style={{ fontWeight: 800, color: "var(--red)" }}>{INR(totals.vInc)}</TD>
                     <TD right style={{ fontWeight: 800, color: "var(--blue)" }}>{INR(totals.actualSalary)}</TD>
-                    <TD right style={{ fontWeight: 800, color: "var(--orange)" }}>{INR(totals.fElec)}</TD>
-                    <TD right style={{ fontWeight: 800, color: "var(--orange)" }}>—</TD>
+                    <TD right style={{ fontWeight: 800, color: "var(--orange)" }}>{INR(totals.fShopElec)}</TD>
+                    <TD right style={{ fontWeight: 800, color: "var(--orange)" }}>{totals.fRoomElec > 0 ? INR(totals.fRoomElec) : "—"}</TD>
                     <TD right style={{ fontWeight: 800, color: "var(--orange)" }}>{INR(totals.fWifi)}</TD>
                     <TD right style={{ fontWeight: 800, color: "var(--orange)" }}>{INR(totals.fShopRent)}</TD>
                     <TD right style={{ fontWeight: 800, color: "var(--orange)" }}>{INR(totals.fRoomRent)}</TD>
