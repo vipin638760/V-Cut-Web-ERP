@@ -3,7 +3,7 @@ import { useEffect, useState, useRef, useMemo, Fragment } from "react";
 import { collection, onSnapshot, query, orderBy, doc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
-import { INR, staffBillingInPeriod, makeFilterPrefix, periodLabel, proRataSalary, staffLeavesInMonth, staffStatusForMonth, staffIncentivesInPeriod, parseLocalDate, getMonthlyFixed, MASK } from "@/lib/calculations";
+import { INR, staffBillingInPeriod, makeFilterPrefix, periodLabel, proRataSalary, staffLeavesInMonth, staffStatusForMonth, staffIncentivesInPeriod, parseLocalDate, getMonthlyFixed, MASK, computeIncentiveExpense } from "@/lib/calculations";
 import { PeriodWidget, ToggleGroup, Card, Pill, TH, TD, Icon, Modal, TabNav, ProgressBar, BranchEmployeeSearch, useToast } from "@/components/ui";
 import { useRouter } from "next/navigation";
 // ExcelJS is ~200KB — load only when Export is actually used.
@@ -83,6 +83,7 @@ export default function DashboardPage() {
   const [materialAllocations, setMaterialAllocations] = useState([]);
   const [monthlyExpenses, setMonthlyExpenses] = useState([]);
   const [fixedExpenses, setFixedExpenses] = useState([]);
+  const [incentiveReleases, setIncentiveReleases] = useState([]);
   const [loading, setLoading]     = useState(true);
 
   // Period
@@ -175,6 +176,9 @@ export default function DashboardPage() {
       onSnapshot(collection(db, "fixed_expenses"),
         sn => setFixedExpenses(sn.docs.map(d => ({ ...d.data(), id: d.id }))),
         err("fixed_expenses")),
+      onSnapshot(collection(db, "incentive_releases"),
+        sn => setIncentiveReleases(sn.docs.map(d => ({ ...d.data(), id: d.id }))),
+        err("incentive_releases")),
     ];
     return () => unsubs.forEach(u => u());
   }, [subTick]);
@@ -197,6 +201,8 @@ export default function DashboardPage() {
   // Prorata Factor for Fixed Costs
   const isYearly = filterMode === "year";
   const factor = (isYearly && filterYear === NOW.getFullYear()) ? (NOW.getMonth() + 1) : (isYearly ? 12 : 1);
+  // Staff lookup for the per-staff incentive_pct used by computeIncentiveExpense.
+  const staffByIdMap = new Map(staff.map(s => [s.id, s]));
 
   // Network totals are derived from branchData below so Operating Cost =
   // Full Net P&L's expense side: vInc + vMatE + vOther + fixed + actual
@@ -217,7 +223,11 @@ export default function DashboardPage() {
     const iMatS   = bEntries.reduce((s, e) => s + (e.staff_billing || []).reduce((ss, sb) => ss + (sb.material || 0), 0), 0);
     const income  = iOnline + iCash + iMatS;
 
-    const vInc   = bEntries.reduce((s, e) => s + (e.staff_billing || []).reduce((ss, sb) => ss + (sb.incentive || 0) + (sb.mat_incentive || 0), 0), 0);
+    // Incentive expense = raw 5% per-day + ceil-to-10 rounding bump from
+    // any release that paid out in this period for this branch. Pending
+    // entries count as raw; once paid the rounding surplus shows up too.
+    const branchReleases = incentiveReleases.filter(r => r.branch_id === b.id && inPeriod(r.period_from || (r.released_at || "").slice(0, 10)));
+    const vInc = computeIncentiveExpense(bEntries, staffByIdMap, branchReleases);
     // Material cost respects Master Setup → Material Expense Source toggles.
     const vMatAlloc = allocsTotal(materialAllocations.filter(a => a.branch_id === b.id && inPeriod(a.date || (a.transferred_at || "").slice(0, 10))));
     const vMatLump = bEntries.reduce((s, e) => s + (Number(e.mat_expense) || 0), 0);

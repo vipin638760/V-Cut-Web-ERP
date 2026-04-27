@@ -2,7 +2,7 @@
 import { useEffect, useState, useRef } from "react";
 import { db } from "@/lib/firebase";
 import { collection, onSnapshot, query, orderBy } from "firebase/firestore";
-import { INR, MASK, MONTHS, proRataSalary, staffStatusForMonth, getMonthlyFixed } from "@/lib/calculations";
+import { INR, MASK, MONTHS, proRataSalary, staffStatusForMonth, getMonthlyFixed, computeIncentiveExpense } from "@/lib/calculations";
 import { PeriodWidget, ToggleGroup, Card, Icon, TH, TD, Pill } from "@/components/ui";
 import VLoader from "@/components/VLoader";
 
@@ -21,6 +21,7 @@ export default function PLReportPage() {
   const [transactions, setTransactions] = useState([]);
   const [monthlyExpenses, setMonthlyExpenses] = useState([]);
   const [fixedExpenses, setFixedExpenses] = useState([]);
+  const [incentiveReleases, setIncentiveReleases] = useState([]);
   const [costCenters, setCostCenters] = useState([]);
   const [salaryHistory, setSalaryHistory] = useState([]);
   const [materialAllocations, setMaterialAllocations] = useState([]);
@@ -45,6 +46,7 @@ export default function PLReportPage() {
       onSnapshot(collection(db, "transactions"), s => setTransactions(s.docs.map(d => ({ ...d.data(), id: d.id })))),
       onSnapshot(collection(db, "monthly_expenses"), s => setMonthlyExpenses(s.docs.map(d => ({ ...d.data(), id: d.id })))),
       onSnapshot(collection(db, "fixed_expenses"), s => setFixedExpenses(s.docs.map(d => ({ ...d.data(), id: d.id })))),
+      onSnapshot(collection(db, "incentive_releases"), s => setIncentiveReleases(s.docs.map(d => ({ ...d.data(), id: d.id })))),
       onSnapshot(collection(db, "cost_centers"), s => setCostCenters(s.docs.map(d => ({ ...d.data(), id: d.id })))),
       onSnapshot(collection(db, "salary_history"), s => setSalaryHistory(s.docs.map(d => ({ ...d.data(), id: d.id })))),
       onSnapshot(collection(db, "material_allocations"), s => setMaterialAllocations(s.docs.map(d => ({ ...d.data(), id: d.id })))),
@@ -95,7 +97,12 @@ export default function PLReportPage() {
     const totalIncome = iOnline + iCash + iMatS;
 
     // Variable — incentive + material cost (flag-aware) + other day-level costs.
-    const incentives = periodEnts.reduce((s, e) => s + (e.staff_billing || []).reduce((ss, sb) => ss + (sb.incentive || 0) + (sb.mat_incentive || 0), 0), 0);
+    // Raw 5% per-day + ceil-10 rounding bump on releases that paid out for
+    // this branch in this month. Pending entries count as raw; once paid the
+    // rounding surplus is added.
+    const monthReleases = incentiveReleases.filter(r => r.branch_id === bid && (r.period_from || (r.released_at || "").slice(0, 10)).startsWith(month));
+    const staffByIdMap = new Map(staff.map(s => [s.id, s]));
+    const incentives = computeIncentiveExpense(periodEnts, staffByIdMap, monthReleases);
 
     const matUseAllocations = globalSettings?.mat_use_allocations !== false;
     const matUseLumpsum = globalSettings?.mat_use_lumpsum === true;

@@ -15,6 +15,38 @@ export const MASK = '•••••';
 // joined Apr 22 but salary computed as 0 because effectiveStart > effectiveEnd).
 export const parseLocalDate = (ymd) => (ymd ? new Date(ymd + "T00:00") : null);
 
+// Incentive expense = raw 5% × billing + 5% × material across each staff
+// row, plus the ceil-to-10 rounding bump that was actually paid out at
+// release time (release.amount_released - release.total_incentive).
+//
+// **Why:** Entries store `staff_billing[].incentive` ceil-10 per-day, which
+// inflates the period sum vs the real 5% (e.g. ₹1,810 vs ₹1,703 for 15 days).
+// User wants the expense to read the actual earned (raw) until payout, then
+// add only the rounding surplus that was actually paid. This formula gives:
+//   • before payout: expense = raw (₹1,703)
+//   • after payout:  expense = raw + bump = amount_released (₹1,710)
+//
+// **How to apply:** Filter entries + releases to the period/branch you care
+// about, then call this. Pre-filtering keeps the helper period-agnostic.
+export function computeIncentiveExpense(entries = [], staffById, releases = []) {
+  const MAT_PCT = 0.05;
+  let raw = 0;
+  entries.forEach(e => {
+    (e.staff_billing || []).forEach(sb => {
+      const s = staffById && (staffById.get ? staffById.get(sb.staff_id) : null);
+      const incPct = (Number(s?.incentive_pct) || 0) / 100;
+      raw += (Number(sb.billing) || 0) * incPct;
+      raw += (Number(sb.material) || 0) * MAT_PCT;
+    });
+  });
+  let bump = 0;
+  releases.forEach(r => {
+    const diff = (Number(r.amount_released) || 0) - (Number(r.total_incentive) || 0);
+    if (diff > 0) bump += diff;
+  });
+  return raw + bump;
+}
+
 // Fixed-cost resolver — returns per-month fixed-cost figures for a branch.
 // Override priority per field, highest wins:
 //   1. `fixedExpenses` row from the Operational Expenses page (typed by name)

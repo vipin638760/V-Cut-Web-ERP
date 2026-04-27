@@ -3,7 +3,7 @@ import { useEffect, useState, useRef } from "react";
 import { collection, onSnapshot, query, orderBy, where, getDocs, deleteDoc, doc, addDoc, updateDoc, writeBatch } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
-import { INR, branchIncomeInPeriod, makeFilterPrefix, periodLabel, proRataSalary, staffLeavesInMonth, staffStatusForMonth, parseLocalDate, MASK, effectiveCashInHand } from "@/lib/calculations";
+import { INR, branchIncomeInPeriod, makeFilterPrefix, periodLabel, proRataSalary, staffLeavesInMonth, staffStatusForMonth, parseLocalDate, MASK, effectiveCashInHand, computeIncentiveExpense } from "@/lib/calculations";
 import { Icon, IconBtn, Pill, Card, PeriodWidget, ToggleGroup, TH, TD, Modal, SearchSelect, BranchEmployeeSearch, useConfirm, useToast, useSort } from "@/components/ui";
 import { useRouter } from "next/navigation";
 import VLoader from "@/components/VLoader";
@@ -432,6 +432,9 @@ export default function BranchesPage() {
   // **How to apply:** Resolver consults this when no `fixed_expenses` row
   // exists for the (branch, month, type).
   const [monthlyExpenses, setMonthlyExpenses] = useState([]);
+  // Per-staff incentive payouts. Used to add the ceil-10 rounding bump
+  // (amount_released − total_incentive) to incentive expense once paid.
+  const [incentiveReleases, setIncentiveReleases] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedBranch, setSelectedBranch] = useState(null);
   const [logView, setLogView] = useState(null);
@@ -557,6 +560,7 @@ export default function BranchesPage() {
       }),
       onSnapshot(collection(db, "fixed_expenses"), sn => setFixedExpenses(sn.docs.map(d => ({ ...d.data(), id: d.id })))),
       onSnapshot(collection(db, "monthly_expenses"), sn => setMonthlyExpenses(sn.docs.map(d => ({ ...d.data(), id: d.id })))),
+      onSnapshot(collection(db, "incentive_releases"), sn => setIncentiveReleases(sn.docs.map(d => ({ ...d.data(), id: d.id })))),
     ];
     return () => unsubs.forEach(u => u());
   }, []);
@@ -688,6 +692,9 @@ export default function BranchesPage() {
   //   1. `fixed_expenses` row (Operational Expenses page) for this type
   //   2. `monthly_expenses` row (Master Setup → Fixed Exp) for this field
   //   3. branches master default
+  // Staff lookup keyed by id — needed for the per-staff incentive_pct used in
+  // computeIncentiveExpense's raw-5% calculation.
+  const staffByIdMap = new Map(staff.map(s => [s.id, s]));
   const resolveFixed = (b, type, perMonthDefault, isYearly, filterYear, filterMonth) => {
     const startM = isYearly ? 1 : filterMonth;
     const endM = isYearly ? (filterYear === NOW.getFullYear() ? NOW.getMonth() + 1 : 12) : filterMonth;
@@ -721,7 +728,12 @@ export default function BranchesPage() {
     const iMatS   = bEntries.reduce((s, e) => s + (e.staff_billing || []).reduce((ss, sb) => ss + (sb.material || 0), 0), 0);
     const income  = iOnline + iCash + iMatS;
 
-    const vInc   = bEntries.reduce((s, e) => s + (e.staff_billing || []).reduce((ss, sb) => ss + (sb.incentive || 0) + (sb.mat_incentive || 0), 0), 0);
+    // Incentive expense = raw 5% per-day + ceil-to-10 rounding bump on
+    // releases that fall in this period for this branch. Pending entries
+    // count as raw; once paid out, the rounding surplus also lands here so
+    // the total matches what was actually disbursed.
+    const branchReleases = incentiveReleases.filter(r => r.branch_id === b.id && inPeriod(r.period_from || (r.released_at || "").slice(0, 10)));
+    const vInc = computeIncentiveExpense(bEntries, staffByIdMap, branchReleases);
     // Material cost honours Master Setup → Material Expense Source toggles
     // so card/table/Summary use the same source as the branch detail + P&L
     // pages. Default (allocations only) matches the dashboard's Operating
