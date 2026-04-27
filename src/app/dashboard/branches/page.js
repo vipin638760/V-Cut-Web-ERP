@@ -4,7 +4,7 @@ import { collection, onSnapshot, query, orderBy, where, getDocs, deleteDoc, doc,
 import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
 import { INR, branchIncomeInPeriod, makeFilterPrefix, periodLabel, proRataSalary, staffLeavesInMonth, staffStatusForMonth, parseLocalDate, MASK, effectiveCashInHand } from "@/lib/calculations";
-import { Icon, IconBtn, Pill, Card, PeriodWidget, ToggleGroup, TH, TD, Modal, SearchSelect, useConfirm, useToast, useSort } from "@/components/ui";
+import { Icon, IconBtn, Pill, Card, PeriodWidget, ToggleGroup, TH, TD, Modal, SearchSelect, BranchEmployeeSearch, useConfirm, useToast, useSort } from "@/components/ui";
 import { useRouter } from "next/navigation";
 import VLoader from "@/components/VLoader";
 
@@ -425,6 +425,12 @@ export default function BranchesPage() {
   const [globalSettings, setGlobalSettings] = useState(null);
   const [salHistory, setSalHistory] = useState([]);
   const [selectedStaffHistory, setSelectedStaffHistory] = useState(null);
+  // Search-driven focus on a specific staff row inside the branch detail.
+  // **Why:** When the user searches "Aarif" in the unified search, we open
+  // his branch detail and highlight his row briefly so he's easy to spot.
+  // **How to apply:** Set on search-select; cleared after the highlight
+  // pulse fades or the user leaves the detail view.
+  const [staffFocusId, setStaffFocusId] = useState(null);
   const staffRosterSort = useSort();
   const [attendanceCalendar, setAttendanceCalendar] = useState(null); // branch id
   const [attendanceMonth, setAttendanceMonth] = useState(null); // "YYYY-MM"
@@ -437,6 +443,17 @@ export default function BranchesPage() {
 
   // Controls
   const [brFilter, setBrFilter] = useState("all");
+  // After the branch detail mounts with a staff focus, scroll the matching
+  // row into view and let the highlight pulse for ~3s before clearing.
+  useEffect(() => {
+    if (!staffFocusId || !selectedBranch) return;
+    const t = setTimeout(() => {
+      const el = typeof document !== "undefined" ? document.getElementById(`staff-row-${staffFocusId}`) : null;
+      if (el && el.scrollIntoView) el.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 350);
+    const clear = setTimeout(() => setStaffFocusId(null), 3500);
+    return () => { clearTimeout(t); clearTimeout(clear); };
+  }, [staffFocusId, selectedBranch]);
   const [brTypeFilter, setBrTypeFilter] = useState("all");
   const [brSortCol, setBrSortCol] = useState("name");
   const [brSortDir, setBrSortDir] = useState("asc");
@@ -539,6 +556,7 @@ export default function BranchesPage() {
     const applyUrlState = () => {
       const params = new URLSearchParams(window.location.search);
       const bid  = params.get("branchId");
+      const sid  = params.get("staffId");
       const view = params.get("view");
       const tab  = params.get("tab");
       const expand = params.get("expand");
@@ -557,6 +575,7 @@ export default function BranchesPage() {
       // relevant card is open on arrival.
       if (expand) setDailyCashExpanded(expand);
       if (bid)  setSelectedBranch(bid);
+      if (sid)  setStaffFocusId(sid);
       if (mode) setFilterMode(mode);
       if (yr)   setFilterYear(Number(yr));
       if (mo)   setFilterMonth(Number(mo));
@@ -571,7 +590,7 @@ export default function BranchesPage() {
       }
 
       // Clean URL params so a refresh doesn't re-apply stale deep-link state.
-      if (bid || view || tab || expand || mode || yr || mo || cal) {
+      if (bid || sid || view || tab || expand || mode || yr || mo || cal) {
         window.history.replaceState({}, "", window.location.pathname);
       }
     };
@@ -2239,8 +2258,14 @@ export default function BranchesPage() {
               {sortedRows.map((row, i) => {
                 const { s, billing, staffTInc, totalSale, pct, curSalary, daysWorked, paidLeaves, lop, payrollDays } = row;
                 const hasExit = !!s.exit_date;
+                const isFocused = staffFocusId === s.id;
                 return (
-                  <tr key={s.id}>
+                  <tr key={s.id} id={`staff-row-${s.id}`}
+                    style={isFocused ? {
+                      background: "linear-gradient(90deg, rgba(var(--accent-rgb),0.18), rgba(var(--accent-rgb),0.04))",
+                      boxShadow: "inset 3px 0 0 var(--accent)",
+                      transition: "background 0.6s ease",
+                    } : undefined}>
                     <TD style={{ color: "var(--text3)" }}>{i + 1}</TD>
                     <TD style={{ fontWeight: 600 }}>{s.name}</TD>
                     <TD><Pill label={s.role || "—"} color="blue" /></TD>
@@ -2704,9 +2729,22 @@ export default function BranchesPage() {
     <div>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20, flexWrap: "wrap", gap: 12 }}>
         <div style={{ fontSize: 24, fontWeight: 800, color: "var(--gold)", letterSpacing: 1 }}>Branches</div>
-        {isAdmin && <button onClick={() => { setForm({ name: "", type: "mens", location: "", shop_rent: "", room_rent: "", salary_budget: "", wifi: "", shop_elec: "", room_elec: "" }); setEditId(null); setShowForm(!showForm); }} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 16px", borderRadius: 10, background: "linear-gradient(135deg,var(--gold),var(--gold2))", color: "#000", border: "none", cursor: "pointer", fontWeight: 700, fontSize: 13 }}>
-          <Icon name="plus" size={14} /> Add Branch
-        </button>}
+        <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", flex: 1, justifyContent: "flex-end", minWidth: 0 }}>
+          <BranchEmployeeSearch
+            branches={branches}
+            staff={staff}
+            onSelect={({ type, branchId, staffId }) => {
+              setSelectedBranch(branchId);
+              setStaffFocusId(type === "staff" ? staffId : null);
+              if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
+            }}
+            placeholder="Search branch or employee..."
+            style={{ maxWidth: 360 }}
+          />
+          {isAdmin && <button onClick={() => { setForm({ name: "", type: "mens", location: "", shop_rent: "", room_rent: "", salary_budget: "", wifi: "", shop_elec: "", room_elec: "" }); setEditId(null); setShowForm(!showForm); }} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 16px", borderRadius: 10, background: "linear-gradient(135deg,var(--gold),var(--gold2))", color: "#000", border: "none", cursor: "pointer", fontWeight: 700, fontSize: 13 }}>
+            <Icon name="plus" size={14} /> Add Branch
+          </button>}
+        </div>
       </div>
 
       <PeriodWidget filterMode={filterMode} setFilterMode={setFilterMode} filterYear={filterYear} setFilterYear={setFilterYear} filterMonth={filterMonth} setFilterMonth={setFilterMonth} />

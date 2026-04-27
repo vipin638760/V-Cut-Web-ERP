@@ -122,6 +122,9 @@ export default function PayrollTab() {
   const [branchSearch, setBranchSearch] = useState("");
   const branchFilterRef = useRef(null);
 
+  // Free-text employee search — filters visibleStaff by name (case-insensitive).
+  const [employeeSearch, setEmployeeSearch] = useState("");
+
   // Multi-select for bulk release (staff_id set).
   const [selectedStaff, setSelectedStaff] = useState(() => new Set());
   const toggleStaff = (id) => setSelectedStaff(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
@@ -291,11 +294,35 @@ export default function PayrollTab() {
 
       {/* Salary View */}
       {viewTab === "salary" && (() => {
-        const visibleStaff = staff.filter(s => {
+        const empQ = employeeSearch.trim().toLowerCase();
+        const eligibleByStatus = staff.filter(s => {
           if (branchFilter.size > 0 && !branchFilter.has(s.branch_id)) return false;
           if (filterMode === 'month') return staffStatusForMonth(s, filterPrefix).status !== 'inactive';
           return s.status !== 'inactive';
-        }).sort((a, b) => a.name.localeCompare(b.name));
+        });
+        const totalEligible = eligibleByStatus.length;
+        const visibleStaff = eligibleByStatus
+          .filter(s => !empQ || (s.name || "").toLowerCase().includes(empQ))
+          .sort((a, b) => a.name.localeCompare(b.name));
+
+        // Aggregate totals across the visible (filtered) roster — drives the KPI strip.
+        const kpi = visibleStaff.reduce((acc, s) => {
+          let earned = 0;
+          if (filterMode === 'year') {
+            const limit = (filterYear === new Date().getFullYear()) ? new Date().getMonth() + 1 : 12;
+            for (let m = 1; m <= limit; m++) earned += proRataSalary(s, `${filterYear}-${String(m).padStart(2,'0')}`, branches, salHistory, staff);
+          } else {
+            earned = proRataSalary(s, filterPrefix, branches, salHistory, staff);
+          }
+          const advs = getStaffAdvances(s.id);
+          const advApproved = advs.filter(a => a.status === 'approved').reduce((sum, a) => sum + Number(a.amount), 0);
+          const advPending = advs.filter(a => a.status === 'pending').reduce((sum, a) => sum + Number(a.amount), 0);
+          acc.earned += earned;
+          acc.advApproved += advApproved;
+          acc.advPending += advPending;
+          acc.net += (earned - advApproved);
+          return acc;
+        }, { earned: 0, advApproved: 0, advPending: 0, net: 0 });
 
         // Rows that are eligible for release (not already released + completed month) —
         // these are the ones that get a checkbox and count toward bulk release.
@@ -349,6 +376,23 @@ export default function PayrollTab() {
         return (<>
           {/* Filter + bulk action bar */}
           <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 12 }}>
+            {/* Employee search */}
+            <div style={{ position: "relative", display: "inline-flex", alignItems: "center", minWidth: 240, flex: "1 1 240px", maxWidth: 360 }}>
+              <span style={{ position: "absolute", left: 12, color: "var(--text3)", display: "inline-flex", pointerEvents: "none" }}>
+                <Icon name="search" size={14} />
+              </span>
+              <input value={employeeSearch} onChange={e => setEmployeeSearch(e.target.value)}
+                placeholder="Search employee by name..."
+                style={{ width: "100%", padding: "10px 36px 10px 36px", borderRadius: 10, background: "var(--bg3)", border: `1px solid ${employeeSearch ? "var(--accent)" : "var(--border)"}`, color: "var(--text)", fontSize: 12, fontWeight: 600, outline: "none", letterSpacing: 0.2 }} />
+              {employeeSearch && (
+                <button onClick={() => setEmployeeSearch("")}
+                  title="Clear search"
+                  style={{ position: "absolute", right: 6, background: "var(--bg4)", border: "none", borderRadius: 6, width: 24, height: 24, display: "inline-flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "var(--text3)", fontSize: 14, lineHeight: 1 }}>
+                  ×
+                </button>
+              )}
+            </div>
+
             {/* Branch multi-select with search */}
             <div ref={branchFilterRef} style={{ position: "relative" }}>
               <button onClick={() => setBranchFilterOpen(o => !o)}
@@ -407,7 +451,45 @@ export default function PayrollTab() {
             )}
           </div>
 
+          {/* KPI strip — totals across the currently visible roster */}
+          <div style={{ display: "grid", gridTemplateColumns: `repeat(auto-fit, minmax(180px, 1fr))`, gap: 12 }}>
+            <div style={{ padding: "14px 18px", borderRadius: 12, background: "linear-gradient(135deg, rgba(var(--accent-rgb),0.10), rgba(var(--accent-rgb),0.02))", border: "1px solid rgba(var(--accent-rgb),0.25)" }}>
+              <div style={{ fontSize: 9, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.5, marginBottom: 6 }}>Employees</div>
+              <div style={{ fontSize: 22, fontWeight: 800, color: "var(--accent)", fontFamily: "var(--font-headline, var(--font-outfit))", lineHeight: 1 }}>
+                {visibleStaff.length}
+                {empQ && totalEligible !== visibleStaff.length && (
+                  <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text3)", marginLeft: 6 }}>of {totalEligible}</span>
+                )}
+              </div>
+            </div>
+            <div style={{ padding: "14px 18px", borderRadius: 12, background: "linear-gradient(135deg, rgba(74,222,128,0.10), rgba(74,222,128,0.02))", border: "1px solid rgba(74,222,128,0.25)" }}>
+              <div style={{ fontSize: 9, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.5, marginBottom: 6 }}>Total Earned</div>
+              <div style={{ fontSize: 22, fontWeight: 800, color: "var(--green)", fontFamily: "var(--font-headline, var(--font-outfit))", lineHeight: 1 }}>{INR(kpi.earned)}</div>
+            </div>
+            <div style={{ padding: "14px 18px", borderRadius: 12, background: "linear-gradient(135deg, rgba(248,113,113,0.10), rgba(248,113,113,0.02))", border: "1px solid rgba(248,113,113,0.25)" }}>
+              <div style={{ fontSize: 9, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.5, marginBottom: 6 }}>Advances Taken</div>
+              <div style={{ fontSize: 22, fontWeight: 800, color: "var(--red)", fontFamily: "var(--font-headline, var(--font-outfit))", lineHeight: 1 }}>{kpi.advApproved > 0 ? `-${INR(kpi.advApproved)}` : INR(0)}</div>
+            </div>
+            <div style={{ padding: "14px 18px", borderRadius: 12, background: "linear-gradient(135deg, rgba(251,146,60,0.10), rgba(251,146,60,0.02))", border: "1px solid rgba(251,146,60,0.25)" }}>
+              <div style={{ fontSize: 9, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.5, marginBottom: 6 }}>Pending Advance</div>
+              <div style={{ fontSize: 22, fontWeight: 800, color: "var(--orange)", fontFamily: "var(--font-headline, var(--font-outfit))", lineHeight: 1 }}>{INR(kpi.advPending)}</div>
+            </div>
+            <div style={{ padding: "14px 18px", borderRadius: 12, background: "linear-gradient(135deg, rgba(var(--accent-rgb),0.16), rgba(var(--accent-rgb),0.04))", border: "1px solid rgba(var(--accent-rgb),0.45)" }}>
+              <div style={{ fontSize: 9, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.5, marginBottom: 6 }}>Net Payable</div>
+              <div style={{ fontSize: 22, fontWeight: 800, color: kpi.net < 0 ? "var(--red)" : "var(--accent)", fontFamily: "var(--font-headline, var(--font-outfit))", lineHeight: 1 }}>{INR(kpi.net)}</div>
+            </div>
+          </div>
+
       <Card style={{ padding: 0, overflow: "hidden" }}>
+        {visibleStaff.length === 0 && (
+          <div style={{ padding: "48px 24px", textAlign: "center", color: "var(--text3)" }}>
+            <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6 }}>No employees match your filters</div>
+            <div style={{ fontSize: 11 }}>
+              {empQ ? <>No one in the roster matches &ldquo;<strong style={{ color: "var(--text2)" }}>{employeeSearch}</strong>&rdquo;.</> : "Try clearing the branch filter."}
+            </div>
+          </div>
+        )}
+        {visibleStaff.length > 0 && (
         <div style={{ overflowX: "auto" }}>
         <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
           <thead>
@@ -589,6 +671,7 @@ export default function PayrollTab() {
           </tbody>
         </table>
         </div>
+        )}
       </Card>
         </>);
       })()}

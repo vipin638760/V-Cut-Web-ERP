@@ -1055,3 +1055,97 @@ export function BranchSelect({
     </div>
   );
 }
+
+// Unified branch + employee search.
+// onSelect({ type: "branch" | "staff", branchId, staffId? }) — caller decides
+// where to route. The component handles the input + dropdown UI only.
+export function BranchEmployeeSearch({ branches = [], staff = [], onSelect, placeholder = "Search branch or employee…", autoFocus = false, style = {} }) {
+  const [q, setQ] = useState("");
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e) => { if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [open]);
+
+  const query = q.trim().toLowerCase();
+  const branchMatches = query ? branches.filter(b => (b.name || "").toLowerCase().includes(query)).slice(0, 6) : [];
+  const staffMatches = query ? staff.filter(s => s.status !== "inactive" && (s.name || "").toLowerCase().includes(query)).slice(0, 8) : [];
+  const noMatch = query && branchMatches.length === 0 && staffMatches.length === 0;
+  const branchById = new Map(branches.map(b => [b.id, b]));
+
+  const choose = (payload) => {
+    if (onSelect) onSelect(payload);
+    setQ("");
+    setOpen(false);
+  };
+
+  return (
+    <div ref={wrapRef} style={{ position: "relative", minWidth: 240, flex: "1 1 260px", maxWidth: 380, ...style }}>
+      <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "var(--text3)", display: "inline-flex", pointerEvents: "none" }}>
+        <Icon name="search" size={14} />
+      </span>
+      <input
+        value={q}
+        autoFocus={autoFocus}
+        onChange={e => { setQ(e.target.value); setOpen(true); }}
+        onFocus={() => setOpen(true)}
+        placeholder={placeholder}
+        style={{ width: "100%", padding: "10px 36px 10px 36px", borderRadius: 10, background: "var(--bg3)", border: `1px solid ${q ? "var(--accent)" : "var(--border)"}`, color: "var(--text)", fontSize: 12, fontWeight: 600, outline: "none", letterSpacing: 0.2 }}
+      />
+      {q && (
+        <button onClick={() => setQ("")} title="Clear search"
+          style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", background: "var(--bg4)", border: "none", borderRadius: 6, width: 22, height: 22, display: "inline-flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "var(--text3)", fontSize: 13, lineHeight: 1 }}>×</button>
+      )}
+      {open && query && (
+        <div style={{ position: "absolute", top: "calc(100% + 6px)", left: 0, right: 0, zIndex: 30, maxHeight: 360, overflowY: "auto", background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 12, boxShadow: "0 24px 60px -12px rgba(0,0,0,0.7)" }}>
+          {noMatch && (
+            <div style={{ padding: "16px 14px", textAlign: "center", fontSize: 11, color: "var(--text3)" }}>
+              No branch or employee matches &ldquo;<strong style={{ color: "var(--text2)" }}>{q}</strong>&rdquo;
+            </div>
+          )}
+          {branchMatches.length > 0 && (
+            <div>
+              <div style={{ padding: "8px 14px 4px", fontSize: 9, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.5 }}>Branches · {branchMatches.length}</div>
+              {branchMatches.map(b => (
+                <button key={`b-${b.id}`} onClick={() => choose({ type: "branch", branchId: b.id })}
+                  style={{ width: "100%", textAlign: "left", padding: "10px 14px", background: "transparent", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 10, color: "var(--text)" }}
+                  onMouseEnter={e => e.currentTarget.style.background = "rgba(var(--accent-rgb),0.08)"}
+                  onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                  <Icon name="grid" size={13} color="var(--accent)" />
+                  <span style={{ flex: 1, fontSize: 12, fontWeight: 700 }}>{b.name}</span>
+                  {b.type && <span style={{ fontSize: 9, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, padding: "2px 6px", background: "var(--bg4)", borderRadius: 4 }}>{b.type}</span>}
+                </button>
+              ))}
+            </div>
+          )}
+          {staffMatches.length > 0 && (
+            <div style={{ borderTop: branchMatches.length > 0 ? "1px solid var(--border2)" : "none" }}>
+              <div style={{ padding: "8px 14px 4px", fontSize: 9, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.5 }}>Employees · {staffMatches.length}</div>
+              {staffMatches.map(s => {
+                const b = branchById.get(s.branch_id);
+                return (
+                  <button key={`s-${s.id}`} onClick={() => choose({ type: "staff", branchId: s.branch_id, staffId: s.id })}
+                    style={{ width: "100%", textAlign: "left", padding: "10px 14px", background: "transparent", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 10, color: "var(--text)" }}
+                    onMouseEnter={e => e.currentTarget.style.background = "rgba(var(--accent-rgb),0.08)"}
+                    onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                    <Icon name="users" size={13} color="var(--gold)" />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 12, fontWeight: 700 }}>{s.name}</div>
+                      <div style={{ fontSize: 10, color: "var(--text3)", marginTop: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                        {b?.name || "No branch"}{s.role ? ` · ${s.role}` : ""}
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}

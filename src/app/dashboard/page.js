@@ -4,7 +4,7 @@ import { collection, onSnapshot, query, orderBy, doc } from "firebase/firestore"
 import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
 import { INR, staffBillingInPeriod, makeFilterPrefix, periodLabel, proRataSalary, staffLeavesInMonth, staffStatusForMonth, staffIncentivesInPeriod, parseLocalDate, getMonthlyFixed, MASK } from "@/lib/calculations";
-import { PeriodWidget, ToggleGroup, Card, Pill, TH, TD, Icon, Modal, TabNav, ProgressBar, useToast } from "@/components/ui";
+import { PeriodWidget, ToggleGroup, Card, Pill, TH, TD, Icon, Modal, TabNav, ProgressBar, BranchEmployeeSearch, useToast } from "@/components/ui";
 import { useRouter } from "next/navigation";
 // ExcelJS is ~200KB — load only when Export is actually used.
 let _excelJSPromise = null;
@@ -1029,7 +1029,20 @@ export default function DashboardPage() {
           <h2 style={{ fontSize: 28, fontWeight: 800, color: "var(--text)", letterSpacing: -0.5, margin: 0, fontFamily: "var(--font-headline, var(--font-outfit))" }}>Organizational Pulse</h2>
           <p style={{ fontSize: 13, color: "var(--text3)", fontWeight: 500, marginTop: 6 }}>System oversight and branch network analytics.</p>
         </div>
-        <PeriodWidget filterMode={filterMode} setFilterMode={setFilterMode} filterYear={filterYear} setFilterYear={setFilterYear} filterMonth={filterMonth} setFilterMonth={setFilterMonth} />
+        <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", justifyContent: "flex-end", flex: 1, minWidth: 0 }}>
+          <BranchEmployeeSearch
+            branches={branches}
+            staff={staff}
+            onSelect={({ type, branchId, staffId }) => {
+              const qs = new URLSearchParams({ branchId });
+              if (type === "staff" && staffId) qs.set("staffId", staffId);
+              router.push(`/dashboard/branches?${qs.toString()}`);
+            }}
+            placeholder="Search branch or employee..."
+            style={{ maxWidth: 360 }}
+          />
+          <PeriodWidget filterMode={filterMode} setFilterMode={setFilterMode} filterYear={filterYear} setFilterYear={setFilterYear} filterMonth={filterMonth} setFilterMonth={setFilterMonth} />
+        </div>
       </div>
 
       {/* Admin Metrics — actuals row */}
