@@ -41,6 +41,12 @@ export default function StaffPage() {
   const [branchFilter, setBranchFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("active");
   const [branchTypeFilter, setBranchTypeFilter] = useState("all"); // all | mens | unisex — based on branch.type
+  // Attendance shape filter — splits the active period into:
+  //   whole         → status === "active" for the period (worked every day they were eligible)
+  //   partial-on    → partial coverage AND staff still active overall (mid-month join, current month, etc.)
+  //   partial-off   → partial coverage AND staff has exited (worked some days, no longer working)
+  // "all" disables this filter.
+  const [attendanceFilter, setAttendanceFilter] = useState("all");
   const [staffSearch, setStaffSearch] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState(null);
@@ -109,6 +115,21 @@ export default function StaffPage() {
   let filtered = branchFilter ? staff.filter(s => s.branch_id === branchFilter) : [...staff];
   if (statusFilter === "active") filtered = filtered.filter(s => staffOverallStatus(s, statusRefMon) === "active");
   else if (statusFilter === "inactive") filtered = filtered.filter(s => staffOverallStatus(s, statusRefMon) !== "active");
+  // Attendance filter — period-aware. Uses staffStatusForMonth (capped to
+  // yesterday so the current month doesn't falsely mark today as a missed
+  // day) for monthly view; in yearly view we treat any partial month across
+  // the active months as "partial".
+  if (attendanceFilter !== "all") {
+    const checkMon = filterMode === "month" ? filterPrefix : `${filterYear}-${String(NOW.getMonth() + 1).padStart(2, "0")}`;
+    filtered = filtered.filter(s => {
+      const mon = staffStatusForMonth(s, checkMon, { capToYesterday: true });
+      const overall = staffOverallStatus(s, statusRefMon);
+      if (attendanceFilter === "whole") return mon.status === "active";
+      if (attendanceFilter === "partial-on") return mon.status === "partial" && overall === "active";
+      if (attendanceFilter === "partial-off") return mon.status === "partial" && overall !== "active";
+      return true;
+    });
+  }
   if (branchTypeFilter !== "all") {
     const branchById = new Map(branches.map(b => [b.id, b]));
     filtered = filtered.filter(s => {
@@ -393,6 +414,21 @@ export default function StaffPage() {
           {[["all", "All"], ["mens", "Mens"], ["unisex", "Unisex"]].map(([val, label]) => (
             <button key={val} onClick={() => setBranchTypeFilter(val)}
               style={{ padding: "6px 16px", fontSize: 11, fontWeight: 700, color: branchTypeFilter === val ? "#000" : "var(--text3)", background: branchTypeFilter === val ? "var(--accent)" : "transparent", border: "none", borderRadius: 9, cursor: "pointer", transition: "all 0.2s", textTransform: "uppercase" }}>
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {/* Attendance shape filter — full month / partial still active / partial exited */}
+        <div style={{ display: "inline-flex", background: "var(--bg3)", border: "1.5px solid var(--border2)", borderRadius: 12, padding: 3, gap: 2 }} title="Attendance pattern in the selected period">
+          {[
+            ["all", "All", "var(--accent)"],
+            ["whole", "Whole Month", "var(--green)"],
+            ["partial-on", "Partial · Active", "var(--blue, #60a5fa)"],
+            ["partial-off", "Partial · Exited", "var(--orange)"],
+          ].map(([val, label, color]) => (
+            <button key={val} onClick={() => setAttendanceFilter(val)}
+              style={{ padding: "6px 14px", fontSize: 11, fontWeight: 700, color: attendanceFilter === val ? "#000" : "var(--text3)", background: attendanceFilter === val ? color : "transparent", border: "none", borderRadius: 9, cursor: "pointer", transition: "all 0.2s", textTransform: "uppercase", letterSpacing: 0.4 }}>
               {label}
             </button>
           ))}
@@ -856,6 +892,7 @@ export default function StaffPage() {
               <TH style={hs} sort={sort} sortKey="name">Staff Identity</TH>
               <TH style={hs} sort={sort} sortKey="role">Role & Status</TH>
               <TH style={hs} sort={sort} sortKey="goal">Goal Progress</TH>
+              {!isAccountant && <TH right style={hs} sort={sort} sortKey="incentive">Incentive %</TH>}
               {!isAccountant && <TH right style={hs} sort={sort} sortKey="salary">{filterMode === 'year' ? 'Yearly Salary' : 'Monthly Salary'}</TH>}
               {canEdit && <TH sticky style={{ ...hs, textAlign: "center" }}>Actions</TH>}
               </>); })()}
@@ -871,6 +908,18 @@ export default function StaffPage() {
                 return staffBillingInPeriod(s.id, entries, filterPrefix, filterMode, filterYear) / tgt;
               },
               salary: s => yearlyStaffSalary(s),
+              // Sort by the resolved effective rate (per-staff override → branch-type
+              // global → 10% default) so the Incentive column groups consistently.
+              incentive: s => {
+                if (s.incentive_pct !== undefined && s.incentive_pct !== null && s.incentive_pct !== "") return Number(s.incentive_pct) || 0;
+                const br = branches.find(x => x.id === s.branch_id);
+                if (br && globalSettings) {
+                  return br.type === "unisex"
+                    ? Number(globalSettings.unisex_inc ?? 10) || 10
+                    : Number(globalSettings.mens_inc ?? 10) || 10;
+                }
+                return 10;
+              },
             }).map((s, i) => {
               const b = branches.find(x => x.id === s.branch_id);
               const ach = staffBillingInPeriod(s.id, entries, filterPrefix, filterMode, filterYear);
@@ -922,6 +971,42 @@ export default function StaffPage() {
                   <TD style={{ minWidth: 200 }}>
                     <ProgressBar value={ach} max={tgt} label={`${INR(ach)} / ${INR(tgt)}`} color={ach >= tgt ? "green" : "accent"} />
                   </TD>
+                  {!isAccountant && (() => {
+                    // Resolve effective incentive rate with the same fallback chain
+                    // as entry/page.js + computeIncentiveExpense, so what's shown
+                    // here matches what actually gets applied at billing time.
+                    let effectiveRate;
+                    let source;
+                    if (s.incentive_pct !== undefined && s.incentive_pct !== null && s.incentive_pct !== "") {
+                      effectiveRate = Number(s.incentive_pct) || 0;
+                      source = effectiveRate === 0 ? "explicit-zero" : "explicit";
+                    } else if (b && globalSettings) {
+                      effectiveRate = b.type === "unisex"
+                        ? Number(globalSettings.unisex_inc ?? 10) || 10
+                        : Number(globalSettings.mens_inc ?? 10) || 10;
+                      source = "fallback";
+                    } else {
+                      effectiveRate = 10;
+                      source = "default";
+                    }
+                    const color = source === "explicit-zero" ? "var(--red)"
+                      : source === "explicit" ? "var(--accent)"
+                      : "var(--orange)";
+                    const note = source === "explicit-zero" ? "Set to 0 — no incentive earned"
+                      : source === "explicit" ? "Set on staff profile"
+                      : source === "fallback" ? `Falls back to ${b?.type === "unisex" ? "unisex" : "mens"} global rate`
+                      : "Default — no branch type resolved";
+                    return (
+                      <TD right>
+                        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }} title={note}>
+                          <div style={{ fontSize: 14, fontWeight: 800, color }}>{effectiveRate}%</div>
+                          <div style={{ fontSize: 10, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 0.5 }}>
+                            {source === "explicit" ? "set" : source === "explicit-zero" ? "zero" : source === "fallback" ? "fallback" : "default"}
+                          </div>
+                        </div>
+                      </TD>
+                    );
+                  })()}
                   {!isAccountant && (
                     <TD right>
                       <div style={{ display: "flex", alignItems: "center", gap: 6, justifyContent: "flex-end" }}>
