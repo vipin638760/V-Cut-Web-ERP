@@ -86,15 +86,31 @@ export default function IncentiveCalculatorPage() {
     return entries.filter(e => e.branch_id === branchFilter);
   }, [entries, branchFilter]);
 
+  // Per-day display uses RAW (5% of billing, 5% of material) so the period
+  // total reflects the actual incentive earned. The legacy `sb.incentive` /
+  // `sb.mat_incentive` values are stored ceil-10 per-day at entry-save time,
+  // which inflates the period sum (15 days × up-to-₹9 each can drift ~₹100).
+  // **Why:** User wants to see the real 5% daily and only ceil-to-10 at
+  // payout, so the released amount equals ceilTo10(sum of raw) rather than
+  // sum(ceilTo10(per-day)).
+  // **How to apply:** Read from `entries[*].rawTotalInc` for any pending sum,
+  // and call `ceilTo10()` on the resulting sum at release time.
+  const MAT_PCT = 0.05;
   const incentiveData = useMemo(() => {
     const map = {};
     filtered.forEach(entry => {
       (entry.staff_billing || []).forEach(sb => {
         if (!sb.staff_id) return;
-        const totalInc = (Number(sb.incentive) || 0) + (Number(sb.mat_incentive) || 0);
-        if (totalInc <= 0) return;
+        const s = staffById.get(sb.staff_id);
+        const incPct = (Number(s?.incentive_pct) || 0) / 100;
+        const billing = Number(sb.billing) || 0;
+        const matSale = Number(sb.material) || 0;
+        const rawIncentive = billing * incPct;
+        const rawMatIncentive = matSale * MAT_PCT;
+        const rawTotalInc = rawIncentive + rawMatIncentive;
+        // Skip rows that earn nothing (covers the original totalInc <= 0 guard).
+        if (rawTotalInc <= 0) return;
         if (!map[sb.staff_id]) {
-          const s = staffById.get(sb.staff_id);
           map[sb.staff_id] = {
             name: s?.name || sb.staff_id,
             role: s?.role || "",
@@ -106,14 +122,12 @@ export default function IncentiveCalculatorPage() {
           };
         }
         const d = map[sb.staff_id];
-        d.totalIncentive += totalInc;
-        const billing = Number(sb.billing) || 0;
-        const matSale = Number(sb.material) || 0;
+        d.totalIncentive += rawTotalInc;
         d.totalSale += billing;
         d.totalMatSale += matSale;
         const taken = sb.incentive_taken !== false;
-        if (taken) d.takenIncentive += totalInc;
-        else d.pendingIncentive += totalInc;
+        if (taken) d.takenIncentive += rawTotalInc;
+        else d.pendingIncentive += rawTotalInc;
         d.days++;
         d.entries.push({
           date: entry.date,
@@ -121,15 +135,19 @@ export default function IncentiveCalculatorPage() {
           branch_id: entry.branch_id,
           branch: branchesById.get(entry.branch_id)?.name || "",
           billing, matSale,
-          incentive: Number(sb.incentive) || 0,
-          mat_incentive: Number(sb.mat_incentive) || 0,
-          totalInc, taken,
+          incentive: rawIncentive,
+          mat_incentive: rawMatIncentive,
+          totalInc: rawTotalInc,
+          taken,
           staff_id: sb.staff_id,
         });
       });
     });
     return Object.entries(map).map(([id, d]) => ({ id, ...d }));
   }, [filtered, staffById, branchesById]);
+
+  // Round payout amount up to the next ₹10 (₹1,703 → ₹1,710, ₹220 → ₹220).
+  const ceilTo10 = (n) => Math.ceil((Number(n) || 0) / 10) * 10;
 
   // Check if a staff already has a release for this period
   const releasesByStaff = useMemo(() => {
@@ -176,14 +194,19 @@ export default function IncentiveCalculatorPage() {
   const handleRelease = () => {
     const selStaff = displayed.filter(d => selected.has(d.id));
     if (selStaff.length === 0) return;
+    // Each staff's payout is the ceil-10 of their raw pending sum, so the
+    // released total adds those rounded figures (matches what's actually paid).
+    const payoutByStaff = (d) => ceilTo10(d.pendingIncentive);
+    const totalPayout = selStaff.reduce((s, d) => s + payoutByStaff(d), 0);
     confirm({
       title: "Release Incentives",
       message: `
         <div style="text-align:center;">
-          <div style="font-size:24px;font-weight:800;color:var(--green);margin-bottom:8px;">${INR(selectedTotal)}</div>
+          <div style="font-size:24px;font-weight:800;color:var(--green);margin-bottom:4px;">${INR(totalPayout)}</div>
+          <div style="font-size:11px;color:var(--text3);margin-bottom:8px;">Actual: ${INR(selectedTotal)} · rounded up to nearest ₹10</div>
           <div style="font-size:12px;color:var(--text3);">Release pending incentives for <strong>${selStaff.length}</strong> staff member${selStaff.length > 1 ? "s" : ""}?</div>
           <div style="margin-top:10px;font-size:11px;color:var(--text3);max-height:120px;overflow-y:auto;text-align:left;padding:8px 12px;border-radius:8px;background:var(--bg3);">
-            ${selStaff.map(d => `<div style="padding:2px 0;">${d.name} — ${INR(d.pendingIncentive)}</div>`).join("")}
+            ${selStaff.map(d => `<div style="padding:2px 0;">${d.name} — <strong>${INR(payoutByStaff(d))}</strong> <span style="opacity:0.6;">(actual ${INR(d.pendingIncentive)})</span></div>`).join("")}
           </div>
         </div>
       `,
@@ -196,6 +219,7 @@ export default function IncentiveCalculatorPage() {
           const now = new Date().toISOString();
 
           for (const d of selStaff) {
+            const payout = payoutByStaff(d);
             // Create release record
             const releaseRef = doc(collection(db, "incentive_releases"));
             batch.set(releaseRef, {
@@ -207,7 +231,7 @@ export default function IncentiveCalculatorPage() {
               period_to: dateTo,
               total_sale: d.totalSale,
               total_incentive: d.totalIncentive,
-              amount_released: d.pendingIncentive,
+              amount_released: payout,
               days: d.days,
               released_at: now,
               released_by: currentUser?.name || "user",
@@ -236,7 +260,7 @@ export default function IncentiveCalculatorPage() {
           }
 
           await batch.commit();
-          toast({ title: "Released", message: `Incentives released for ${selStaff.length} staff — ${INR(selectedTotal)}`, type: "success" });
+          toast({ title: "Released", message: `Incentives released for ${selStaff.length} staff — ${INR(totalPayout)}`, type: "success" });
           setSelected(new Set());
         } catch (err) {
           toast({ title: "Error", message: err.message, type: "error" });
@@ -254,11 +278,13 @@ export default function IncentiveCalculatorPage() {
     if (selEntries.length === 0) return;
     const rowTotal = selEntries.reduce((s, e) => s + e.totalInc, 0);
     const rowSale = selEntries.reduce((s, e) => s + e.billing, 0);
+    const rowPayout = ceilTo10(rowTotal);
     confirm({
       title: "Release Selected Days",
       message: `
         <div style="text-align:center;">
-          <div style="font-size:20px;font-weight:800;color:var(--green);margin-bottom:6px;">${INR(rowTotal)}</div>
+          <div style="font-size:20px;font-weight:800;color:var(--green);margin-bottom:4px;">${INR(rowPayout)}</div>
+          <div style="font-size:11px;color:var(--text3);margin-bottom:6px;">Actual: ${INR(rowTotal)} · rounded up to nearest ₹10</div>
           <div style="font-size:12px;color:var(--text3);">Release incentives for <strong>${selEntries.length}</strong> day${selEntries.length > 1 ? "s" : ""} for <strong>${staffData.name}</strong>?</div>
           <div style="font-size:11px;color:var(--text3);margin-top:4px;">Total sale: ${INR(rowSale)}</div>
         </div>
@@ -282,7 +308,7 @@ export default function IncentiveCalculatorPage() {
             period_to: dateTo,
             total_sale: rowSale,
             total_incentive: rowTotal,
-            amount_released: rowTotal,
+            amount_released: rowPayout,
             days: selEntries.length,
             released_at: now,
             released_by: currentUser?.name || "user",
@@ -310,7 +336,7 @@ export default function IncentiveCalculatorPage() {
           }
 
           await batch.commit();
-          toast({ title: "Released", message: `${selEntries.length} day${selEntries.length > 1 ? "s" : ""} released for ${staffData.name} — ${INR(rowTotal)}`, type: "success" });
+          toast({ title: "Released", message: `${selEntries.length} day${selEntries.length > 1 ? "s" : ""} released for ${staffData.name} — ${INR(rowPayout)}`, type: "success" });
           setSelectedRows(new Set());
         } catch (err) {
           toast({ title: "Error", message: err.message, type: "error" });
@@ -448,7 +474,10 @@ export default function IncentiveCalculatorPage() {
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text)" }}>{selected.size} staff selected</span>
             <span style={{ fontSize: 11, color: "var(--text3)" }}>|</span>
-            <span style={{ fontSize: 13, fontWeight: 800, color: "var(--green)" }}>{INR(selectedTotal)}</span>
+            <span style={{ fontSize: 13, fontWeight: 800, color: "var(--green)" }} title="Payout — rounded up to nearest ₹10 per staff">
+              {INR(displayed.filter(d => selected.has(d.id)).reduce((s, d) => s + ceilTo10(d.pendingIncentive), 0))}
+            </span>
+            <span style={{ fontSize: 11, color: "var(--text3)" }}>(actual {INR(selectedTotal)})</span>
           </div>
           <button onClick={handleRelease} disabled={releasing}
             style={{ padding: "10px 22px", borderRadius: 10, background: "linear-gradient(135deg, #22c55e, #16a34a)", color: "#fff", border: "none", fontWeight: 800, fontSize: 12, cursor: releasing ? "wait" : "pointer", opacity: releasing ? 0.6 : 1, display: "inline-flex", alignItems: "center", gap: 6 }}>
@@ -610,7 +639,7 @@ export default function IncentiveCalculatorPage() {
                     <span style={{ color: "var(--text3)" }}>|</span>
                     <span>Sale: <strong style={{ color: "var(--blue, #60a5fa)" }}>{INR(selRowSale)}</strong></span>
                     <span style={{ color: "var(--text3)" }}>|</span>
-                    <span>Incentive: <strong style={{ color: "var(--green)" }}>{INR(selRowTotal)}</strong></span>
+                    <span>Incentive: <strong style={{ color: "var(--green)" }}>{INR(ceilTo10(selRowTotal))}</strong> <span style={{ opacity: 0.6 }}>(actual {INR(selRowTotal)})</span></span>
                   </div>
                   <button onClick={() => handleReleaseRows(d)} disabled={releasing}
                     style={{ padding: "8px 18px", borderRadius: 8, background: "linear-gradient(135deg, #22c55e, #16a34a)", color: "#fff", border: "none", fontWeight: 800, fontSize: 11, cursor: releasing ? "wait" : "pointer", opacity: releasing ? 0.6 : 1, display: "inline-flex", alignItems: "center", gap: 5 }}>
