@@ -548,6 +548,8 @@ export default function IncentiveCalculatorPage() {
         const breakdownTotalSale = sorted.reduce((s, e) => s + e.billing, 0);
         const breakdownTotalMatSale = sorted.reduce((s, e) => s + e.matSale, 0);
         const breakdownTotalInc = sorted.reduce((s, e) => s + e.totalInc, 0);
+        const breakdownPendingInc = sorted.reduce((s, e) => s + (e.taken ? 0 : e.totalInc), 0);
+        const breakdownTakenInc = breakdownTotalInc - breakdownPendingInc;
 
         // Past releases for this staff
         const staffReleases = releasesByStaff[d.id] || [];
@@ -556,10 +558,12 @@ export default function IncentiveCalculatorPage() {
           <Card style={{ marginTop: 12, padding: 16 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
               <div style={{ fontSize: 14, fontWeight: 800, color: "var(--text)" }}>{d.name} — Day-by-day breakdown</div>
-              <div style={{ display: "flex", gap: 12, fontSize: 12 }}>
+              <div style={{ display: "flex", gap: 12, fontSize: 12, flexWrap: "wrap" }}>
                 <span>Sale: <strong style={{ color: "var(--blue, #60a5fa)" }}>{INR(breakdownTotalSale)}</strong></span>
                 <span>Mat: <strong style={{ color: "var(--accent)" }}>{INR(breakdownTotalMatSale)}</strong></span>
                 <span>Incentive: <strong style={{ color: "var(--gold)" }}>{INR(breakdownTotalInc)}</strong></span>
+                <span>Taken: <strong style={{ color: "var(--green)" }}>{INR(breakdownTakenInc)}</strong></span>
+                <span>Pending: <strong style={{ color: breakdownPendingInc > 0 ? "var(--orange)" : "var(--text3)" }}>{INR(breakdownPendingInc)}</strong></span>
               </div>
             </div>
 
