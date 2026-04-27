@@ -418,6 +418,13 @@ export default function BranchesPage() {
   const [staff, setStaff] = useState([]);
   const [entries, setEntries] = useState([]);
   const [materialAllocations, setMaterialAllocations] = useState([]);
+  // Per-month overrides written from Operational Expenses (Fixed tab).
+  // **Why:** Without this, edits to Shop Rent / Room Rent / Elec / WiFi /
+  // custom fixed columns made on the Operational Expenses page never showed
+  // up here — the Summary view fell back to the static branches master.
+  // **How to apply:** Used in the branchData factor loop to override the
+  // master default per (branch, YYYY-MM, expense_type).
+  const [fixedExpenses, setFixedExpenses] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedBranch, setSelectedBranch] = useState(null);
   const [logView, setLogView] = useState(null);
@@ -541,6 +548,7 @@ export default function BranchesPage() {
       onSnapshot(query(collection(db, "material_allocations"), orderBy("transferred_at", "desc")), sn => {
         setMaterialAllocations(sn.docs.map(d => ({ ...d.data(), id: d.id })));
       }),
+      onSnapshot(collection(db, "fixed_expenses"), sn => setFixedExpenses(sn.docs.map(d => ({ ...d.data(), id: d.id })))),
     ];
     return () => unsubs.forEach(u => u());
   }, []);
@@ -635,6 +643,33 @@ export default function BranchesPage() {
     }, 0);
   };
 
+  // Override lookup from `fixed_expenses` — keyed by `${branchId}|${YYYY-MM}|${type}`.
+  // Same map every branch reuses, so build it once outside the .map.
+  const fixedOverride = (() => {
+    const m = new Map();
+    fixedExpenses.forEach(fx => {
+      if (!fx.branch_id || !fx.date || !fx.type) return;
+      const key = `${fx.branch_id}|${fx.date.slice(0, 7)}|${fx.type}`;
+      m.set(key, (m.get(key) || 0) + (Number(fx.amount) || 0));
+    });
+    return m;
+  })();
+  // Resolve a fixed-cost line for a (branch, type, master-default) tuple
+  // across the active period, summing per-month and preferring the override
+  // when an Operational Expenses row exists for that month.
+  const resolveFixed = (b, type, perMonthDefault, isYearly, filterYear, filterMonth) => {
+    const startM = isYearly ? 1 : filterMonth;
+    const endM = isYearly ? (filterYear === NOW.getFullYear() ? NOW.getMonth() + 1 : 12) : filterMonth;
+    let total = 0;
+    for (let m = startM; m <= endM; m++) {
+      const ymKey = `${filterYear}-${String(m).padStart(2, "0")}`;
+      const k = `${b.id}|${ymKey}|${type}`;
+      const ovr = fixedOverride.get(k);
+      total += ovr != null ? ovr : (Number(perMonthDefault) || 0);
+    }
+    return total;
+  };
+
   // Build branch data
   let branchData = branches.map(b => {
     const bEntries = entries.filter(ent => ent.branch_id === b.id && inPeriod(ent.date));
@@ -662,11 +697,16 @@ export default function BranchesPage() {
     const vOther = bEntries.reduce((s, e) => s + (e.others || 0) + (e.petrol || 0), 0);
     const vPetrol = bEntries.reduce((s, e) => s + (e.petrol || 0), 0);
     
-    // Fixed costs
-    const fShopRent = (b.shop_rent || 0) * factor;
-    const fRoomRent = (b.room_rent || 0) * factor;
-    const fWifi     = (b.wifi || 0) * factor;
-    const fElec     = ((b.shop_elec || 0) + (b.room_elec || 0)) * factor;
+    // Fixed costs — prefer per-month overrides written by Operational Expenses,
+    // fall back to the branches master default. fElec sums the Shop + Room
+    // electricity lines so a partial override (e.g. Shop only) still adds the
+    // Room master for that month.
+    const fShopRent = resolveFixed(b, "Shop Rent",        b.shop_rent || 0, isYearly, filterYear, filterMonth);
+    const fRoomRent = resolveFixed(b, "Room Rent",        b.room_rent || 0, isYearly, filterYear, filterMonth);
+    const fWifi     = resolveFixed(b, "WiFi Bill",        b.wifi || 0,      isYearly, filterYear, filterMonth);
+    const fShopElec = resolveFixed(b, "Electricity Shop", b.shop_elec || 0, isYearly, filterYear, filterMonth);
+    const fRoomElec = resolveFixed(b, "Electricity Room", b.room_elec || 0, isYearly, filterYear, filterMonth);
+    const fElec     = fShopElec + fRoomElec;
     const fFixedTot = fShopRent + fRoomRent + fWifi + fElec;
 
     // Payroll (Actual)
