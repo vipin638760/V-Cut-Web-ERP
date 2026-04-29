@@ -546,13 +546,18 @@ export default function StaffPage() {
           const monLeaves = leaves.filter(l => l.staff_id === s.id && (l.date || "").startsWith(month) && (l.status === "approved" || !l.status));
           const overrideByDate = new Map(attendanceOverrides.map(o => [o.date, o]));
 
-          // Per-day billing for this staff (from entries.staff_billing), independent of override.
-          // **Why:** an admin override doesn't move the bill — billing comes from the daily entry.
+          // Per-day billing for this staff = service sale + material sale, summed across every
+          // entry on that date (staff may appear in multiple branches' staff_billing when loaned).
+          // **Why:** matches the Branches page "Daily sale split by staff · service + material" chart.
           const billingForDay = (dateStr) => {
-            const e = monEntries.find(x => x.date === dateStr);
-            if (!e) return 0;
-            const sb = (e.staff_billing || []).find(x => x.staff_id === s.id);
-            return Number(sb?.billing) || 0;
+            let total = 0;
+            monEntries.forEach(e => {
+              if (e.date !== dateStr) return;
+              const sb = (e.staff_billing || []).find(x => x.staff_id === s.id);
+              if (!sb) return;
+              total += (Number(sb.billing) || 0) + (Number(sb.material) || 0);
+            });
+            return total;
           };
 
           // Resolve per-day status. Priority: override > leave > entries > default.
