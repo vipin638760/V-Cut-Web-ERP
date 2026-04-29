@@ -1735,16 +1735,17 @@ export default function BranchesPage() {
       // daily total reconciles with the top Full Net P&L. Future days show projected salary in
       // the Future Salary column for visibility, but it doesn't flow into PL (the top KPI caps
       // salary at yesterday so only past-day shares are owed).
+      const mfDaily = getMonthlyFixed(b, filterPrefix, monthlyExpenses, fixedExpenses);
       for (let d = 1; d <= daysCount; d++) {
         const dayPrefix = `${filterYear}-${String(filterMonth).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
         const dEntries = entries.filter(e => e.branch_id === b.id && e.date === dayPrefix);
         const dLeaves = leaves.filter(l => l.staff_id && activeStaffInMonth.some(as => as.id === l.staff_id) && l.status === 'approved' && l.date === dayPrefix).reduce((s, l) => s + (l.days || 1), 0);
         const isProjected = dEntries.length === 0;
 
-        const dShopRent = (b.shop_rent || 0) * dayFactor;
-        const dRoomRent = (b.room_rent || 0) * dayFactor;
-        const dElec = ((b.shop_elec || 0) + (b.room_elec || 0)) * dayFactor;
-        const dWifi = (b.wifi || 0) * dayFactor;
+        const dShopRent = mfDaily.shop_rent * dayFactor;
+        const dRoomRent = mfDaily.room_rent * dayFactor;
+        const dElec = (mfDaily.shop_elec + mfDaily.room_elec) * dayFactor;
+        const dWifi = mfDaily.wifi * dayFactor;
         const dFixedFees = dShopRent + dRoomRent + dElec + dWifi;
         const dSalaryShare = computeDayShareFor(dayPrefix);
         const label = `${d} ${new Date(filterYear, filterMonth - 1).toLocaleString('default', { month: 'short' })}`;
@@ -1821,7 +1822,8 @@ export default function BranchesPage() {
         const mMatExp = (matUseAllocations ? mAllocMat : 0) + (matUseLumpsum ? mLumpMat : 0);
         const mOtherExp = mEntries.reduce((s, e) => s + (e.others || 0) + (e.petrol || 0), 0);
         
-        const mFixed = (b.shop_rent || 0) + (b.room_rent || 0) + (b.wifi || 0) + (b.shop_elec || 0) + (b.room_elec || 0);
+        const mfYearly = getMonthlyFixed(b, monthPrefix, monthlyExpenses, fixedExpenses);
+        const mFixed = mfYearly.shop_rent + mfYearly.room_rent + mfYearly.wifi + mfYearly.shop_elec + mfYearly.room_elec;
         const activeStaffInMonth = staff.filter(s => s.branch_id === b.id && staffStatusForMonth(s, monthPrefix).status !== 'inactive');
         const mActualSalary = activeStaffInMonth.reduce((s, st) => s + proRataSalary(st, monthPrefix, branches, salHistory, staff, globalSettings), 0);
         const mLeaves = activeStaffInMonth.reduce((s, st) => s + staffLeavesInMonth(st.id, monthPrefix, leaves), 0);
@@ -1843,10 +1845,10 @@ export default function BranchesPage() {
           material: mAllocMat,
           lumpsumMat: mLumpMat,
           others: mOtherExp,
-          shopRent: (b.shop_rent || 0),
-          roomRent: (b.room_rent || 0),
-          elec: (b.shop_elec || 0) + (b.room_elec || 0),
-          wifi: (b.wifi || 0),
+          shopRent: mfYearly.shop_rent,
+          roomRent: mfYearly.room_rent,
+          elec: mfYearly.shop_elec + mfYearly.room_elec,
+          wifi: mfYearly.wifi,
           salary: mActualSalary,
           futureSalary: 0,
           gst: 0,
@@ -1997,12 +1999,12 @@ export default function BranchesPage() {
 
         {/* KPI breakdown popup */}
         {kpiBreakdown && canEdit && (() => {
-          const nMonths = factor; // number of months summed for this period
-          const shopRent = (b.shop_rent || 0) * nMonths;
-          const roomRent = (b.room_rent || 0) * nMonths;
-          const wifi = (b.wifi || 0) * nMonths;
-          const elec = ((b.shop_elec || 0) + (b.room_elec || 0)) * nMonths;
-          const salaryPortion = totalFixedSalaryComp - (shopRent + roomRent + wifi + elec);
+          const nMonths = factor;
+          const shopRent = totalShopRent;
+          const roomRent = totalRoomRent;
+          const wifi = totalWifi;
+          const elec = totalElec;
+          const salaryPortion = totalSalary;
 
           let rows; let total; let title; let titleColor;
           if (kpiBreakdown === "variable") {
@@ -2015,23 +2017,22 @@ export default function BranchesPage() {
           } else if (kpiBreakdown === "fixed") {
             title = "Fixed Costs"; titleColor = "var(--orange)"; total = totalFixedSalaryComp;
             rows = [
-              { label: "Shop Rent", value: shopRent, hint: `₹${(b.shop_rent || 0).toLocaleString("en-IN")} × ${nMonths} month${nMonths === 1 ? "" : "s"}`, color: "var(--orange)" },
-              { label: "Room Rent", value: roomRent, hint: `₹${(b.room_rent || 0).toLocaleString("en-IN")} × ${nMonths} month${nMonths === 1 ? "" : "s"}`, color: "var(--orange)" },
-              { label: "Electricity (Shop + Room)", value: elec, hint: `₹${((b.shop_elec || 0) + (b.room_elec || 0)).toLocaleString("en-IN")} × ${nMonths} month${nMonths === 1 ? "" : "s"}`, color: "var(--orange)" },
-              { label: "WiFi", value: wifi, hint: `₹${(b.wifi || 0).toLocaleString("en-IN")} × ${nMonths} month${nMonths === 1 ? "" : "s"}`, color: "var(--orange)" },
+              { label: "Shop Rent", value: shopRent, hint: `Sum across ${nMonths} month${nMonths === 1 ? "" : "s"} (per-month overrides honored)`, color: "var(--orange)" },
+              { label: "Room Rent", value: roomRent, hint: `Sum across ${nMonths} month${nMonths === 1 ? "" : "s"} (per-month overrides honored)`, color: "var(--orange)" },
+              { label: "Electricity (Shop + Room)", value: elec, hint: `Sum across ${nMonths} month${nMonths === 1 ? "" : "s"} (per-month overrides honored)`, color: "var(--orange)" },
+              { label: "WiFi", value: wifi, hint: `Sum across ${nMonths} month${nMonths === 1 ? "" : "s"} (per-month overrides honored)`, color: "var(--orange)" },
               { label: "Actual Salary (pro-rated)", value: salaryPortion, hint: "Sum of active staff's pro-rata salaries across the months in period", color: "var(--blue)" },
             ];
           } else {
-            // "total" — rolls variable + fixed + GST into one view
             title = "Total Expense"; titleColor = "var(--red)"; total = totalVarExp + totalFixedSalaryComp + totalGstEst;
             rows = [
               { label: "Variable — Staff Incentives", value: totalIncentiveExp, hint: "Included in Variable Exp", color: "var(--red)" },
               { label: "Variable — Material Cost", value: totalMatExp, hint: "Included in Variable Exp", color: "var(--red)" },
               { label: "Variable — Other / Petrol", value: totalOtherExp, hint: "Included in Variable Exp", color: "var(--red)" },
-              { label: "Fixed — Shop Rent", value: shopRent, hint: `₹${(b.shop_rent || 0).toLocaleString("en-IN")} × ${nMonths} month${nMonths === 1 ? "" : "s"}`, color: "var(--orange)" },
-              { label: "Fixed — Room Rent", value: roomRent, hint: `₹${(b.room_rent || 0).toLocaleString("en-IN")} × ${nMonths} month${nMonths === 1 ? "" : "s"}`, color: "var(--orange)" },
-              { label: "Fixed — Electricity", value: elec, hint: `₹${((b.shop_elec || 0) + (b.room_elec || 0)).toLocaleString("en-IN")} × ${nMonths} month${nMonths === 1 ? "" : "s"}`, color: "var(--orange)" },
-              { label: "Fixed — WiFi", value: wifi, hint: `₹${(b.wifi || 0).toLocaleString("en-IN")} × ${nMonths} month${nMonths === 1 ? "" : "s"}`, color: "var(--orange)" },
+              { label: "Fixed — Shop Rent", value: shopRent, hint: `Sum across ${nMonths} month${nMonths === 1 ? "" : "s"} (per-month overrides honored)`, color: "var(--orange)" },
+              { label: "Fixed — Room Rent", value: roomRent, hint: `Sum across ${nMonths} month${nMonths === 1 ? "" : "s"} (per-month overrides honored)`, color: "var(--orange)" },
+              { label: "Fixed — Electricity", value: elec, hint: `Sum across ${nMonths} month${nMonths === 1 ? "" : "s"} (per-month overrides honored)`, color: "var(--orange)" },
+              { label: "Fixed — WiFi", value: wifi, hint: `Sum across ${nMonths} month${nMonths === 1 ? "" : "s"} (per-month overrides honored)`, color: "var(--orange)" },
               { label: "Fixed — Actual Salary", value: salaryPortion, hint: "Pro-rated across months in period", color: "var(--blue)" },
               { label: "GST Estimate (5%)", value: totalGstEst, hint: "GST extracted from online revenue", color: "var(--red)" },
             ];

@@ -862,6 +862,7 @@ export default function DashboardPage() {
           const isFutureMonth = (filterYear > curY) || (filterYear === curY && filterMonth > curM);
           const endDay = isFutureMonth ? 0 : ((filterYear === curY && filterMonth === curM) ? NOW.getDate() : daysCount);
           const dayFactor = 1 / daysCount;
+          const mfX = getMonthlyFixed(b, filterPrefix, monthlyExpenses, fixedExpenses);
           for (let dd = 1; dd <= endDay; dd++) {
             const dayPrefix = `${filterYear}-${String(filterMonth).padStart(2, '0')}-${String(dd).padStart(2, '0')}`;
             const dEntries = entries.filter(e => e.branch_id === b.id && e.date === dayPrefix);
@@ -871,7 +872,7 @@ export default function DashboardPage() {
             const dIncExp = dEntries.reduce((s, e) => s + (e.staff_billing || []).reduce((ss, sb) => ss + (sb.incentive || 0) + (sb.mat_incentive || 0), 0), 0);
             const dMatExp = dEntries.reduce((s, e) => s + (e.mat_expense || 0), 0);
             const dOtherExp = dEntries.reduce((s, e) => s + (e.others || 0) + (e.petrol || 0), 0);
-            const mFixed = (b.shop_rent || 0) + (b.room_rent || 0) + (b.wifi || 0) + (b.shop_elec || 0) + (b.room_elec || 0);
+            const mFixed = mfX.shop_rent + mfX.room_rent + mfX.wifi + mfX.shop_elec + mfX.room_elec;
             const dFixed = mFixed * dayFactor;
             const activeSt = staff.filter(s => s.branch_id === b.id && staffStatusForMonth(s, filterPrefix).status !== 'inactive');
             const mActualSal = activeSt.reduce((s, st) => s + proRataSalary(st, filterPrefix, branches, salHistory, staff, globalSettings), 0);
@@ -879,7 +880,7 @@ export default function DashboardPage() {
             const dLeaves = leaves.filter(l => activeSt.some(as => as.id === l.staff_id) && l.status === 'approved' && l.date === dayPrefix).reduce((s, l) => s + (l.days || 1), 0);
             const dIncome = dOnline + dCash + dMatInc;
             const dExpenses = dIncExp + dMatExp + dOtherExp + dFixed + dSalary;
-            breakdown.push({ label: dayPrefix, income: dIncome, incentives: dIncExp, material: dMatExp, others: dOtherExp, shopRent: (b.shop_rent || 0) * dayFactor, roomRent: (b.room_rent || 0) * dayFactor, elec: ((b.shop_elec || 0) + (b.room_elec || 0)) * dayFactor, wifi: (b.wifi || 0) * dayFactor, salary: dSalary, leaves: dLeaves, pl: dIncome - dExpenses });
+            breakdown.push({ label: dayPrefix, income: dIncome, incentives: dIncExp, material: dMatExp, others: dOtherExp, shopRent: mfX.shop_rent * dayFactor, roomRent: mfX.room_rent * dayFactor, elec: (mfX.shop_elec + mfX.room_elec) * dayFactor, wifi: mfX.wifi * dayFactor, salary: dSalary, leaves: dLeaves, pl: dIncome - dExpenses });
           }
         } else {
           for (let m = 1; m <= endMonth; m++) {
@@ -891,13 +892,14 @@ export default function DashboardPage() {
             const mIncExp = mEntries.reduce((s, e) => s + (e.staff_billing || []).reduce((ss, sb) => ss + (sb.incentive || 0) + (sb.mat_incentive || 0), 0), 0);
             const mMatExp = mEntries.reduce((s, e) => s + (e.mat_expense || 0), 0);
             const mOtherExp = mEntries.reduce((s, e) => s + (e.others || 0) + (e.petrol || 0), 0);
-            const mFixed = (b.shop_rent || 0) + (b.room_rent || 0) + (b.wifi || 0) + (b.shop_elec || 0) + (b.room_elec || 0);
+            const mfM = getMonthlyFixed(b, monthPrefix, monthlyExpenses, fixedExpenses);
+            const mFixed = mfM.shop_rent + mfM.room_rent + mfM.wifi + mfM.shop_elec + mfM.room_elec;
             const activeSt = staff.filter(s => s.branch_id === b.id && staffStatusForMonth(s, monthPrefix).status !== 'inactive');
             const mActualSal = activeSt.reduce((s, st) => s + proRataSalary(st, monthPrefix, branches, salHistory, staff, globalSettings), 0);
             const mLeaves = activeSt.reduce((s, st) => s + staffLeavesInMonth(st.id, monthPrefix, leaves), 0);
             const mIncome = mOnline + mCash + mMatInc;
             const mExpenses = mIncExp + mMatExp + mOtherExp + mFixed + mActualSal;
-            breakdown.push({ label: new Date(filterYear, m - 1).toLocaleString('default', { month: 'short' }) + ` ${filterYear}`, income: mIncome, incentives: mIncExp, material: mMatExp, others: mOtherExp, shopRent: (b.shop_rent || 0), roomRent: (b.room_rent || 0), elec: (b.shop_elec || 0) + (b.room_elec || 0), wifi: (b.wifi || 0), salary: mActualSal, leaves: mLeaves, pl: mIncome - mExpenses });
+            breakdown.push({ label: new Date(filterYear, m - 1).toLocaleString('default', { month: 'short' }) + ` ${filterYear}`, income: mIncome, incentives: mIncExp, material: mMatExp, others: mOtherExp, shopRent: mfM.shop_rent, roomRent: mfM.room_rent, elec: mfM.shop_elec + mfM.room_elec, wifi: mfM.wifi, salary: mActualSal, leaves: mLeaves, pl: mIncome - mExpenses });
           }
         }
 
