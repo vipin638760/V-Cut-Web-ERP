@@ -133,6 +133,10 @@ npm run build
 npm run lint      # ESLint
 ```
 
+## Workflow
+
+- **Always merge to `main` after pushing.** Once a feature branch is committed and pushed, open a PR via `mcp__github__create_pull_request` and immediately merge it (squash) via `mcp__github__merge_pull_request` — don't leave changes sitting on the feature branch. The Vercel production deployment builds from `main`, so unmerged work isn't visible in the deployed app.
+
 ## Sessions & docs
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) — full system architecture for stakeholders.
