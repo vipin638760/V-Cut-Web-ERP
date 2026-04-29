@@ -533,7 +533,7 @@ export default function StaffPage() {
       })()}
 
       {/* Attendance Calendar Modal — per-staff, per-month, editable by admin/accountant */}
-      <Modal isOpen={!!attendanceModal} onClose={() => { setAttendanceModal(null); setAttendanceOverrides([]); setEditingDay(null); }} title={`Attendance · ${attendanceModal?.staff?.name || ""}`} width={720}>
+      <Modal isOpen={!!attendanceModal} onClose={() => { setAttendanceModal(null); setAttendanceOverrides([]); setEditingDay(null); }} title={`Attendance · ${attendanceModal?.staff?.name || ""}`} width={1080}>
         {attendanceModal && (() => {
           const { staff: s, month } = attendanceModal;
           const [yr, mo] = month.split("-").map(Number);
@@ -705,7 +705,8 @@ export default function StaffPage() {
           [...branchTally.keys()].forEach((bid, i) => branchColour.set(bid, swatchPalette[i % swatchPalette.length]));
 
           return (
-            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 320px", gap: 18, alignItems: "start" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 14, minWidth: 0 }}>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 10, fontSize: 11, fontWeight: 700 }}>
                 <span style={{ padding: "6px 10px", borderRadius: 8, background: "rgba(74,222,128,0.12)", color: "var(--green)" }}>● Present {presentCount}</span>
                 <span style={{ padding: "6px 10px", borderRadius: 8, background: "rgba(96,165,250,0.12)", color: "var(--blue, #60a5fa)" }}>● Leave {leaveCount}</span>
@@ -805,86 +806,145 @@ export default function StaffPage() {
                 })}
               </div>
 
-              {/* Inline day editor */}
-              {editingDay && canEdit && (() => {
+              <div style={{ fontSize: 10, color: "var(--text3)", lineHeight: 1.5 }}>
+                Source priority: <strong>Manual override</strong> › Approved leave › Daily entries › Join/exit lifecycle.
+                {!canEdit && <> You have read-only access.</>}
+              </div>
+            </div>
+
+            {/* Side panel — branch-card styled day details / editor. Always rendered. */}
+            <aside style={{ position: "sticky", top: 0, alignSelf: "start", display: "flex", flexDirection: "column", gap: 12 }}>
+              {(() => {
+                if (!editingDay) {
+                  return (
+                    <div style={{ padding: "22px 24px", borderRadius: 16, background: "var(--bg3)", border: "1px solid rgba(34,211,238,0.18)", boxShadow: "0 0 18px rgba(34,211,238,0.08), 0 0 1px rgba(34,211,238,0.25) inset", textAlign: "center" }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.5, marginBottom: 10 }}>Day Details</div>
+                      <div style={{ fontSize: 13, color: "var(--text2)", lineHeight: 1.6 }}>Click any day on the calendar to view billing breakdown{canEdit ? " and edit attendance" : ""}.</div>
+                    </div>
+                  );
+                }
                 const st = dayStatus(editingDay);
                 const hasOverride = st.source === "override";
                 const dayBilling = billingForDay(editingDay);
                 const isHoliday = st.kind === "leave" && (st.leaveType || "").toLowerCase() === "holiday";
                 const isZeroSale = st.kind === "present" && dayBilling === 0;
+                const dispBranchId = st.branch_id || dayDraft.branch_id;
+                const dispBranch = (branches.find(b => b.id === dispBranchId)?.name || "").replace("V-CUT ", "");
+                const dotColour = dispBranchId ? branchColour.get(dispBranchId) : null;
+                const kindLabel = st.kind === "present" ? "Present" : st.kind === "leave" ? (isHoliday ? "Holiday" : "Leave") : st.kind === "absent" ? "Absent" : st.kind;
+                const kindColour = st.kind === "present" ? "var(--green)" : st.kind === "leave" ? "#60a5fa" : st.kind === "absent" ? "var(--red)" : "var(--text3)";
+                const kindRgb = st.kind === "present" ? "74,222,128" : st.kind === "leave" ? "96,165,250" : st.kind === "absent" ? "248,113,113" : "163,163,163";
+                const dateObj = new Date(editingDay);
+                const longDate = dateObj.toLocaleDateString("default", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
                 return (
-                  <div style={{ padding: 14, borderRadius: 12, background: "var(--bg3)", border: "1px solid var(--border2)", display: "flex", flexDirection: "column", gap: 10 }}>
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                      <div style={{ fontSize: 13, fontWeight: 800, color: "var(--text)" }}>
-                        Edit {editingDay}
-                        {st.kind === "present" && (
-                          <span style={{ marginLeft: 10, fontSize: 11, color: "var(--gold)", fontWeight: 700 }}>
-                            {INR(dayBilling)} {st.branch_id ? `· ${(branches.find(b => b.id === st.branch_id)?.name || "").replace("V-CUT ", "")}` : ""}
-                          </span>
-                        )}
+                  <div style={{ padding: "18px 20px", borderRadius: 16, background: "var(--bg3)", border: `1px solid rgba(${kindRgb},0.35)`, boxShadow: `0 0 20px rgba(${kindRgb},0.18), 0 0 1px rgba(${kindRgb},0.45) inset`, display: "flex", flexDirection: "column", gap: 14, position: "relative", overflow: "hidden" }}>
+                    <div style={{ position: "absolute", top: -20, right: -20, width: 90, height: 90, background: kindColour, opacity: 0.05, borderRadius: "50%", filter: "blur(22px)" }} />
+
+                    {/* Header */}
+                    <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
+                      <div>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.5 }}>{longDate}</div>
+                        <div style={{ fontSize: 14, fontWeight: 800, color: kindColour, textTransform: "uppercase", letterSpacing: 1, marginTop: 4 }}>{kindLabel}</div>
                       </div>
                       <button type="button" onClick={() => setEditingDay(null)}
-                        style={{ background: "transparent", border: "none", color: "var(--text3)", cursor: "pointer", fontSize: 14 }}>✕</button>
+                        style={{ background: "transparent", border: "none", color: "var(--text3)", cursor: "pointer", fontSize: 18, lineHeight: 1, padding: 4 }}>✕</button>
                     </div>
+
+                    {/* Billing hero — like StatCard */}
+                    {st.kind === "present" && (
+                      <div>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.5, marginBottom: 4 }}>Daily Sale</div>
+                        <div style={{ fontSize: 26, fontWeight: 800, color: "var(--gold)", lineHeight: 1.1, fontFamily: "var(--font-headline, var(--font-outfit))" }}>{INR(dayBilling)}</div>
+                        <div style={{ fontSize: 10, color: "var(--text3)", marginTop: 2 }}>Service + Material</div>
+                      </div>
+                    )}
+
+                    {/* Branch chip */}
+                    {dispBranchId && (
+                      <div>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.5, marginBottom: 6 }}>Branch</div>
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "6px 12px", borderRadius: 999, background: "var(--bg4)", border: `1px solid ${dotColour || "var(--border2)"}`, color: "var(--text)", fontSize: 12, fontWeight: 700 }}>
+                          {dotColour && <span style={{ width: 8, height: 8, borderRadius: "50%", background: dotColour }} />}
+                          {dispBranch || "—"}
+                          {dispBranchId === s.branch_id && <span style={{ fontSize: 9, color: "var(--text3)", fontWeight: 600, textTransform: "uppercase", letterSpacing: 1 }}>home</span>}
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Zero-sale callout */}
                     {isZeroSale && !isHoliday && (
-                      <div style={{ padding: "8px 12px", borderRadius: 8, background: "rgba(250,204,21,0.12)", border: "1px solid rgba(250,204,21,0.35)", color: "#facc15", fontSize: 11, fontWeight: 700 }}>
-                        ⚠ Staff was present but billed ₹0. You can mark this as a Holiday instead.
+                      <div style={{ padding: "10px 12px", borderRadius: 10, background: "rgba(250,204,21,0.12)", border: "1px solid rgba(250,204,21,0.35)", color: "#facc15", fontSize: 11, fontWeight: 700, lineHeight: 1.5 }}>
+                        ⚠ Staff was present but billed ₹0. You can mark this as a paid Holiday.
                       </div>
                     )}
-                    <div style={{ display: "inline-flex", borderRadius: 8, overflow: "hidden", border: "1px solid var(--border2)", width: "fit-content" }}>
-                      {[["present", true, "Present"], ["absent", false, "Absent"]].map(([k, v, lbl]) => (
-                        <button key={k} type="button" onClick={() => setDayDraft(d => ({ ...d, present: v }))}
-                          style={{ padding: "8px 14px", background: dayDraft.present === v ? (v ? "var(--green)" : "var(--red)") : "var(--bg3)", color: dayDraft.present === v ? "#000" : "var(--text2)", border: "none", fontSize: 11, fontWeight: 800, cursor: "pointer", textTransform: "uppercase", letterSpacing: 1 }}>{lbl}</button>
-                      ))}
-                    </div>
-                    {dayDraft.present && (
-                      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                        <label style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Worked at</label>
-                        <BranchSelect
-                          value={dayDraft.branch_id || ""}
-                          onChange={(v) => setDayDraft(d => ({ ...d, branch_id: v }))}
-                          branches={branches}
-                          placeholder="—"
-                          minWidth={0}
-                        />
+
+                    {/* Note (read-only display when present) */}
+                    {st.note && (
+                      <div>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.5, marginBottom: 4 }}>Note</div>
+                        <div style={{ fontSize: 12, color: "var(--text2)", padding: "8px 10px", background: "var(--bg4)", borderRadius: 8, border: "1px solid var(--border2)" }}>{st.note}</div>
                       </div>
                     )}
-                    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                      <label style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Note (optional)</label>
-                      <input value={dayDraft.note} onChange={e => setDayDraft(d => ({ ...d, note: e.target.value }))}
-                        placeholder="Reason / context"
-                        style={{ padding: "8px 10px", borderRadius: 8, background: "var(--bg4)", border: "1px solid var(--border2)", color: "var(--text)", fontSize: 12, outline: "none" }} />
-                    </div>
-                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                      <button type="button" onClick={() => saveDay(editingDay, dayDraft)}
-                        style={{ flex: 1, minWidth: 120, padding: "10px", borderRadius: 10, background: "var(--accent)", color: "#000", border: "none", fontWeight: 800, cursor: "pointer" }}>Save</button>
-                      {isHoliday ? (
-                        <button type="button" onClick={() => removeHoliday(editingDay)}
-                          title="Remove holiday marking"
-                          style={{ padding: "10px 14px", borderRadius: 10, background: "var(--bg4)", color: "var(--text2)", border: "1px solid var(--border)", fontWeight: 700, cursor: "pointer" }}>
-                          Remove Holiday
-                        </button>
-                      ) : (
-                        <button type="button" onClick={() => markHoliday(editingDay)}
-                          title="Mark this day as a paid holiday for this staff"
-                          style={{ padding: "10px 14px", borderRadius: 10, background: "rgba(96,165,250,0.18)", color: "#60a5fa", border: "1px solid rgba(96,165,250,0.5)", fontWeight: 800, cursor: "pointer" }}>
-                          Mark Holiday
-                        </button>
-                      )}
-                      {hasOverride && (
-                        <button type="button" onClick={() => clearOverride(editingDay)}
-                          title="Revert to computed attendance"
-                          style={{ padding: "10px 14px", borderRadius: 10, background: "var(--bg4)", color: "var(--text2)", border: "1px solid var(--border)", fontWeight: 700, cursor: "pointer" }}>Clear Override</button>
-                      )}
-                    </div>
+
+                    {/* Editor — admin/accountant only */}
+                    {canEdit && (
+                      <>
+                        <div style={{ height: 1, background: "var(--border)", margin: "2px 0" }} />
+                        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                          <div style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.5 }}>Update Attendance</div>
+                          <div style={{ display: "inline-flex", borderRadius: 8, overflow: "hidden", border: "1px solid var(--border2)", width: "fit-content" }}>
+                            {[["present", true, "Present"], ["absent", false, "Absent"]].map(([k, v, lbl]) => (
+                              <button key={k} type="button" onClick={() => setDayDraft(d => ({ ...d, present: v }))}
+                                style={{ padding: "8px 14px", background: dayDraft.present === v ? (v ? "var(--green)" : "var(--red)") : "var(--bg3)", color: dayDraft.present === v ? "#000" : "var(--text2)", border: "none", fontSize: 11, fontWeight: 800, cursor: "pointer", textTransform: "uppercase", letterSpacing: 1 }}>{lbl}</button>
+                            ))}
+                          </div>
+                          {dayDraft.present && (
+                            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                              <label style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Worked at</label>
+                              <BranchSelect
+                                value={dayDraft.branch_id || ""}
+                                onChange={(v) => setDayDraft(d => ({ ...d, branch_id: v }))}
+                                branches={branches}
+                                placeholder="—"
+                                minWidth={0}
+                              />
+                            </div>
+                          )}
+                          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                            <label style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Note (optional)</label>
+                            <input value={dayDraft.note} onChange={e => setDayDraft(d => ({ ...d, note: e.target.value }))}
+                              placeholder="Reason / context"
+                              style={{ padding: "8px 10px", borderRadius: 8, background: "var(--bg4)", border: "1px solid var(--border2)", color: "var(--text)", fontSize: 12, outline: "none" }} />
+                          </div>
+                          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 4 }}>
+                            <button type="button" onClick={() => saveDay(editingDay, dayDraft)}
+                              style={{ flex: 1, minWidth: 100, padding: "10px", borderRadius: 10, background: "var(--accent)", color: "#000", border: "none", fontWeight: 800, cursor: "pointer" }}>Save</button>
+                            {isHoliday ? (
+                              <button type="button" onClick={() => removeHoliday(editingDay)}
+                                title="Remove holiday marking"
+                                style={{ flex: 1, minWidth: 100, padding: "10px", borderRadius: 10, background: "var(--bg4)", color: "var(--text2)", border: "1px solid var(--border)", fontWeight: 700, cursor: "pointer" }}>
+                                Remove Holiday
+                              </button>
+                            ) : (
+                              <button type="button" onClick={() => markHoliday(editingDay)}
+                                title="Mark this day as a paid holiday for this staff"
+                                style={{ flex: 1, minWidth: 100, padding: "10px", borderRadius: 10, background: "rgba(96,165,250,0.18)", color: "#60a5fa", border: "1px solid rgba(96,165,250,0.5)", fontWeight: 800, cursor: "pointer" }}>
+                                Mark Holiday
+                              </button>
+                            )}
+                          </div>
+                          {hasOverride && (
+                            <button type="button" onClick={() => clearOverride(editingDay)}
+                              title="Revert to computed attendance"
+                              style={{ padding: "8px 10px", borderRadius: 8, background: "transparent", color: "var(--text3)", border: "1px dashed var(--border)", fontWeight: 600, fontSize: 11, cursor: "pointer" }}>Clear Manual Override</button>
+                          )}
+                        </div>
+                      </>
+                    )}
                   </div>
                 );
               })()}
-
-              <div style={{ fontSize: 10, color: "var(--text3)", lineHeight: 1.5 }}>
-                Source priority: <strong>Manual override</strong> › Approved leave › Daily entries › Join/exit lifecycle.
-                {!canEdit && <> You have read-only access.</>}
-              </div>
+            </aside>
             </div>
           );
         })()}
