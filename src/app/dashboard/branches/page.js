@@ -3,7 +3,7 @@ import { useEffect, useState, useRef } from "react";
 import { collection, onSnapshot, query, orderBy, where, getDocs, deleteDoc, doc, addDoc, updateDoc, writeBatch } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
-import { INR, branchIncomeInPeriod, makeFilterPrefix, periodLabel, proRataSalary, staffLeavesInMonth, staffStatusForMonth, parseLocalDate, MASK, effectiveCashInHand, computeIncentiveExpense } from "@/lib/calculations";
+import { INR, branchIncomeInPeriod, makeFilterPrefix, periodLabel, proRataSalary, staffLeavesInMonth, staffStatusForMonth, parseLocalDate, MASK, effectiveCashInHand, computeIncentiveExpense, getMonthlyFixed } from "@/lib/calculations";
 import { Icon, IconBtn, Pill, Card, PeriodWidget, ToggleGroup, TH, TD, Modal, SearchSelect, BranchEmployeeSearch, useConfirm, useToast, useSort } from "@/components/ui";
 import { useRouter } from "next/navigation";
 import VLoader from "@/components/VLoader";
@@ -1863,6 +1863,7 @@ export default function BranchesPage() {
     let totalOnline = 0, totalCash = 0, totalMatInc = 0;
     let totalIncentiveExp = 0, totalMatExp = 0, totalOtherExp = 0;
     let totalFixedSalaryComp = 0;
+    let totalShopRent = 0, totalRoomRent = 0, totalElec = 0, totalWifi = 0, totalSalary = 0;
 
     for (let m = startMonthStats; m <= endMonth; m++) {
       const monthPrefix = `${filterYear}-${m < 10 ? '0' + m : m}`;
@@ -1877,11 +1878,15 @@ export default function BranchesPage() {
       const mLumpMatKpi = mEntries.reduce((s, e) => s + (Number(e.mat_expense) || 0), 0);
       const mMatExp = (matUseAllocations ? mAllocMatKpi : 0) + (matUseLumpsum ? mLumpMatKpi : 0);
       const mOtherExp = mEntries.reduce((s, e) => s + (e.others || 0) + (e.petrol || 0), 0);
-      const mFixed = (b.shop_rent || 0) + (b.room_rent || 0) + (b.wifi || 0) + (b.shop_elec || 0) + (b.room_elec || 0);
+      const mf = getMonthlyFixed(b, monthPrefix, monthlyExpenses, fixedExpenses);
+      const mFixed = mf.shop_rent + mf.room_rent + mf.wifi + mf.shop_elec + mf.room_elec;
       const actSal = staff.filter(as => as.branch_id === b.id && staffStatusForMonth(as, monthPrefix).status !== 'inactive').reduce((s, st) => s + proRataSalary(st, monthPrefix, branches, salHistory, staff, globalSettings), 0);
 
       totalOnline += mOnline; totalCash += mCash; totalMatInc += mMatInc;
       totalIncentiveExp += mIncExp; totalMatExp += mMatExp; totalOtherExp += mOtherExp;
+      totalShopRent += mf.shop_rent; totalRoomRent += mf.room_rent;
+      totalElec += mf.shop_elec + mf.room_elec; totalWifi += mf.wifi;
+      totalSalary += actSal;
       totalFixedSalaryComp += (mFixed + actSal);
     }
 
@@ -2090,7 +2095,16 @@ export default function BranchesPage() {
           <Card style={{ padding: 0 }}>
             <div style={{ padding: "14px 16px", borderBottom: "1px solid var(--border)", fontWeight: 700, color: "var(--red)", fontSize: 12, textTransform: "uppercase", letterSpacing: 1 }}>Expense Breakdown</div>
             <div style={{ padding: 16 }}>
-              {[["Staff Incentives", INR(totalIncentiveExp), "var(--red)"], ["Material Cost", INR(totalMatExp), "var(--red)"], ["Other / Petrol", INR(totalOtherExp), "var(--red)"], ["Shop Rent", INR(b.shop_rent * factor), "var(--orange)"], ["Room Rent", INR(b.room_rent * factor), "var(--orange)"], ["Electricity", INR(((b.shop_elec || 0) + (b.room_elec || 0)) * factor), "var(--orange)"], ["WiFi", INR(b.wifi * factor), "var(--orange)"]].map(([l, v, c]) => (
+              {[
+                ["Staff Incentives", INR(totalIncentiveExp), "var(--red)"],
+                ["Material Cost", INR(totalMatExp), "var(--red)"],
+                ["Other / Petrol", INR(totalOtherExp), "var(--red)"],
+                ["Shop Rent", INR(totalShopRent), "var(--orange)"],
+                ["Room Rent", INR(totalRoomRent), "var(--orange)"],
+                ["Electricity", INR(totalElec), "var(--orange)"],
+                ["WiFi", INR(totalWifi), "var(--orange)"],
+                ...(isAdmin ? [["Salary", INR(totalSalary), "var(--orange)"]] : []),
+              ].map(([l, v, c]) => (
                 <div key={l} style={{ display: "flex", justifyContent: "space-between", padding: "7px 0", borderBottom: "1px solid var(--border)", fontSize: 12 }}>
                   <span style={{ color: "var(--text2)", fontWeight: 500 }}>{l}</span>
                   <span style={{ fontWeight: 600, color: c }}>{v}</span>
@@ -2102,7 +2116,7 @@ export default function BranchesPage() {
               </div>
               <div style={{ display: "flex", justifyContent: "space-between", padding: "10px 0 4px", fontSize: 14, fontWeight: 700 }}>
                 <span style={{ color: "var(--red)" }}>TOTAL</span>
-                <span style={{ color: "var(--red)" }}>{isAdmin ? INR(totalVarExp + totalFixedSalaryComp + totalGstEst) : "•••••"}</span>
+                <span style={{ color: "var(--red)" }}>{INR(totalVarExp + totalShopRent + totalRoomRent + totalElec + totalWifi + (isAdmin ? totalSalary : 0) + totalGstEst)}</span>
               </div>
             </div>
           </Card>
