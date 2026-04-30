@@ -312,6 +312,7 @@ export default function DashboardPage() {
     return {
       b,
       i: income,
+      iOnline, iCash, iMatS,
       e: expenses,
       n: net,
       staffCount: staff.filter(s => s.branch_id === b.id).length,
@@ -331,6 +332,9 @@ export default function DashboardPage() {
   // GST estimate + variable + fixed) — this is what the Summary view's
   // Total Expense card uses, so the two now agree.
   const tI  = branchData.reduce((s, d) => s + d.i, 0);
+  const tIOnline = branchData.reduce((s, d) => s + (d.iOnline || 0), 0);
+  const tICash   = branchData.reduce((s, d) => s + (d.iCash || 0), 0);
+  const tIMat    = branchData.reduce((s, d) => s + (d.iMatS || 0), 0);
   const tE  = branchData.reduce((s, d) => s + d.e + d.totalGst, 0);
   const tEProjected = branchData.reduce((s, d) => s + d.projectedExp, 0);
   const net = branchData.reduce((s, d) => s + d.n, 0);
@@ -1064,7 +1068,28 @@ export default function DashboardPage() {
 
       {/* Admin Metrics — actuals row */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 16 }}>
-        <PremiumStatCard label="Gross Revenue" value={INR(tI)} sub="Total turnover" icon="trending" color="var(--green)" />
+        <PremiumStatCard label="Gross Revenue" value={INR(tI)} icon="trending" color="var(--green)"
+          sub={(() => {
+            const pct = (v) => tI > 0 ? `${((v / tI) * 100).toFixed(1)}%` : "0%";
+            return (
+              <span style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 2 }}>
+                <span title={`Online / UPI · ${pct(tIOnline)}`} style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 999, background: "rgba(34,211,238,0.12)", border: "1px solid rgba(34,211,238,0.35)", fontSize: 10, fontWeight: 800, color: "var(--accent)" }}>
+                  <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--accent)" }} />
+                  Online {INR(tIOnline)}
+                </span>
+                <span title={`Cash · ${pct(tICash)}`} style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 999, background: "rgba(74,222,128,0.12)", border: "1px solid rgba(74,222,128,0.35)", fontSize: 10, fontWeight: 800, color: "var(--green)" }}>
+                  <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--green)" }} />
+                  Cash {INR(tICash)}
+                </span>
+                {tIMat > 0 && (
+                  <span title={`Material sales · ${pct(tIMat)}`} style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 999, background: "rgba(192,132,252,0.12)", border: "1px solid rgba(192,132,252,0.35)", fontSize: 10, fontWeight: 800, color: "#c084fc" }}>
+                    <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#c084fc" }} />
+                    Mat {INR(tIMat)}
+                  </span>
+                )}
+              </span>
+            );
+          })()} />
         <PremiumStatCard label="Operating Cost" value={INR(tE)} sub="Salary + Overheads" icon="wallet" color="var(--red)"
           onClick={() => router.push("/dashboard/branches?view=summary")} linkLabel="See expense breakdown" />
         <PremiumStatCard label="Net P&L" value={INR(net)} sub="Bottom line earnings" icon="pie" color={net >= 0 ? "var(--green)" : "var(--red)"} />
