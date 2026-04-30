@@ -1790,6 +1790,7 @@ function MiniKPI({ label, value, sub, color }) {
 // entry.mat_expense (the lumpsum number typed into Daily Entry). If both are
 // on, the stack shows them as two colours so the mix is visible.
 function DailyMaterialChart({ entries, allocations, branches = [], filterYear, filterMonth, useAllocations, useLumpsum }) {
+  const router = useRouter();
   const [hover, setHover] = useState(null);
   // Independent hover state for the per-branch leaderboard rows.
   const [branchHover, setBranchHover] = useState(null);
@@ -2181,6 +2182,12 @@ function DailyMaterialChart({ entries, allocations, branches = [], filterYear, f
                     });
                   }}
                   onMouseLeave={() => setBranchHover(null)}
+                  onClick={() => {
+                    if (isZero || !r.id) return;
+                    const monthStr = `${filterYear}-${String(filterMonth).padStart(2, "0")}`;
+                    router.push(`/dashboard/materials?tab=transfers&view=branches&branch=${r.id}&month=${monthStr}`);
+                  }}
+                  title={isZero ? "" : `Open ${r.name.replace("V-CUT ", "")}'s material transfers`}
                   style={{ display: "grid", gridTemplateColumns: "22px minmax(120px, 170px) 1fr 48px auto", alignItems: "center", gap: 10, opacity: isZero ? 0.55 : 1, padding: "4px 8px", borderRadius: 8, background: isHovered ? "rgba(192,132,252,0.06)" : "transparent", transition: "background 0.15s", cursor: isZero ? "default" : "pointer" }}>
                   <div style={{ width: 20, height: 20, borderRadius: 6, background: isZero ? "var(--bg4)" : i < 3 ? "rgba(192,132,252,0.12)" : "var(--bg4)", border: `1px solid ${isZero ? "var(--border)" : i < 3 ? "rgba(192,132,252,0.35)" : "var(--border)"}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 900, color: rankColor }}>
                     {i + 1}

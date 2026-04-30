@@ -499,6 +499,9 @@ export default function BranchesPage() {
   const [openSections, setOpenSections] = useState(new Set());
   // KPI breakdown popup — "variable" or "fixed" or null
   const [kpiBreakdown, setKpiBreakdown] = useState(null);
+  // Material Consumption dashboard: which material card is expanded for the
+  // detail timeline. Keyed by material_id (or name fallback).
+  const [expandedMat, setExpandedMat] = useState(null);
   const toggleSection = (id) => setOpenSections(prev => {
     const next = new Set(prev);
     next.has(id) ? next.delete(id) : next.add(id);
@@ -2734,6 +2737,171 @@ export default function BranchesPage() {
                   </tbody>
                 </table>
               </Card>
+
+              {/* Material Consumption Dashboard — per-material cards. Click any
+                  card to reveal its date-by-date timeline + line chart for this
+                  branch in the current period. */}
+              {flatRows.length > 0 && (() => {
+                const byMat = new Map();
+                flatRows.forEach(r => {
+                  const key = r.material_id || r.name;
+                  const e = byMat.get(key) || { key, name: r.name, unit: r.unit || "pcs", qty: 0, value: 0, count: 0, dates: new Map() };
+                  const lt = Number(r.line_total) || (Number(r.qty) * Number(r.price_at_transfer)) || 0;
+                  const q = Number(r.qty) || 0;
+                  e.qty += q; e.value += lt; e.count += 1;
+                  const dr = e.dates.get(r.date) || { qty: 0, value: 0 };
+                  dr.qty += q; dr.value += lt;
+                  e.dates.set(r.date, dr);
+                  byMat.set(key, e);
+                });
+                const matCards = Array.from(byMat.values()).map(m => ({
+                  ...m,
+                  series: Array.from(m.dates.entries()).sort((a, b) => a[0].localeCompare(b[0])).map(([date, v]) => ({ date, qty: v.qty, value: v.value })),
+                })).sort((a, b) => b.value - a.value);
+                const grandValue = matCards.reduce((s, m) => s + m.value, 0);
+                const expanded = matCards.find(m => m.key === expandedMat);
+                return (
+                  <div style={{ marginTop: 24 }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, flexWrap: "wrap", gap: 10 }}>
+                      <div style={{ fontSize: 14, fontWeight: 700, color: "var(--accent)" }}>
+                        Material Consumption Dashboard ({matCards.length})
+                      </div>
+                      <div style={{ fontSize: 11, color: "var(--text3)" }}>
+                        Click any card to drill into its date-by-date timeline. Sorted by spend.
+                      </div>
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 12 }}>
+                      {matCards.map(m => {
+                        const isOpen = expandedMat === m.key;
+                        const sharePct = grandValue > 0 ? (m.value / grandValue) * 100 : 0;
+                        const maxQty = m.series.reduce((mx, s) => Math.max(mx, s.qty), 0) || 1;
+                        const W = 220, H = 36;
+                        const step = m.series.length > 1 ? W / (m.series.length - 1) : 0;
+                        const points = m.series.map((s, i) => `${(i * step).toFixed(1)},${(H - (s.qty / maxQty) * (H - 4) - 2).toFixed(1)}`).join(" ");
+                        return (
+                          <div key={m.key} role="button" tabIndex={0}
+                            onClick={() => setExpandedMat(isOpen ? null : m.key)}
+                            onKeyDown={(ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); setExpandedMat(isOpen ? null : m.key); } }}
+                            style={{
+                              padding: 14, borderRadius: 12,
+                              background: isOpen ? "rgba(34,211,238,0.1)" : "var(--bg3)",
+                              border: `1.5px solid ${isOpen ? "var(--accent)" : "var(--border2)"}`,
+                              cursor: "pointer",
+                              transition: "background .15s, border .15s, transform .15s",
+                              transform: isOpen ? "translateY(-1px)" : "none",
+                              boxShadow: isOpen ? "0 6px 18px rgba(34,211,238,0.22)" : "none",
+                              display: "flex", flexDirection: "column", gap: 8,
+                            }}>
+                            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                              <div style={{ fontSize: 12.5, fontWeight: 800, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={m.name}>{m.name}</div>
+                              <div style={{ fontSize: 9, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 0.6 }}>{sharePct.toFixed(1)}%</div>
+                            </div>
+                            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8 }}>
+                              <div>
+                                <div style={{ fontSize: 9, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.6 }}>Qty</div>
+                                <div style={{ fontSize: 14, fontWeight: 800, color: "var(--blue)", fontFamily: "var(--font-headline, var(--font-outfit))" }}>{m.qty} <span style={{ fontSize: 10, color: "var(--text3)", fontWeight: 600 }}>{m.unit}</span></div>
+                              </div>
+                              <div style={{ textAlign: "right" }}>
+                                <div style={{ fontSize: 9, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.6 }}>Value</div>
+                                <div style={{ fontSize: 14, fontWeight: 800, color: "var(--green)", fontFamily: "var(--font-headline, var(--font-outfit))" }}>{INR(m.value)}</div>
+                              </div>
+                            </div>
+                            <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: H }}>
+                              <polyline points={points} fill="none" stroke={isOpen ? "var(--accent)" : "rgba(34,211,238,0.55)"} strokeWidth={1.6} strokeLinejoin="round" strokeLinecap="round" />
+                              {m.series.map((s, i) => (
+                                <circle key={i} cx={(i * step).toFixed(1)} cy={(H - (s.qty / maxQty) * (H - 4) - 2).toFixed(1)} r={1.8} fill={isOpen ? "var(--accent)" : "rgba(34,211,238,0.7)"} />
+                              ))}
+                            </svg>
+                            <div style={{ fontSize: 10, color: "var(--text3)", display: "flex", justifyContent: "space-between" }}>
+                              <span>{m.count} transfer{m.count === 1 ? "" : "s"}</span>
+                              <span>{m.series.length} day{m.series.length === 1 ? "" : "s"}</span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {expanded && (() => {
+                      const maxBarQty = expanded.series.reduce((mx, s) => Math.max(mx, s.qty), 0) || 1;
+                      const W = 720, H = 160, padL = 36, padR = 12, padT = 12, padB = 28;
+                      const innerW = W - padL - padR, innerH = H - padT - padB;
+                      const step = expanded.series.length > 0 ? innerW / Math.max(expanded.series.length, 1) : 0;
+                      return (
+                        <Card style={{ marginTop: 14, padding: 16, border: "1.5px solid var(--accent)", background: "rgba(34,211,238,0.05)" }}>
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10, marginBottom: 12 }}>
+                            <div>
+                              <div style={{ fontSize: 9, fontWeight: 800, color: "var(--accent)", textTransform: "uppercase", letterSpacing: 1.2 }}>Detail</div>
+                              <div style={{ fontSize: 16, fontWeight: 800, color: "var(--text)", marginTop: 2 }}>{expanded.name}</div>
+                            </div>
+                            <div style={{ display: "flex", gap: 14, alignItems: "baseline" }}>
+                              <div><span style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase" }}>Qty</span> <strong style={{ fontSize: 14, color: "var(--blue)", marginLeft: 4 }}>{expanded.qty} {expanded.unit}</strong></div>
+                              <div><span style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase" }}>Value</span> <strong style={{ fontSize: 14, color: "var(--green)", marginLeft: 4 }}>{INR(expanded.value)}</strong></div>
+                              <button onClick={() => setExpandedMat(null)}
+                                style={{ padding: "6px 12px", borderRadius: 8, background: "var(--bg4)", color: "var(--text2)", border: "1px solid var(--border2)", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>Close</button>
+                            </div>
+                          </div>
+                          <div style={{ overflowX: "auto" }}>
+                            <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", minWidth: 480, height: H }}>
+                              {[0, 0.5, 1].map(t => (
+                                <line key={t} x1={padL} x2={W - padR} y1={padT + innerH * (1 - t)} y2={padT + innerH * (1 - t)} stroke="var(--border)" strokeDasharray="3 3" />
+                              ))}
+                              {[0, 0.5, 1].map(t => (
+                                <text key={t} x={padL - 4} y={padT + innerH * (1 - t) + 3} textAnchor="end" fontSize={9} fill="var(--text3)">{Math.round(maxBarQty * t)}</text>
+                              ))}
+                              {expanded.series.map((s, i) => {
+                                const barW = Math.max(step * 0.55, 8);
+                                const barH = (s.qty / maxBarQty) * innerH;
+                                const x = padL + i * step + (step - barW) / 2;
+                                const y = padT + innerH - barH;
+                                return (
+                                  <g key={s.date}>
+                                    <rect x={x} y={y} width={barW} height={barH} fill="url(#matBarGrad)" rx={2}>
+                                      <title>{`${s.date} · ${s.qty} ${expanded.unit} · ${INR(s.value)}`}</title>
+                                    </rect>
+                                    <text x={x + barW / 2} y={H - padB + 12} textAnchor="middle" fontSize={8} fill="var(--text3)">{s.date.slice(8, 10)}</text>
+                                  </g>
+                                );
+                              })}
+                              <defs>
+                                <linearGradient id="matBarGrad" x1="0" y1="0" x2="0" y2="1">
+                                  <stop offset="0%" stopColor="var(--accent)" stopOpacity="0.95" />
+                                  <stop offset="100%" stopColor="var(--accent)" stopOpacity="0.45" />
+                                </linearGradient>
+                              </defs>
+                            </svg>
+                          </div>
+                          <div style={{ marginTop: 12, overflowX: "auto" }}>
+                            <table className="pill-table" style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
+                              <thead><tr>
+                                <TH>Date</TH>
+                                <TH right>Qty</TH>
+                                <TH>Unit</TH>
+                                <TH right>Value</TH>
+                              </tr></thead>
+                              <tbody>
+                                {expanded.series.map(s => (
+                                  <tr key={s.date}>
+                                    <TD style={{ fontWeight: 600 }}>{s.date}</TD>
+                                    <TD right style={{ color: "var(--blue)", fontWeight: 700 }}>{s.qty}</TD>
+                                    <TD style={{ color: "var(--text3)" }}>{expanded.unit}</TD>
+                                    <TD right style={{ color: "var(--green)", fontWeight: 800 }}>{INR(s.value)}</TD>
+                                  </tr>
+                                ))}
+                                <tr className="totals-row">
+                                  <TD style={{ fontWeight: 800, color: "var(--gold)" }}>TOTAL</TD>
+                                  <TD right style={{ fontWeight: 800, color: "var(--blue)" }}>{expanded.qty}</TD>
+                                  <TD style={{ color: "var(--text3)" }}>{expanded.unit}</TD>
+                                  <TD right style={{ fontWeight: 800, color: "var(--accent)" }}>{INR(expanded.value)}</TD>
+                                </tr>
+                              </tbody>
+                            </table>
+                          </div>
+                        </Card>
+                      );
+                    })()}
+                  </div>
+                );
+              })()}
             </div>
           );
         })()}

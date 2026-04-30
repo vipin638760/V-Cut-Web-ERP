@@ -1,5 +1,6 @@
 "use client";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { collection, onSnapshot, query, orderBy, addDoc, doc, writeBatch, deleteDoc, updateDoc, increment } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
@@ -20,6 +21,7 @@ const MATERIAL_GROUPS = [
 ];
 
 export default function MaterialsPage() {
+  const searchParams = useSearchParams();
   const { confirm, ConfirmDialog } = useConfirm();
   const { toast, ToastContainer } = useToast();
   const [materials, setMaterials] = useState([]);
@@ -786,6 +788,23 @@ export default function MaterialsPage() {
     });
     return () => cancelAnimationFrame(id);
   }, [pendingBranchScroll, allocView]);
+
+  // Deep-link support: dashboard's Branch Consumption rows link here with
+  // ?tab=transfers&view=branches&branch=<id>&month=<YYYY-MM>. Apply once on mount.
+  const deepLinkAppliedRef = useRef(false);
+  useEffect(() => {
+    if (deepLinkAppliedRef.current || !searchParams) return;
+    const qTab = searchParams.get("tab");
+    const qView = searchParams.get("view");
+    const qBranch = searchParams.get("branch");
+    const qMonth = searchParams.get("month");
+    if (!qTab && !qBranch && !qMonth) return;
+    if (qTab === "transfers") setTab("transfers");
+    if (qView === "branches" || qView === "table" || qView === "analytics") setAllocView(qView);
+    if (qMonth && /^\d{4}-\d{2}$/.test(qMonth)) setMaterialMonth(qMonth);
+    if (qBranch) setPendingBranchScroll(qBranch);
+    deepLinkAppliedRef.current = true;
+  }, [searchParams]);
   const [analyticsExporting, setAnalyticsExporting] = useState(false);
   // Multi-select for bulk delete in the flat Table view.
   const [selectedAllocIds, setSelectedAllocIds] = useState(() => new Set());
