@@ -418,6 +418,7 @@ export default function BranchesPage() {
   const [staff, setStaff] = useState([]);
   const [entries, setEntries] = useState([]);
   const [materialAllocations, setMaterialAllocations] = useState([]);
+  const [materialsMaster, setMaterialsMaster] = useState([]);
   // Per-month overrides written from Operational Expenses (Fixed tab).
   // **Why:** Without this, edits to Shop Rent / Room Rent / Elec / WiFi /
   // custom fixed columns made on the Operational Expenses page never showed
@@ -502,6 +503,10 @@ export default function BranchesPage() {
   // Material Consumption dashboard: which material card is expanded for the
   // detail timeline. Keyed by material_id (or name fallback).
   const [expandedMat, setExpandedMat] = useState(null);
+  // Materials Received table — search, group filter, sort.
+  const [matSearch, setMatSearch] = useState("");
+  const [matGroupFilter, setMatGroupFilter] = useState("");
+  const matSort = useSort("date", "desc");
   const toggleSection = (id) => setOpenSections(prev => {
     const next = new Set(prev);
     next.has(id) ? next.delete(id) : next.add(id);
@@ -561,6 +566,7 @@ export default function BranchesPage() {
       onSnapshot(query(collection(db, "material_allocations"), orderBy("transferred_at", "desc")), sn => {
         setMaterialAllocations(sn.docs.map(d => ({ ...d.data(), id: d.id })));
       }),
+      onSnapshot(collection(db, "materials"), sn => setMaterialsMaster(sn.docs.map(d => ({ ...d.data(), id: d.id })))),
       onSnapshot(collection(db, "fixed_expenses"), sn => setFixedExpenses(sn.docs.map(d => ({ ...d.data(), id: d.id })))),
       onSnapshot(collection(db, "monthly_expenses"), sn => setMonthlyExpenses(sn.docs.map(d => ({ ...d.data(), id: d.id })))),
       onSnapshot(collection(db, "incentive_releases"), sn => setIncentiveReleases(sn.docs.map(d => ({ ...d.data(), id: d.id })))),
@@ -2682,55 +2688,127 @@ export default function BranchesPage() {
 
         {/* Materials Received */}
         {openSections.has("materials") && (() => {
+          const matIdToGroup = new Map(materialsMaster.map(m => [m.id, (m.group || "").toString()]));
           const branchAllocs = materialAllocations.filter(a => a.branch_id === b.id && (a.date || a.transferred_at || "").startsWith(filterMode === "year" ? String(filterYear) : filterPrefix));
-          const flatRows = branchAllocs.flatMap(a =>
+          const flatRowsAll = branchAllocs.flatMap(a =>
             (a.items || []).map((it, i) => ({
               ...it,
+              group: it.group || matIdToGroup.get(it.material_id) || "",
               date: a.date || (a.transferred_at || "").slice(0, 10),
               transferred_at: a.transferred_at,
               allocation_id: a.id,
               key: `${a.id}-${i}`,
+              line_total: Number(it.line_total) || (Number(it.qty) * Number(it.price_at_transfer)) || 0,
             }))
-          ).sort((x, y) => (y.date || "").localeCompare(x.date || ""));
-          const totalReceived = flatRows.reduce((s, r) => s + (Number(r.line_total) || (Number(r.qty) * Number(r.price_at_transfer)) || 0), 0);
+          );
+          const groupOptions = Array.from(new Set(flatRowsAll.map(r => r.group).filter(Boolean))).sort();
+          const search = matSearch.trim().toLowerCase();
+          const filteredRows = flatRowsAll.filter(r => {
+            if (matGroupFilter && r.group !== matGroupFilter) return false;
+            if (search && !(r.name || "").toLowerCase().includes(search) && !(r.group || "").toLowerCase().includes(search)) return false;
+            return true;
+          });
+          const flatRows = matSort.sortRows(filteredRows, {
+            date:  r => r.date || "",
+            name:  r => (r.name || "").toLowerCase(),
+            group: r => (r.group || "").toLowerCase(),
+            qty:   r => Number(r.qty) || 0,
+            unit:  r => (r.unit || "").toLowerCase(),
+            price: r => Number(r.price_at_transfer) || 0,
+            total: r => Number(r.line_total) || 0,
+          });
+          // Default sort: newest date first, then biggest line.
+          if (!matSort.sortCol) {
+            flatRows.sort((x, y) => (y.date || "").localeCompare(x.date || "") || (y.line_total - x.line_total));
+          }
+          const totalReceived = flatRows.reduce((s, r) => s + r.line_total, 0);
+          const totalQty = flatRows.reduce((s, r) => s + (Number(r.qty) || 0), 0);
+          const totalAll = flatRowsAll.reduce((s, r) => s + r.line_total, 0);
           return (
             <div style={{ marginTop: 24, marginBottom: 24 }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, flexWrap: "wrap", gap: 10 }}>
-                <div style={{ fontSize: 14, fontWeight: 700, color: "var(--gold)" }}>
-                  Materials Received ({flatRows.length}) — {filterMode === "year" ? String(filterYear) : plabel}
+                <div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: "var(--gold)" }}>
+                    Materials Received — {filterMode === "year" ? String(filterYear) : plabel}
+                  </div>
+                  <div style={{ fontSize: 10, color: "var(--text3)", marginTop: 2 }}>
+                    Showing <strong style={{ color: "var(--text2)" }}>{flatRows.length}</strong> of {flatRowsAll.length} line{flatRowsAll.length === 1 ? "" : "s"}
+                    {(matSearch || matGroupFilter) && <span style={{ color: "var(--accent)", marginLeft: 6 }}>· filtered</span>}
+                  </div>
                 </div>
-                <div style={{ fontSize: 12, color: "var(--text3)" }}>
-                  Total cost <strong style={{ color: "var(--accent)", fontSize: 14 }}>{INR(totalReceived)}</strong>
-                  {flatRows.length > 0 && <span style={{ marginLeft: 8, fontSize: 10, color: "var(--text3)" }}>(added to the material expense for each transfer's date)</span>}
+                <div style={{ fontSize: 12, color: "var(--text3)", textAlign: "right" }}>
+                  <div>Filtered total <strong style={{ color: "var(--accent)", fontSize: 14, marginLeft: 4 }}>{INR(totalReceived)}</strong></div>
+                  {(matSearch || matGroupFilter) && totalAll !== totalReceived && (
+                    <div style={{ fontSize: 10, color: "var(--text3)", marginTop: 2 }}>Period grand total {INR(totalAll)}</div>
+                  )}
                 </div>
               </div>
-              <Card style={{ padding: 0 }}>
-                <table className="pill-table" style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12.5 }}>
+              {/* Toolbar — search + group filter + reset */}
+              <Card style={{ padding: 12, marginBottom: 10, display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10 }}>
+                <div style={{ position: "relative", flex: "1 1 240px", minWidth: 200 }}>
+                  <input value={matSearch} onChange={e => setMatSearch(e.target.value)}
+                    placeholder="Search material or group…"
+                    style={{ width: "100%", padding: "9px 32px 9px 34px", borderRadius: 8, background: "var(--bg4)", border: "1px solid var(--border2)", color: "var(--text)", fontSize: 12.5, outline: "none" }} />
+                  <span style={{ position: "absolute", left: 11, top: "50%", transform: "translateY(-50%)", fontSize: 13, color: "var(--text3)", pointerEvents: "none" }}>🔍</span>
+                  {matSearch && (
+                    <button onClick={() => setMatSearch("")} title="Clear search"
+                      style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)", padding: "2px 8px", borderRadius: 6, background: "var(--bg3)", border: "1px solid var(--border2)", color: "var(--text3)", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>✕</button>
+                  )}
+                </div>
+                <SearchSelect
+                  value={matGroupFilter}
+                  onChange={v => setMatGroupFilter(v || "")}
+                  options={groupOptions.map(g => ({ value: g, label: g }))}
+                  allowEmpty
+                  placeholder="All Groups"
+                  buttonStyle={{ padding: "9px 14px", borderRadius: 8, background: "var(--bg4)", border: "1px solid var(--border2)", color: "var(--text)", fontSize: 12.5, minWidth: 160 }}
+                />
+                {(matSearch || matGroupFilter) && (
+                  <button onClick={() => { setMatSearch(""); setMatGroupFilter(""); }}
+                    style={{ padding: "8px 14px", borderRadius: 8, background: "var(--bg4)", border: "1px solid var(--border2)", color: "var(--text2)", fontSize: 11, fontWeight: 700, cursor: "pointer", textTransform: "uppercase", letterSpacing: 0.5 }}>
+                    Reset
+                  </button>
+                )}
+                <div style={{ marginLeft: "auto", fontSize: 10, color: "var(--text3)", display: "flex", gap: 14, flexWrap: "wrap" }}>
+                  <span>Qty <strong style={{ color: "var(--blue)", fontSize: 12 }}>{totalQty}</strong></span>
+                  <span>Lines <strong style={{ color: "var(--text2)", fontSize: 12 }}>{flatRows.length}</strong></span>
+                </div>
+              </Card>
+              <Card style={{ padding: 0, overflowX: "auto" }}>
+                <table className="pill-table" style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12.5, minWidth: 720 }}>
                   <thead><tr>
-                    <TH>Date</TH>
-                    <TH>Material</TH>
-                    <TH right>Qty</TH>
-                    <TH>Unit</TH>
-                    <TH right>Unit Price</TH>
-                    <TH right>Line Total</TH>
+                    <TH sort={matSort} sortKey="date">Date</TH>
+                    <TH sort={matSort} sortKey="name">Material</TH>
+                    <TH sort={matSort} sortKey="group">Group</TH>
+                    <TH right sort={matSort} sortKey="qty">Qty</TH>
+                    <TH sort={matSort} sortKey="unit">Unit</TH>
+                    <TH right sort={matSort} sortKey="price">Unit Price</TH>
+                    <TH right sort={matSort} sortKey="total">Line Total</TH>
                   </tr></thead>
                   <tbody>
                     {flatRows.map(r => (
                       <tr key={r.key}>
                         <TD style={{ whiteSpace: "nowrap", fontWeight: 600 }}>{r.date || "—"}</TD>
-                        <TD style={{ fontWeight: 600 }}>{r.name}</TD>
+                        <TD style={{ fontWeight: 700 }}>{r.name}</TD>
+                        <TD>{r.group ? (
+                          <span style={{ padding: "2px 8px", borderRadius: 999, background: "rgba(34,211,238,0.12)", color: "var(--accent)", fontSize: 9.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: 0.5, whiteSpace: "nowrap" }}>{r.group}</span>
+                        ) : <span style={{ color: "var(--text3)", fontSize: 11, fontStyle: "italic" }}>—</span>}</TD>
                         <TD right style={{ color: "var(--blue)", fontWeight: 700 }}>{r.qty}</TD>
                         <TD style={{ color: "var(--text3)" }}>{r.unit || "pcs"}</TD>
                         <TD right style={{ color: "var(--text3)" }}>{INR(r.price_at_transfer || 0)}</TD>
-                        <TD right style={{ color: "var(--green)", fontWeight: 800 }}>{INR(r.line_total || (Number(r.qty) * Number(r.price_at_transfer)) || 0)}</TD>
+                        <TD right style={{ color: "var(--green)", fontWeight: 800 }}>{INR(r.line_total)}</TD>
                       </tr>
                     ))}
                     {flatRows.length === 0 && (
-                      <tr><td colSpan={6} style={{ textAlign: "center", padding: 24, color: "var(--text3)", fontStyle: "italic" }}>No materials transferred to this branch in this period.</td></tr>
+                      <tr><td colSpan={7} style={{ textAlign: "center", padding: 24, color: "var(--text3)", fontStyle: "italic" }}>
+                        {flatRowsAll.length === 0 ? "No materials transferred to this branch in this period." : "No rows match the current filters."}
+                      </td></tr>
                     )}
                     {flatRows.length > 0 && (
                       <tr className="totals-row" style={{ background: "var(--bg3)", borderTop: "2px solid var(--border2)" }}>
-                        <TD style={{ fontWeight: 800, color: "var(--gold)" }} colSpan={5}>TOTAL</TD>
+                        <TD style={{ fontWeight: 800, color: "var(--gold)" }} colSpan={3}>TOTAL</TD>
+                        <TD right style={{ fontWeight: 800, color: "var(--blue)" }}>{totalQty}</TD>
+                        <TD colSpan={2}></TD>
                         <TD right style={{ fontWeight: 800, color: "var(--accent)" }}>{INR(totalReceived)}</TD>
                       </tr>
                     )}
