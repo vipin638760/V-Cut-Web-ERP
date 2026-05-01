@@ -1070,21 +1070,29 @@ export default function DashboardPage() {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 16 }}>
         <PremiumStatCard label="Gross Revenue" value={INR(tI)} icon="trending" color="var(--green)"
           sub={(() => {
-            const pct = (v) => tI > 0 ? `${((v / tI) * 100).toFixed(1)}%` : "0%";
+            const pct = (v) => tI > 0 ? (v / tI) * 100 : 0;
+            const pOn = pct(tIOnline), pCa = pct(tICash), pMa = pct(tIMat);
             return (
-              <span style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 2 }}>
-                <span title={`Online / UPI · ${pct(tIOnline)}`} style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 999, background: "rgba(34,211,238,0.12)", border: "1px solid rgba(34,211,238,0.35)", fontSize: 10, fontWeight: 800, color: "var(--accent)" }}>
-                  <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--accent)" }} />
-                  Online {INR(tIOnline)}
+              <span style={{ display: "block", marginTop: 8 }}>
+                <span style={{ display: "flex", height: 4, borderRadius: 3, overflow: "hidden", background: "rgba(255,255,255,0.06)" }}>
+                  {pOn > 0 && <span style={{ width: `${pOn}%`, background: "var(--accent)" }} title={`Online ${pOn.toFixed(1)}%`} />}
+                  {pCa > 0 && <span style={{ width: `${pCa}%`, background: "var(--green)" }} title={`Cash ${pCa.toFixed(1)}%`} />}
+                  {pMa > 0 && <span style={{ width: `${pMa}%`, background: "#c084fc" }} title={`Material ${pMa.toFixed(1)}%`} />}
                 </span>
-                <span title={`Cash · ${pct(tICash)}`} style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 999, background: "rgba(74,222,128,0.12)", border: "1px solid rgba(74,222,128,0.35)", fontSize: 10, fontWeight: 800, color: "var(--green)" }}>
-                  <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--green)" }} />
-                  Cash {INR(tICash)}
+                <span style={{ display: "flex", justifyContent: "space-between", gap: 10, marginTop: 8, fontSize: 11, color: "var(--text2)" }}>
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontWeight: 600 }}>
+                    <span style={{ width: 7, height: 7, borderRadius: 2, background: "var(--accent)" }} />
+                    Online <strong style={{ color: "var(--text)", fontWeight: 800, fontFamily: "var(--font-headline, var(--font-outfit))" }}>{INR(tIOnline)}</strong>
+                  </span>
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontWeight: 600 }}>
+                    <span style={{ width: 7, height: 7, borderRadius: 2, background: "var(--green)" }} />
+                    Cash <strong style={{ color: "var(--text)", fontWeight: 800, fontFamily: "var(--font-headline, var(--font-outfit))" }}>{INR(tICash)}</strong>
+                  </span>
                 </span>
                 {tIMat > 0 && (
-                  <span title={`Material sales · ${pct(tIMat)}`} style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 999, background: "rgba(192,132,252,0.12)", border: "1px solid rgba(192,132,252,0.35)", fontSize: 10, fontWeight: 800, color: "#c084fc" }}>
-                    <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#c084fc" }} />
-                    Mat {INR(tIMat)}
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 5, marginTop: 4, fontSize: 11, color: "var(--text2)", fontWeight: 600 }}>
+                    <span style={{ width: 7, height: 7, borderRadius: 2, background: "#c084fc" }} />
+                    Material <strong style={{ color: "var(--text)", fontWeight: 800, fontFamily: "var(--font-headline, var(--font-outfit))" }}>{INR(tIMat)}</strong>
                   </span>
                 )}
               </span>
