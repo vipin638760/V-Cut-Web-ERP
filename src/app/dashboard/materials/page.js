@@ -73,6 +73,13 @@ export default function MaterialsPage() {
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
   });
+  // Optional date range *within* materialMonth. When both blank → whole month.
+  // **Why:** Accountant wants to drill into "transfers between 5–12 May" without
+  // leaving the analytics view. Clearing both falls back to month-wide totals.
+  // **How to apply:** Filter helper `allocInSelectedPeriod` checks range first,
+  // falls back to monthPrefix.
+  const [materialDateFrom, setMaterialDateFrom] = useState("");
+  const [materialDateTo, setMaterialDateTo] = useState("");
 
   // Per-branch By-Branch view: which transfer groups are currently expanded.
   // Default is collapsed — branches show one row per date until the user opens one.
@@ -372,7 +379,18 @@ export default function MaterialsPage() {
   // Analytics aggregation for the selected month — drives every widget on
   // the Analytics view: KPI strip, branch summary, top materials, top
   // branches, per-branch top materials, plus the Download Excel export.
-  const monthAllocs = useMemo(() => allocations.filter(a => (a.date || (a.transferred_at || "")).startsWith(materialMonth)), [allocations, materialMonth]);
+  // Allocation predicate for the active period — month + optional date range.
+  const allocInSelectedPeriod = useMemo(() => {
+    return (a) => {
+      const d = (a.date || (a.transferred_at || "")).slice(0, 10);
+      if (!d) return false;
+      if (!d.startsWith(materialMonth)) return false;
+      if (materialDateFrom && d < materialDateFrom) return false;
+      if (materialDateTo && d > materialDateTo) return false;
+      return true;
+    };
+  }, [materialMonth, materialDateFrom, materialDateTo]);
+  const monthAllocs = useMemo(() => allocations.filter(allocInSelectedPeriod), [allocations, allocInSelectedPeriod]);
   const analytics = useMemo(() => {
     // Per-branch rollup
     const perBranch = new Map(); // branch_id → { transfers, items, qty, spend, byMaterial: Map }
@@ -540,7 +558,8 @@ export default function MaterialsPage() {
       const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
       const a = document.createElement("a");
       a.href = URL.createObjectURL(blob);
-      a.download = `V-Cut_Materials_Analytics_${materialMonth}.xlsx`;
+      const rangeSuffix = (materialDateFrom || materialDateTo) ? `_${materialDateFrom || "start"}_to_${materialDateTo || "end"}` : "";
+      a.download = `V-Cut_Materials_Analytics_${materialMonth}${rangeSuffix}.xlsx`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -2826,11 +2845,62 @@ export default function MaterialsPage() {
                 Transferred Materials {allocView === "branches" ? "· By Branch" : "— All Transfers"}
               </div>
               <div style={{ display: "inline-flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 0.5 }}>
-                  Month
-                  <input type="month" value={materialMonth} onChange={e => setMaterialMonth(e.target.value)}
-                    style={{ padding: "6px 10px", borderRadius: 8, background: "var(--bg3)", border: "1px solid var(--border2)", color: "var(--text)", fontSize: 12, outline: "none" }} />
-                </label>
+                {(() => {
+                  const [yrStr, moStr] = materialMonth.split("-");
+                  const curYr = Number(yrStr) || new Date().getFullYear();
+                  const curMo = Number(moStr) || (new Date().getMonth() + 1);
+                  const yrs = [];
+                  const thisYr = new Date().getFullYear();
+                  for (let y = thisYr - 4; y <= thisYr + 1; y++) yrs.push(y);
+                  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+                  const setYM = (y, m) => {
+                    setMaterialMonth(`${y}-${String(m).padStart(2, "0")}`);
+                    setMaterialDateFrom("");
+                    setMaterialDateTo("");
+                  };
+                  // Bound the From/To pickers to the selected month so users
+                  // can't accidentally pick a date outside the rollup period.
+                  const monthStart = `${materialMonth}-01`;
+                  const monthEnd = (() => {
+                    const last = new Date(curYr, curMo, 0).getDate();
+                    return `${materialMonth}-${String(last).padStart(2, "0")}`;
+                  })();
+                  const inputStyle = { padding: "6px 10px", borderRadius: 8, background: "var(--bg3)", border: "1px solid var(--border2)", color: "var(--text)", fontSize: 12, outline: "none" };
+                  return (
+                    <div style={{ display: "inline-flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                      <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 0.5 }}>
+                        Year
+                        <select value={curYr} onChange={e => setYM(Number(e.target.value), curMo)} style={inputStyle}>
+                          {yrs.map(y => <option key={y} value={y}>{y}</option>)}
+                        </select>
+                      </label>
+                      <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 0.5 }}>
+                        Month
+                        <select value={curMo} onChange={e => setYM(curYr, Number(e.target.value))} style={inputStyle}>
+                          {months.map((m, i) => <option key={i} value={i + 1}>{m}</option>)}
+                        </select>
+                      </label>
+                      <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 0.5 }}
+                        title="Optional date range within the selected month — leave blank for the whole month">
+                        From
+                        <input type="date" value={materialDateFrom} min={monthStart} max={monthEnd}
+                          onChange={e => setMaterialDateFrom(e.target.value)} style={inputStyle} />
+                      </label>
+                      <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 0.5 }}>
+                        To
+                        <input type="date" value={materialDateTo} min={materialDateFrom || monthStart} max={monthEnd}
+                          onChange={e => setMaterialDateTo(e.target.value)} style={inputStyle} />
+                      </label>
+                      {(materialDateFrom || materialDateTo) && (
+                        <button type="button" onClick={() => { setMaterialDateFrom(""); setMaterialDateTo(""); }}
+                          title="Clear date range"
+                          style={{ padding: "5px 10px", borderRadius: 8, background: "var(--bg4)", border: "1px solid var(--border2)", color: "var(--text2)", fontSize: 10, fontWeight: 800, cursor: "pointer", textTransform: "uppercase", letterSpacing: 0.5 }}>
+                          Clear
+                        </button>
+                      )}
+                    </div>
+                  );
+                })()}
                 <div style={{ display: "inline-flex", gap: 2, background: "var(--bg4)", padding: 3, borderRadius: 10 }}>
                   {[["branches", "By Branch"], ["table", "Table"], ["analytics", "Analytics"]].map(([v, l]) => (
                     <button key={v} onClick={() => setAllocView(v)}
@@ -2867,7 +2937,7 @@ export default function MaterialsPage() {
               // Keep only branches that had transfers this month so 13 empty cards don't clutter the page.
               const allocLatestDate = (a) => a.date || (a.transferred_at || "").slice(0, 10) || "";
               const branchesWithData = branches
-                .map(b => ({ b, allocs: allocations.filter(a => a.branch_id === b.id && (a.date || (a.transferred_at || "")).startsWith(materialMonth)) }))
+                .map(b => ({ b, allocs: allocations.filter(a => a.branch_id === b.id && allocInSelectedPeriod(a)) }))
                 .filter(row => row.allocs.length > 0)
                 .sort((x, y) => {
                   const yLatest = y.allocs.reduce((m, a) => { const d = allocLatestDate(a); return d > m ? d : m; }, "");
@@ -3046,7 +3116,7 @@ export default function MaterialsPage() {
                 );
               }
               const goToBranch = (bid) => {
-                const allocs = allocations.filter(a => a.branch_id === bid && (a.date || (a.transferred_at || "")).startsWith(materialMonth));
+                const allocs = allocations.filter(a => a.branch_id === bid && allocInSelectedPeriod(a));
                 expandAllocIds(allocs.map(a => a.id));
                 setAllocView("branches");
                 setPendingBranchScroll(bid);
