@@ -3,7 +3,7 @@ import { useEffect, useState, useRef, useMemo, Fragment } from "react";
 import { collection, onSnapshot, query, orderBy, doc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
-import { INR, staffBillingInPeriod, makeFilterPrefix, periodLabel, proRataSalary, staffLeavesInMonth, staffStatusForMonth, staffIncentivesInPeriod, parseLocalDate, getMonthlyFixed, MASK, computeIncentiveExpense } from "@/lib/calculations";
+import { INR, staffBillingInPeriod, makeFilterPrefix, periodLabel, proRataSalary, staffLeavesInMonth, staffStatusForMonth, staffIncentivesInPeriod, parseLocalDate, getMonthlyFixed, MASK, computeIncentiveExpense, toTitleCase } from "@/lib/calculations";
 import { PeriodWidget, ToggleGroup, Card, Pill, TH, TD, Icon, Modal, TabNav, ProgressBar, BranchEmployeeSearch, useToast } from "@/components/ui";
 import { useRouter } from "next/navigation";
 // ExcelJS is ~200KB — load only when Export is actually used.
@@ -1701,7 +1701,7 @@ function TopPerformersSection({ staffData, branchesById, brTypeFilter, staffView
                       {i + 1}
                     </div>
                     <div style={{ minWidth: 0 }}>
-                      <div style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.s.name}</div>
+                      <div style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{toTitleCase(row.s.name)}</div>
                       {branchName && <div style={{ fontSize: 9.5, color: "var(--text3)", fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{branchName}</div>}
                     </div>
                     <div style={{ position: "relative", height: 22, background: "rgba(255,255,255,0.025)", borderRadius: 6, overflow: "hidden" }}>
@@ -1749,7 +1749,7 @@ function TopPerformersSection({ staffData, branchesById, brTypeFilter, staffView
                     onMouseEnter={e => e.currentTarget.style.background = "var(--bg4)"}
                     onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
                     <TD style={{ color: rankColor(i), fontWeight: 800, fontSize: 12 }}>{i + 1}</TD>
-                    <TD style={{ fontWeight: 600 }}>{row.s.name}</TD>
+                    <TD style={{ fontWeight: 600 }}>{toTitleCase(row.s.name)}</TD>
                     <TD style={{ color: "var(--text3)", fontSize: 11 }}>{b ? b.name.replace("V-CUT ", "") : "—"}</TD>
                     <TD right style={{ fontWeight: 700, color: "var(--accent)", fontFamily: "var(--font-headline, var(--font-outfit))" }}>{INR(row.sale)}</TD>
                     <TD right style={{ color: "var(--text3)", fontSize: 11, fontWeight: 600 }}>{shareOfTotal > 0 ? `${shareOfTotal.toFixed(1)}%` : "—"}</TD>

@@ -8,6 +8,15 @@ export const INR = (v) => { const n = Math.round(v || 0); return (n < 0 ? '-₹'
 export const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 export const MASK = '•••••';
 
+// Display a name in Title Case, splitting on spaces / underscores / hyphens.
+// Handles legacy DB rows like "SHEETAL", "NADeem", "SAJID_HSR" → "Sheetal",
+// "Nadeem", "Sajid Hsr" so leaderboards and lists read consistently.
+export const toTitleCase = (s) => (s || "")
+  .toString()
+  .toLowerCase()
+  .replace(/[_-]+/g, " ")
+  .replace(/(?:^|\s)\S/g, c => c.toUpperCase());
+
 // Parse a YYYY-MM-DD string as *local* midnight. `new Date("2026-04-22")` is
 // UTC midnight, which in IST resolves to 05:30 on the same calendar date —
 // when compared against a locally-constructed date (e.g. `new Date(y, m, d)`)
