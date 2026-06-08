@@ -3,7 +3,7 @@ import { useEffect, useState, useRef } from "react";
 import { collection, onSnapshot, query, orderBy, where, getDocs, deleteDoc, doc, addDoc, updateDoc, writeBatch } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
-import { INR, branchIncomeInPeriod, makeFilterPrefix, periodLabel, proRataSalary, staffLeavesInMonth, staffStatusForMonth, parseLocalDate, MASK, effectiveCashInHand, computeIncentiveExpense, getMonthlyFixed } from "@/lib/calculations";
+import { INR, branchIncomeInPeriod, makeFilterPrefix, periodLabel, proRataSalary, staffLeavesInMonth, staffStatusForMonth, parseLocalDate, MASK, effectiveCashInHand, computeIncentiveExpense, getMonthlyFixed, effectiveBranchOnDate } from "@/lib/calculations";
 import { Icon, IconBtn, Pill, Card, PeriodWidget, ToggleGroup, TH, TD, Modal, SearchSelect, BranchEmployeeSearch, useConfirm, useToast } from "@/components/ui";
 import { useRouter } from "next/navigation";
 import VLoader from "@/components/VLoader";
@@ -464,6 +464,7 @@ export default function BranchesPage() {
   const [leaves, setLeaves] = useState([]);
   const [globalSettings, setGlobalSettings] = useState(null);
   const [salHistory, setSalHistory] = useState([]);
+  const [transfers, setTransfers] = useState([]);
   const [selectedStaffHistory, setSelectedStaffHistory] = useState(null);
   // Search-driven focus on a specific staff row inside the branch detail.
   // **Why:** When the user searches "Aarif" in the unified search, we open
@@ -594,6 +595,7 @@ export default function BranchesPage() {
       onSnapshot(collection(db, "staff"), sn => setStaff(sn.docs.map(d => ({ ...d.data(), id: d.id })))),
       onSnapshot(collection(db, "leaves"), sn => setLeaves(sn.docs.map(d => ({ ...d.data(), id: d.id })))),
       onSnapshot(collection(db, "salary_history"), sn => setSalHistory(sn.docs.map(d => ({ ...d.data(), id: d.id })))),
+      onSnapshot(collection(db, "staff_transfers"), sn => setTransfers(sn.docs.map(d => ({ ...d.data(), id: d.id })))),
       onSnapshot(doc(db, "settings", "global"), sn => setGlobalSettings(sn.data())),
       onSnapshot(query(collection(db, "entries"), orderBy("date", "desc")), sn => {
         setEntries(sn.docs.map(d => ({ ...d.data(), id: d.id })));
@@ -1716,7 +1718,23 @@ export default function BranchesPage() {
     if (!b) { setSelectedBranch(null); return null; }
 
     // Constants for the entire Detail View
-    const branchStaff = staff.filter(s => s.branch_id === b.id);
+    // Roster must honour active transfers: a staff temporarily transferred to
+    // another branch shows under the destination branch (not home) for the period,
+    // and borrowed staff show under the host. Resolve each staff's effective branch
+    // on a reference date inside the selected period via effectiveBranchOnDate.
+    const _ny = NOW.getFullYear(), _nm = NOW.getMonth() + 1, _nd = NOW.getDate();
+    let rosterRefDate;
+    if (filterMode === "month") {
+      const dim = new Date(filterYear, filterMonth, 0).getDate();
+      if (filterYear === _ny && filterMonth === _nm) rosterRefDate = `${filterPrefix}-${String(_nd).padStart(2, "0")}`;
+      else if (filterYear > _ny || (filterYear === _ny && filterMonth > _nm)) rosterRefDate = `${filterPrefix}-01`;
+      else rosterRefDate = `${filterPrefix}-${String(dim).padStart(2, "0")}`;
+    } else {
+      if (filterYear < _ny) rosterRefDate = `${filterYear}-12-31`;
+      else if (filterYear > _ny) rosterRefDate = `${filterYear}-01-01`;
+      else rosterRefDate = `${_ny}-${String(_nm).padStart(2, "0")}-${String(_nd).padStart(2, "0")}`;
+    }
+    const branchStaff = staff.filter(s => effectiveBranchOnDate(s, rosterRefDate, transfers) === b.id);
     const periodEntries = entries.filter(e => e.branch_id === b.id && inPeriod(e.date));
 
     // Calculate stats based on range (Pro-rata for yearly)
