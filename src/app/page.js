@@ -33,6 +33,7 @@ export default function LoginPage() {
   };
 
   useEffect(() => {
+    router.prefetch("/dashboard");
     setMounted(true);
     const map = readRememberMap();
     // Pick the most recently used role
