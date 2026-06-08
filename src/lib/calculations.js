@@ -221,15 +221,6 @@ export function proRataSalary(st, monthStr, branches, salaryHistory, staffList, 
   const salary = getStaffSalaryForMonth(st.id, monthStr, salaryHistory, staffList);
   if (!salary) return 0;
 
-  // No attendance + no approved leave this month → no salary.
-  if (entries) {
-    const present = staffPresentDaysInMonth(st.id, monthStr, entries);
-    const leaveDays = (leaves || []).filter(l =>
-      l.staff_id === st.id && l.status === 'approved' && l.date && l.date.startsWith(monthStr)
-    ).reduce((s, l) => s + (Number(l.days) || 1), 0);
-    if (present === 0 && leaveDays === 0) return 0;
-  }
-
   const [yr, mo] = monthStr.split('-').map(Number);
   const daysInMonth = new Date(yr, mo, 0).getDate();
 
@@ -240,6 +231,26 @@ export function proRataSalary(st, monthStr, branches, salaryHistory, staffList, 
     if (branch?.type === 'unisex' && globalSettings.unisex_leaves !== undefined) quotaPerMonth = globalSettings.unisex_leaves;
   }
 
+  const approvedLeaves = (leaves || []).filter(l =>
+    l.staff_id === st.id && l.status === 'approved' && l.date && l.date.startsWith(monthStr)
+  );
+  const totalLeaveDays = approvedLeaves.reduce((s, l) => s + (Number(l.days) || 1), 0);
+
+  // Attendance-based pay (preferred — caller supplies `entries`):
+  //   payable = days actually present (in a day's staff_billing, present !== false)
+  //           + paid-leave days (approved leaves capped at the monthly quota).
+  //   per-day rate = salary / daysInMonth. A staff who never showed up and filed
+  //   no leave earns ₹0, regardless of join/exit. Naturally "as of now" since only
+  //   logged days exist — no need to cap to yesterday.
+  if (entries) {
+    const presentDays = staffPresentDaysInMonth(st.id, monthStr, entries) || 0;
+    const paidLeaveDays = Math.min(totalLeaveDays, quotaPerMonth);
+    const payableDays = presentDays + paidLeaveDays;
+    if (payableDays <= 0) return 0;
+    return Math.round((salary / daysInMonth) * payableDays);
+  }
+
+  // Legacy path (no entries supplied): pay across the join/exit calendar window.
   const monthStart = new Date(yr, mo - 1, 1);
   const monthEnd = new Date(yr, mo, 0);
   const joinDate = parseLocalDate(st.join);
@@ -262,11 +273,6 @@ export function proRataSalary(st, monthStr, branches, salaryHistory, staffList, 
   const calDays = Math.round((effectiveEnd - effectiveStart) / 86400000) + 1;
   // Pro-rata allowance ceil'd so fractional entitlement never costs the employee a day.
   const proPaidLeave = Math.ceil(quotaPerMonth * calDays / daysInMonth);
-
-  const approvedLeaves = (leaves || []).filter(l =>
-    l.staff_id === st.id && l.status === 'approved' && l.date && l.date.startsWith(monthStr)
-  );
-  const totalLeaveDays = approvedLeaves.reduce((s, l) => s + (Number(l.days) || 1), 0);
   const unpaidLeaveDays = Math.max(0, totalLeaveDays - proPaidLeave);
 
   const payableDays = Math.max(0, calDays - unpaidLeaveDays);

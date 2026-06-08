@@ -2351,6 +2351,12 @@ export default function BranchesPage() {
             };
           };
 
+          // Days a staff was actually present in a month — one entry per branch/day,
+          // counted when they appear in staff_billing with present !== false. This is
+          // the attendance basis for both the DAYS column and salary.
+          const presentDaysInMonth = (sid, prefix) =>
+            periodEntries.filter(e => e.date?.startsWith(prefix) && (e.staff_billing || []).some(x => x.staff_id === sid && x.present !== false)).length;
+
           const rawRows = branchStaff.map((s) => {
             let billing = 0, matSale = 0, tips = 0, staffTInc = 0;
             let curSalary = 0, leavesTaken = 0, daysWorked = 0, paidLeaves = 0, lop = 0, payrollDays = 0;
@@ -2359,10 +2365,11 @@ export default function BranchesPage() {
             if (filterMode === 'month') {
               curSalary = proRataSalary(s, filterPrefix, branches, salHistory, staff, globalSettings, leaves, entries);
               leavesTaken = staffLeavesInMonth(s.id, filterPrefix, leaves);
-              daysWorked = staffStatusForMonth(s, filterPrefix).daysWorked || 0;
+              daysWorked = presentDaysInMonth(s.id, filterPrefix);
               paidLeaves = Math.min(leavesTaken, quotaPerMonth);
               lop = Math.max(0, leavesTaken - quotaPerMonth);
-              payrollDays = computePayrollDays(filterPrefix)(s);
+              // Days paid = days present + paid-leave days (mirrors salary).
+              payrollDays = daysWorked + paidLeaves;
             } else {
               for (let m = 1; m <= endMonth; m++) {
                 const mPrefix = `${filterYear}-${String(m).padStart(2, '0')}`;
@@ -2371,11 +2378,11 @@ export default function BranchesPage() {
                 leavesTaken += mLeaves;
                 paidLeaves += Math.min(mLeaves, quotaPerMonth);
                 lop += Math.max(0, mLeaves - quotaPerMonth);
-                const mDays = staffStatusForMonth(s, mPrefix).daysWorked || 0;
+                const mDays = presentDaysInMonth(s.id, mPrefix);
                 daysWorked += mDays;
-                payrollDays += computePayrollDays(mPrefix)(s);
                 if (mDays > 0) monthlyDays.push({ m: new Date(filterYear, m - 1, 1).toLocaleString("default", { month: "short" }), days: mDays });
               }
+              payrollDays = daysWorked + paidLeaves;
             }
 
             periodEntries.forEach(e => {
