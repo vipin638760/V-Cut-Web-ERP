@@ -472,6 +472,7 @@ export default function BranchesPage() {
   // pulse fades or the user leaves the detail view.
   const [staffFocusId, setStaffFocusId] = useState(null);
   const staffRosterSort = useSort();
+  const [staffTab, setStaffTab] = useState("active"); // "active" | "inactive"
   const [attendanceCalendar, setAttendanceCalendar] = useState(null); // branch id
   const [attendanceMonth, setAttendanceMonth] = useState(null); // "YYYY-MM"
   const [attendanceSelectedDay, setAttendanceSelectedDay] = useState(null); // "YYYY-MM-DD"
@@ -2386,8 +2387,25 @@ export default function BranchesPage() {
             totalSale:  r => r.totalSale,
           });
 
+          // Split roster into currently-employed (no exit date) vs exited.
+          // Active staff grouped under the "Active" tab, exited under "Inactive".
+          const activeRows = sortedRows.filter(r => !r.s.exit_date);
+          const inactiveRows = sortedRows.filter(r => r.s.exit_date);
+          const shownRows = staffTab === "inactive" ? inactiveRows : activeRows;
+          const totSalary = shownRows.reduce((sum, r) => sum + r.curSalary, 0);
+          const totBilling = shownRows.reduce((sum, r) => sum + r.billing, 0);
+          const totStaffInc = shownRows.reduce((sum, r) => sum + r.staffTInc, 0);
+          const totSale = shownRows.reduce((sum, r) => sum + r.totalSale, 0);
+
           return (<>
-        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 12, color: "var(--gold)" }}>Branch Staff ({branchStaff.length})</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 12, flexWrap: "wrap" }}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: "var(--gold)" }}>Branch Staff ({branchStaff.length})</div>
+          <ToggleGroup
+            options={[["active", `Active (${activeRows.length})`], ["inactive", `Inactive (${inactiveRows.length})`]]}
+            value={staffTab}
+            onChange={setStaffTab}
+          />
+        </div>
         <Card>
           <table className="pill-table" style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12.5 }}>
             <thead><tr>
@@ -2406,7 +2424,7 @@ export default function BranchesPage() {
               <TH> </TH>
             </tr></thead>
             <tbody>
-              {sortedRows.map((row, i) => {
+              {shownRows.map((row, i) => {
                 const { s, billing, staffTInc, totalSale, pct, curSalary, daysWorked, paidLeaves, lop, payrollDays } = row;
                 const hasExit = !!s.exit_date;
                 const isFocused = staffFocusId === s.id;
@@ -2460,7 +2478,19 @@ export default function BranchesPage() {
                   </tr>
                 );
               })}
-              {branchStaff.length === 0 && <tr><td colSpan={isAdmin ? 13 : 12} style={{ textAlign: "center", padding: 24, color: "var(--text3)" }}>No staff in this branch</td></tr>}
+              {shownRows.length === 0 && <tr><td colSpan={isAdmin ? 13 : 12} style={{ textAlign: "center", padding: 24, color: "var(--text3)" }}>No {staffTab} staff in this branch</td></tr>}
+              {shownRows.length > 0 && (
+                <tr className="totals-row" style={{ background: "var(--bg3)", borderTop: "2px solid var(--border2)" }}>
+                  <TD colSpan={8} style={{ fontWeight: 800, color: "var(--gold)" }}>
+                    TOTAL ({shownRows.length} {staffTab})
+                  </TD>
+                  {isAdmin && <TD right style={{ fontWeight: 800, color: "var(--gold)" }}>{INR(totSalary)}</TD>}
+                  <TD right style={{ fontWeight: 800, color: "var(--blue)" }}>{INR(totBilling)}</TD>
+                  <TD right style={{ fontWeight: 800, color: "var(--text2)" }}>{INR(totStaffInc)}</TD>
+                  <TD right style={{ fontWeight: 800, color: "var(--text3)" }}>{INR(totSale)}</TD>
+                  <TD></TD>
+                </tr>
+              )}
             </tbody>
           </table>
         </Card>
