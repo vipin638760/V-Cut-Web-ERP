@@ -72,7 +72,10 @@ export default function LoginPage() {
     let allUsers = [...DEFAULTS_USERS];
     try {
       if (db) {
-        const snap = await getDocs(collection(db, "users"));
+        const timeout = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("timeout")), 6000)
+        );
+        const snap = await Promise.race([getDocs(collection(db, "users")), timeout]);
         snap.docs.forEach((d) => {
           const ud = d.data();
           const existingIdx = allUsers.findIndex((u) => u.id === d.id);
