@@ -2415,7 +2415,12 @@ export default function BranchesPage() {
           // (so their pro-rata salary + billing land in the Active total and P&L).
           // Inactive = exited before the period began with zero contribution.
           const periodStart = filterMode === "month" ? `${filterPrefix}-01` : `${filterYear}-01-01`;
-          const isActiveInPeriod = (r) => r.daysWorked > 0 || !r.s.exit_date || r.s.exit_date >= periodStart;
+          const periodEnd = filterMode === "month"
+            ? `${filterPrefix}-${String(new Date(filterYear, filterMonth, 0).getDate()).padStart(2, '0')}`
+            : `${filterYear}-${String(endMonth).padStart(2, '0')}-${String(new Date(filterYear, endMonth, 0).getDate()).padStart(2, '0')}`;
+          // A staff who joins AFTER the period ends never worked in it, even with no
+          // exit_date — otherwise future joiners show "Active" with ₹0 salary/0 days.
+          const isActiveInPeriod = (r) => (!r.s.join || r.s.join <= periodEnd) && (r.daysWorked > 0 || !r.s.exit_date || r.s.exit_date >= periodStart);
           const activeRows = sortedRows.filter(isActiveInPeriod);
           const inactiveRows = sortedRows.filter(r => !isActiveInPeriod(r));
           const shownRows = staffTab === "inactive" ? inactiveRows : activeRows;
