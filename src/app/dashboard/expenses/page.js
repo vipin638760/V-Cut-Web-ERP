@@ -32,6 +32,7 @@ export default function ExpensesPage() {
   const [staff, setStaff] = useState([]);
   const [salHistory, setSalHistory] = useState([]);
   const [dailyEntries, setDailyEntries] = useState([]);
+  const [leaves, setLeaves] = useState([]);
   const [dailyOps, setDailyOps] = useState([]); // daily_expenses — feeds the Variable tab
   const [loading, setLoading]   = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -85,6 +86,7 @@ export default function ExpensesPage() {
       onSnapshot(collection(db, "staff"), sn => setStaff(sn.docs.map(d => ({ ...d.data(), id: d.id })))),
       onSnapshot(collection(db, "salary_history"), sn => setSalHistory(sn.docs.map(d => ({ ...d.data(), id: d.id })))),
       onSnapshot(query(collection(db, "entries"), orderBy("date", "desc")), sn => setDailyEntries(sn.docs.map(d => ({ ...d.data(), id: d.id })))),
+      onSnapshot(collection(db, "leaves"), sn => setLeaves(sn.docs.map(d => ({ ...d.data(), id: d.id })))),
       onSnapshot(query(collection(db, "daily_expenses"), orderBy("date", "desc")), sn => setDailyOps(sn.docs.map(d => ({ ...d.data(), id: d.id })))),
       onSnapshot(query(collection(db, "fixed_expenses"), orderBy("date", "desc")), sn => {
         setExpenses(sn.docs.map(d => ({ ...d.data(), id: d.id })));
@@ -235,7 +237,7 @@ export default function ExpensesPage() {
   const getBranchStats = (bid) => {
     if (filterMode !== "month") return { salary: 0, variable: 0 };
     const bStaff = staffByBranch.get(bid) || [];
-    const salary = bStaff.reduce((s, st) => s + proRataSalary(st, filterPrefix, branches, salHistory, staff), 0);
+    const salary = bStaff.reduce((s, st) => s + proRataSalary(st, filterPrefix, branches, salHistory, staff, {}, leaves, dailyEntries), 0);
     const variable = dailyAggByBranchMonth.get(`${bid}|${filterPrefix}`)?.variable || 0;
     return { salary, variable };
   };
@@ -519,7 +521,7 @@ export default function ExpensesPage() {
 
       const branchVariableAndSalary = (b, mPrefix) => {
         const bStaff = staff.filter(s => s.branch_id === b.id);
-        const salary = bStaff.reduce((s, st) => s + proRataSalary(st, mPrefix, branches, salHistory, staff), 0);
+        const salary = bStaff.reduce((s, st) => s + proRataSalary(st, mPrefix, branches, salHistory, staff, {}, leaves, dailyEntries), 0);
         const bEntries = dailyEntries.filter(e => e.branch_id === b.id && e.date?.startsWith(mPrefix));
         const variable = bEntries.reduce((s, e) => {
           const sb = e.staff_billing || [];
@@ -836,7 +838,7 @@ export default function ExpensesPage() {
       const bid = branches[i].id;
       const bStaff = staffByBranch.get(bid) || [];
       for (let j = 0; j < bStaff.length; j++) {
-        sal += proRataSalary(bStaff[j], filterPrefix, branches, salHistory, staff);
+        sal += proRataSalary(bStaff[j], filterPrefix, branches, salHistory, staff, {}, leaves, dailyEntries);
       }
       varr += dailyAggByBranchMonth.get(`${bid}|${filterPrefix}`)?.variable || 0;
     }
@@ -872,7 +874,7 @@ export default function ExpensesPage() {
           if (viewType === "total") {
             if (isAdmin) {
               for (let j = 0; j < bStaff.length; j++) {
-                total += proRataSalary(bStaff[j], pref, branches, salHistory, staff);
+                total += proRataSalary(bStaff[j], pref, branches, salHistory, staff, {}, leaves, dailyEntries);
               }
             }
             const dailyAgg = dailyAggByBranchMonth.get(`${b.id}|${pref}`);
@@ -1115,7 +1117,7 @@ export default function ExpensesPage() {
                           mTotal = variableCols.reduce((s, t) => s + (dailyOpsByKey.get(`${b.id}|${mPrefix}|${t}`) || 0), 0);
                         } else if (viewType === "total" && !isFuture) {
                           const bStaff = staff.filter(s => s.branch_id === b.id);
-                          const mSalary = isAdmin ? bStaff.reduce((s, st) => s + proRataSalary(st, mPrefix, branches, salHistory, staff), 0) : 0;
+                          const mSalary = isAdmin ? bStaff.reduce((s, st) => s + proRataSalary(st, mPrefix, branches, salHistory, staff, {}, leaves, dailyEntries), 0) : 0;
                           const bEntries = dailyEntries.filter(e => e.branch_id === b.id && e.date?.startsWith(mPrefix));
                           const mVar = bEntries.reduce((s, e) => {
                             const sb = e.staff_billing || [];
@@ -1183,7 +1185,7 @@ export default function ExpensesPage() {
                       let nTotal = nFixed;
 
                       if (viewType === "total") {
-                        const nSalary = staff.reduce((s, st) => s + proRataSalary(st, mPrefix, branches, salHistory, staff), 0);
+                        const nSalary = staff.reduce((s, st) => s + proRataSalary(st, mPrefix, branches, salHistory, staff, {}, leaves, dailyEntries), 0);
                         const nEntries = dailyEntries.filter(e => e.date?.startsWith(mPrefix));
                         const nVar = nEntries.reduce((s, e) => {
                            const sb = e.staff_billing || [];
@@ -1211,7 +1213,7 @@ export default function ExpensesPage() {
 
                              if (viewType === "total") {
                                 const bStaff = staff.filter(st => st.branch_id === b.id);
-                                bYearTotal += bStaff.reduce((ss, st) => ss + proRataSalary(st, pref, branches, salHistory, staff), 0);
+                                bYearTotal += bStaff.reduce((ss, st) => ss + proRataSalary(st, pref, branches, salHistory, staff, {}, leaves, dailyEntries), 0);
                                 const bEntries = dailyEntries.filter(e => e.branch_id === b.id && e.date?.startsWith(pref));
                                 bYearTotal += bEntries.reduce((ss, e) => {
                                    const sb = e.staff_billing || [];

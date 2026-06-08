@@ -201,9 +201,34 @@ export function getStaffSalaryForMonth(staffId, monthStr, salaryHistory, staffLi
 //   • Approved leaves beyond that ceil'd quota are LOP and deduct whole days of pay.
 //   • For the *current* month the window is capped to yesterday, so the number reflects
 //     what's actually been earned so far — today's shift hasn't happened yet.
-export function proRataSalary(st, monthStr, branches, salaryHistory, staffList, globalSettings = {}, leaves = []) {
+// Attendance gate (opt-in via `entries`):
+//   When the caller passes the entries array, a staff with NO presence on any day
+//   of the month AND no approved leave that month earns ₹0 — they simply didn't
+//   work, even if join/exit dates say they were "employed". Presence = appearing
+//   in a day's staff_billing with present !== false. Pass `null`/omit to disable
+//   gating (legacy behaviour: pay purely on join/exit window).
+export function staffPresentDaysInMonth(stId, monthStr, entries) {
+  if (!entries) return null;
+  let n = 0;
+  for (const e of entries) {
+    if (!e.date || !e.date.startsWith(monthStr)) continue;
+    if ((e.staff_billing || []).some(x => x.staff_id === stId && x.present !== false)) n += 1;
+  }
+  return n;
+}
+
+export function proRataSalary(st, monthStr, branches, salaryHistory, staffList, globalSettings = {}, leaves = [], entries = null) {
   const salary = getStaffSalaryForMonth(st.id, monthStr, salaryHistory, staffList);
   if (!salary) return 0;
+
+  // No attendance + no approved leave this month → no salary.
+  if (entries) {
+    const present = staffPresentDaysInMonth(st.id, monthStr, entries);
+    const leaveDays = (leaves || []).filter(l =>
+      l.staff_id === st.id && l.status === 'approved' && l.date && l.date.startsWith(monthStr)
+    ).reduce((s, l) => s + (Number(l.days) || 1), 0);
+    if (present === 0 && leaveDays === 0) return 0;
+  }
 
   const [yr, mo] = monthStr.split('-').map(Number);
   const daysInMonth = new Date(yr, mo, 0).getDate();

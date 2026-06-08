@@ -275,7 +275,7 @@ export default function DashboardPage() {
       const mStart = new Date(yr, mo - 1, 1);
       const mEnd = new Date(yr, mo, 0);
       const activeStaffInMonth = staff.filter(s => s.branch_id === b.id && staffStatusForMonth(s, mPrefix).status !== 'inactive');
-      actualSalary += activeStaffInMonth.reduce((s, st) => s + proRataSalary(st, mPrefix, branches, salHistory, staff, globalSettings), 0);
+      actualSalary += activeStaffInMonth.reduce((s, st) => s + proRataSalary(st, mPrefix, branches, salHistory, staff, globalSettings, leaves, entries), 0);
       actualLeaves += activeStaffInMonth.reduce((s, st) => s + staffLeavesInMonth(st.id, mPrefix, leaves), 0);
       projectedSalary += activeStaffInMonth.reduce((s, st) => {
         const baseSal = Number(st.salary) || 0;
@@ -382,7 +382,7 @@ export default function DashboardPage() {
       // we loop up to factor (which is the effective number of months passed)
       for (let m = startM; m <= endM; m++) {
         const mPrefix = `${filterYear}-${String(m).padStart(2, '0')}`;
-        periodSalary += proRataSalary(s, mPrefix, branches, salHistory, staff, globalSettings);
+        periodSalary += proRataSalary(s, mPrefix, branches, salHistory, staff, globalSettings, leaves, entries);
         periodLeaves += staffLeavesInMonth(s.id, mPrefix, leaves);
       }
 
@@ -833,12 +833,12 @@ export default function DashboardPage() {
           let billing = 0, matSale = 0, tips = 0, staffTInc = 0;
           let curSalary = 0, leavesTaken = 0;
           if (filterMode === 'month') {
-            curSalary = proRataSalary(s, filterPrefix, branches, salHistory, staff, globalSettings);
+            curSalary = proRataSalary(s, filterPrefix, branches, salHistory, staff, globalSettings, leaves, entries);
             leavesTaken = staffLeavesInMonth(s.id, filterPrefix, leaves);
           } else {
             for (let m = 1; m <= endMonth; m++) {
               const mPrefix = `${filterYear}-${String(m).padStart(2, '0')}`;
-              curSalary += proRataSalary(s, mPrefix, branches, salHistory, staff, globalSettings);
+              curSalary += proRataSalary(s, mPrefix, branches, salHistory, staff, globalSettings, leaves, entries);
               leavesTaken += staffLeavesInMonth(s.id, mPrefix, leaves);
             }
           }
@@ -879,7 +879,7 @@ export default function DashboardPage() {
             const mFixed = mfX.shop_rent + mfX.room_rent + mfX.wifi + mfX.shop_elec + mfX.room_elec;
             const dFixed = mFixed * dayFactor;
             const activeSt = staff.filter(s => s.branch_id === b.id && staffStatusForMonth(s, filterPrefix).status !== 'inactive');
-            const mActualSal = activeSt.reduce((s, st) => s + proRataSalary(st, filterPrefix, branches, salHistory, staff, globalSettings), 0);
+            const mActualSal = activeSt.reduce((s, st) => s + proRataSalary(st, filterPrefix, branches, salHistory, staff, globalSettings, leaves, entries), 0);
             const dSalary = mActualSal * dayFactor;
             const dLeaves = leaves.filter(l => activeSt.some(as => as.id === l.staff_id) && l.status === 'approved' && l.date === dayPrefix).reduce((s, l) => s + (l.days || 1), 0);
             const dIncome = dOnline + dCash + dMatInc;
@@ -899,7 +899,7 @@ export default function DashboardPage() {
             const mfM = getMonthlyFixed(b, monthPrefix, monthlyExpenses, fixedExpenses);
             const mFixed = mfM.shop_rent + mfM.room_rent + mfM.wifi + mfM.shop_elec + mfM.room_elec;
             const activeSt = staff.filter(s => s.branch_id === b.id && staffStatusForMonth(s, monthPrefix).status !== 'inactive');
-            const mActualSal = activeSt.reduce((s, st) => s + proRataSalary(st, monthPrefix, branches, salHistory, staff, globalSettings), 0);
+            const mActualSal = activeSt.reduce((s, st) => s + proRataSalary(st, monthPrefix, branches, salHistory, staff, globalSettings, leaves, entries), 0);
             const mLeaves = activeSt.reduce((s, st) => s + staffLeavesInMonth(st.id, monthPrefix, leaves), 0);
             const mIncome = mOnline + mCash + mMatInc;
             const mExpenses = mIncExp + mMatExp + mOtherExp + mFixed + mActualSal;
@@ -957,7 +957,7 @@ export default function DashboardPage() {
               if (!isPastYear && m > curM && filterYear === curY) break;
               const mPrefix = `${filterYear}-${String(m).padStart(2, '0')}`;
               const status = staffStatusForMonth(s, mPrefix);
-              const mSal = proRataSalary(s, mPrefix, branches, salHistory, staff, globalSettings);
+              const mSal = proRataSalary(s, mPrefix, branches, salHistory, staff, globalSettings, leaves, entries);
               const mLeaves = staffLeavesInMonth(s.id, mPrefix, leaves);
               const mEntries = entries.filter(e => e.branch_id === b.id && e.date.startsWith(mPrefix));
               let mBilling = 0, mInc = 0;
@@ -992,7 +992,7 @@ export default function DashboardPage() {
           writeHeaderRow(ws, row, ["Name", "Role", "Status", "Days Worked", "Leaves", "Billing", "Incentives", "Salary Drawn"]); row++;
           branchStaff.forEach(s => {
             const status = staffStatusForMonth(s, filterPrefix);
-            const mSal = proRataSalary(s, filterPrefix, branches, salHistory, staff, globalSettings);
+            const mSal = proRataSalary(s, filterPrefix, branches, salHistory, staff, globalSettings, leaves, entries);
             const mLeaves = staffLeavesInMonth(s.id, filterPrefix, leaves);
             const mEntries = entries.filter(e => e.branch_id === b.id && e.date.startsWith(filterPrefix));
             let mBilling = 0, mInc = 0;

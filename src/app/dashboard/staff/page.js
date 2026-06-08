@@ -361,10 +361,10 @@ export default function StaffPage() {
 
   // Yearly salary helper — sum pro-rata across all months (honors approved leaves)
   const yearlyStaffSalary = (s) => {
-    if (filterMode !== 'year') return proRataSalary(s, filterPrefix, branches, salaryHistory, staff, globalSettings, leaves);
+    if (filterMode !== 'year') return proRataSalary(s, filterPrefix, branches, salaryHistory, staff, globalSettings, leaves, entries);
     const limit = filterYear === NOW.getFullYear() ? NOW.getMonth() + 1 : 12;
     let total = 0;
-    for (let m = 1; m <= limit; m++) total += proRataSalary(s, `${filterYear}-${String(m).padStart(2,'0')}`, branches, salaryHistory, staff, globalSettings, leaves);
+    for (let m = 1; m <= limit; m++) total += proRataSalary(s, `${filterYear}-${String(m).padStart(2,'0')}`, branches, salaryHistory, staff, globalSettings, leaves, entries);
     return total;
   };
 
@@ -1337,7 +1337,7 @@ export default function StaffPage() {
           let yearTotal = 0;
           for (let m = 1; m <= limit; m++) {
             const mp = `${filterYear}-${String(m).padStart(2,'0')}`;
-            const mSal = proRataSalary(monthlyLogModal, mp, branches, salaryHistory, staff, globalSettings, leaves);
+            const mSal = proRataSalary(monthlyLogModal, mp, branches, salaryHistory, staff, globalSettings, leaves, entries);
             const mBill = staffBillingInPeriod(monthlyLogModal.id, entries, mp, 'month', filterYear);
             const mStatus = staffStatusForMonth(monthlyLogModal, mp);
             yearTotal += mSal;

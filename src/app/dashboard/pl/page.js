@@ -18,6 +18,7 @@ export default function PLReportPage() {
   const [branches, setBranches] = useState([]);
   const [staff, setStaff] = useState([]);
   const [entries, setEntries] = useState([]);
+  const [leaves, setLeaves] = useState([]);
   const [transactions, setTransactions] = useState([]);
   const [monthlyExpenses, setMonthlyExpenses] = useState([]);
   const [fixedExpenses, setFixedExpenses] = useState([]);
@@ -43,6 +44,7 @@ export default function PLReportPage() {
       onSnapshot(collection(db, "branches"), s => setBranches(s.docs.map(d => ({ ...d.data(), id: d.id })))),
       onSnapshot(collection(db, "staff"), s => setStaff(s.docs.map(d => ({ ...d.data(), id: d.id })))),
       onSnapshot(query(collection(db, "entries"), orderBy("date", "desc")), s => setEntries(s.docs.map(d => ({ ...d.data(), id: d.id })))),
+      onSnapshot(collection(db, "leaves"), s => setLeaves(s.docs.map(d => ({ ...d.data(), id: d.id })))),
       onSnapshot(collection(db, "transactions"), s => setTransactions(s.docs.map(d => ({ ...d.data(), id: d.id })))),
       onSnapshot(collection(db, "monthly_expenses"), s => setMonthlyExpenses(s.docs.map(d => ({ ...d.data(), id: d.id })))),
       onSnapshot(collection(db, "fixed_expenses"), s => setFixedExpenses(s.docs.map(d => ({ ...d.data(), id: d.id })))),
@@ -123,7 +125,7 @@ export default function PLReportPage() {
 
     // Salary
     const activeStaff = staff.filter(s => s.branch_id === bid && staffStatusForMonth(s, month).status !== "inactive");
-    const salaries = activeStaff.reduce((s, st) => s + proRataSalary(st, month, branches, salaryHistory, staff, globalSettings), 0);
+    const salaries = activeStaff.reduce((s, st) => s + proRataSalary(st, month, branches, salaryHistory, staff, globalSettings, leaves, entries), 0);
 
     // GST estimate — mirrors Dashboard's totalGst.
     const gstPct = globalSettings?.gst_pct || 0;

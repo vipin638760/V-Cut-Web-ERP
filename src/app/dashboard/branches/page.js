@@ -817,7 +817,7 @@ export default function BranchesPage() {
     for (let m = startM; m <= endM; m++) {
       const mPrefix = `${filterYear}-${String(m).padStart(2, '0')}`;
       const activeStaffInMonth = staff.filter(s => s.branch_id === b.id && staffStatusForMonth(s, mPrefix).status !== 'inactive');
-      actualSalary += activeStaffInMonth.reduce((s, st) => s + proRataSalary(st, mPrefix, branches, salHistory, staff, globalSettings), 0);
+      actualSalary += activeStaffInMonth.reduce((s, st) => s + proRataSalary(st, mPrefix, branches, salHistory, staff, globalSettings, leaves, entries), 0);
       actualLeaves += activeStaffInMonth.reduce((s, st) => s + staffLeavesInMonth(st.id, mPrefix, leaves), 0);
     }
 
@@ -1889,7 +1889,7 @@ export default function BranchesPage() {
         const mfYearly = getMonthlyFixed(b, monthPrefix, monthlyExpenses, fixedExpenses);
         const mFixed = mfYearly.shop_rent + mfYearly.room_rent + mfYearly.wifi + mfYearly.shop_elec + mfYearly.room_elec;
         const activeStaffInMonth = staff.filter(s => s.branch_id === b.id && staffStatusForMonth(s, monthPrefix).status !== 'inactive');
-        const mActualSalary = activeStaffInMonth.reduce((s, st) => s + proRataSalary(st, monthPrefix, branches, salHistory, staff, globalSettings), 0);
+        const mActualSalary = activeStaffInMonth.reduce((s, st) => s + proRataSalary(st, monthPrefix, branches, salHistory, staff, globalSettings, leaves, entries), 0);
         const mLeaves = activeStaffInMonth.reduce((s, st) => s + staffLeavesInMonth(st.id, monthPrefix, leaves), 0);
 
         const mIncome = mOnline + mCash + mMatInc;
@@ -1946,7 +1946,7 @@ export default function BranchesPage() {
       const mOtherExp = mEntries.reduce((s, e) => s + (e.others || 0) + (e.petrol || 0), 0);
       const mf = getMonthlyFixed(b, monthPrefix, monthlyExpenses, fixedExpenses);
       const mFixed = mf.shop_rent + mf.room_rent + mf.wifi + mf.shop_elec + mf.room_elec;
-      const actSal = staff.filter(as => as.branch_id === b.id && staffStatusForMonth(as, monthPrefix).status !== 'inactive').reduce((s, st) => s + proRataSalary(st, monthPrefix, branches, salHistory, staff, globalSettings), 0);
+      const actSal = staff.filter(as => as.branch_id === b.id && staffStatusForMonth(as, monthPrefix).status !== 'inactive').reduce((s, st) => s + proRataSalary(st, monthPrefix, branches, salHistory, staff, globalSettings, leaves, entries), 0);
 
       totalOnline += mOnline; totalCash += mCash; totalMatInc += mMatInc;
       totalIncentiveExp += mIncExp; totalMatExp += mMatExp; totalOtherExp += mOtherExp;
@@ -2357,7 +2357,7 @@ export default function BranchesPage() {
             const monthlyDays = []; // year mode: [{ m: "Jan", days }] for months with any worked days
 
             if (filterMode === 'month') {
-              curSalary = proRataSalary(s, filterPrefix, branches, salHistory, staff, globalSettings);
+              curSalary = proRataSalary(s, filterPrefix, branches, salHistory, staff, globalSettings, leaves, entries);
               leavesTaken = staffLeavesInMonth(s.id, filterPrefix, leaves);
               daysWorked = staffStatusForMonth(s, filterPrefix).daysWorked || 0;
               paidLeaves = Math.min(leavesTaken, quotaPerMonth);
@@ -2366,7 +2366,7 @@ export default function BranchesPage() {
             } else {
               for (let m = 1; m <= endMonth; m++) {
                 const mPrefix = `${filterYear}-${String(m).padStart(2, '0')}`;
-                curSalary += proRataSalary(s, mPrefix, branches, salHistory, staff, globalSettings);
+                curSalary += proRataSalary(s, mPrefix, branches, salHistory, staff, globalSettings, leaves, entries);
                 const mLeaves = staffLeavesInMonth(s.id, mPrefix, leaves);
                 leavesTaken += mLeaves;
                 paidLeaves += Math.min(mLeaves, quotaPerMonth);
@@ -2611,9 +2611,9 @@ export default function BranchesPage() {
             if (!isPastYear && m > currentMonthNum) break; 
             const mPrefix = `${filterYear}-${String(m).padStart(2, '0')}`;
             const status = staffStatusForMonth(s, mPrefix);
-            const mSal = proRataSalary(s, mPrefix, branches, salHistory, staff, globalSettings);
+            const mSal = proRataSalary(s, mPrefix, branches, salHistory, staff, globalSettings, leaves, entries);
             const mLeaves = staffLeavesInMonth(s.id, mPrefix, leaves);
-            
+
             // Performance for the month
             const mEntries = entries.filter(e => e.branch_id === b.id && e.date.startsWith(mPrefix));
             let mBilling = 0, mInc = 0;
@@ -2730,7 +2730,7 @@ export default function BranchesPage() {
                                 const specificDate = filterMode === "month" ? m.date : null;
                                 const staffRows = monthStaff.map(s => {
                                   const base = Number(s.salary) || 0;
-                                  const proRated = proRataSalary(s, monthPrefix, branches, salHistory, staff, globalSettings);
+                                  const proRated = proRataSalary(s, monthPrefix, branches, salHistory, staff, globalSettings, leaves, entries);
                                   let dayStatus = 'present';
                                   let dayShare = base / daysInMonth;
                                   if (specificDate) {
