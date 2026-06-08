@@ -41,6 +41,9 @@ export default function RootLayout({ children }) {
     <html lang="en" suppressHydrationWarning className={`${outfit.variable} ${greatVibes.variable} ${spaceGrotesk.variable} ${manrope.variable} antialiased`}>
       <head>
         <script dangerouslySetInnerHTML={{ __html: `(function(){try{var t=localStorage.getItem("vcut_theme");if(t==="light")document.documentElement.classList.add("light-mode")}catch(e){}})()` }} />
+        {/* Kill any orphaned service worker (left over from an old PWA build) that
+            caches stale JS chunks and makes deploys/dev edits appear ignored. */}
+        <script dangerouslySetInnerHTML={{ __html: `(function(){try{if('serviceWorker'in navigator){navigator.serviceWorker.getRegistrations().then(function(rs){rs.forEach(function(r){r.unregister()})});}if(window.caches&&caches.keys){caches.keys().then(function(ks){ks.forEach(function(k){caches.delete(k)})});}}catch(e){}})()` }} />
       </head>
       <body suppressHydrationWarning className="min-h-screen flex flex-col relative w-full overflow-x-hidden">
         <div className="global-watermark">
