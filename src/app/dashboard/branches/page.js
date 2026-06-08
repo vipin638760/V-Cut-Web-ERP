@@ -2353,6 +2353,7 @@ export default function BranchesPage() {
           const rawRows = branchStaff.map((s) => {
             let billing = 0, matSale = 0, tips = 0, staffTInc = 0;
             let curSalary = 0, leavesTaken = 0, daysWorked = 0, paidLeaves = 0, lop = 0, payrollDays = 0;
+            const monthlyDays = []; // year mode: [{ m: "Jan", days }] for months with any worked days
 
             if (filterMode === 'month') {
               curSalary = proRataSalary(s, filterPrefix, branches, salHistory, staff, globalSettings);
@@ -2369,8 +2370,10 @@ export default function BranchesPage() {
                 leavesTaken += mLeaves;
                 paidLeaves += Math.min(mLeaves, quotaPerMonth);
                 lop += Math.max(0, mLeaves - quotaPerMonth);
-                daysWorked += staffStatusForMonth(s, mPrefix).daysWorked || 0;
+                const mDays = staffStatusForMonth(s, mPrefix).daysWorked || 0;
+                daysWorked += mDays;
                 payrollDays += computePayrollDays(mPrefix)(s);
+                if (mDays > 0) monthlyDays.push({ m: new Date(filterYear, m - 1, 1).toLocaleString("default", { month: "short" }), days: mDays });
               }
             }
 
@@ -2385,7 +2388,7 @@ export default function BranchesPage() {
             });
             const totalSale = billing + matSale + tips;
             const pct = Math.min(Math.round(billing / (s.target || 50000) * 100), 100);
-            return { s, billing, matSale, tips, staffTInc, totalSale, pct, curSalary, daysWorked, paidLeaves, lop, payrollDays };
+            return { s, billing, matSale, tips, staffTInc, totalSale, pct, curSalary, daysWorked, paidLeaves, lop, payrollDays, monthlyDays };
           });
 
           // Active rows sort after exited rows when sorting by End date; use
@@ -2443,7 +2446,7 @@ export default function BranchesPage() {
             </tr></thead>
             <tbody>
               {shownRows.map((row, i) => {
-                const { s, billing, staffTInc, totalSale, pct, curSalary, daysWorked, paidLeaves, lop, payrollDays } = row;
+                const { s, billing, staffTInc, totalSale, pct, curSalary, daysWorked, paidLeaves, lop, payrollDays, monthlyDays } = row;
                 const hasExit = !!s.exit_date;
                 const isFocused = staffFocusId === s.id;
                 return (
@@ -2460,7 +2463,18 @@ export default function BranchesPage() {
                     <TD style={{ color: hasExit ? "var(--red)" : "var(--green)", fontSize: 11, fontWeight: 600 }}>
                       {hasExit ? fmtShort(s.exit_date) : "Active"}
                     </TD>
-                    <TD right style={{ fontWeight: 700, color: "var(--blue, #60a5fa)" }}>{daysWorked}</TD>
+                    <TD right style={{ fontWeight: 700, color: "var(--blue, #60a5fa)" }}>
+                      {daysWorked}
+                      {filterMode === "year" && monthlyDays && monthlyDays.length > 0 && (
+                        <div style={{ marginTop: 3, display: "flex", flexDirection: "column", gap: 1, alignItems: "flex-end" }}>
+                          {monthlyDays.map(md => (
+                            <span key={md.m} style={{ fontSize: 9.5, fontWeight: 600, color: "var(--text3)" }}>
+                              {md.m}: <span style={{ color: "var(--blue, #60a5fa)" }}>{md.days}d</span>
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </TD>
                     <TD right style={{ fontWeight: 700, color: paidLeaves > 0 ? "var(--green)" : "var(--text3)" }}>{paidLeaves}</TD>
                     <TD right style={{ fontWeight: 700, color: lop > 0 ? "var(--red)" : "var(--text3)" }}>{lop}</TD>
                     {isAdmin && (
