@@ -474,6 +474,7 @@ export default function BranchesPage() {
   const [staffFocusId, setStaffFocusId] = useState(null);
   const staffRosterSort = useSort();
   const [staffTab, setStaffTab] = useState("active"); // "active" | "inactive"
+  const [staffSalesCal, setStaffSalesCal] = useState(null); // staff id for per-day sales calendar modal
   const [attendanceCalendar, setAttendanceCalendar] = useState(null); // branch id
   const [attendanceMonth, setAttendanceMonth] = useState(null); // "YYYY-MM"
   const [attendanceSelectedDay, setAttendanceSelectedDay] = useState(null); // "YYYY-MM-DD"
@@ -2464,7 +2465,12 @@ export default function BranchesPage() {
                     <TD style={{ color: "var(--text3)" }}>{i + 1}</TD>
                     <TD style={{ fontWeight: 600 }}>{s.name}</TD>
                     <TD><Pill label={s.role || "—"} color="blue" /></TD>
-                    <TD style={{ color: "var(--text2)", fontSize: 11, fontWeight: 600 }}>{fmtShort(s.join)}</TD>
+                    <TD style={{ color: "var(--text2)", fontSize: 11, fontWeight: 600 }} title={s.join && s.join < periodStart ? `Joined ${fmtShort(s.join)} — showing this period's start` : undefined}>
+                      {/* In month view, a staff who was already employed before the month
+                          started effectively worked from the 1st, so show the period start
+                          rather than their original (earlier) join date. */}
+                      {filterMode === "month" && s.join && s.join < periodStart ? fmtShort(periodStart) : fmtShort(s.join)}
+                    </TD>
                     <TD style={{ color: hasExit ? "var(--red)" : "var(--green)", fontSize: 11, fontWeight: 600 }}>
                       {hasExit ? fmtShort(s.exit_date) : "Active"}
                     </TD>
@@ -2509,7 +2515,13 @@ export default function BranchesPage() {
                           <Icon name="log" size={14} />
                         </button>
                       ) : (
-                        <span style={{ color: "var(--text3)", fontSize: 10 }} title="Switch to Yearly view to see month-by-month history">—</span>
+                        <button
+                          onClick={() => setStaffSalesCal(s.id)}
+                          style={{ background: "rgba(255,255,255,0.05)", border: "none", color: "var(--accent)", borderRadius: 6, width: 28, height: 28, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", transition: "all .2s" }}
+                          title="View daily sales calendar"
+                        >
+                          <Icon name="calendar" size={14} />
+                        </button>
                       )}
                     </TD>
                   </tr>
@@ -2531,6 +2543,57 @@ export default function BranchesPage() {
             </tbody>
           </table>
         </Card>
+
+        {/* Per-staff daily sales calendar (month view) */}
+        {staffSalesCal && (() => {
+          const s = branchStaff.find(x => x.id === staffSalesCal) || staff.find(x => x.id === staffSalesCal);
+          if (!s) return null;
+          const daysInMonth = new Date(filterYear, filterMonth, 0).getDate();
+          // Map each day → this staff's sale (billing + material + tips) for that date.
+          const byDay = {};
+          periodEntries.forEach(e => {
+            if (!e.date) return;
+            const sb = (e.staff_billing || []).find(x => x.staff_id === s.id);
+            if (!sb) return;
+            const sale = (sb.billing || 0) + (sb.material || 0) + (sb.tips || 0);
+            byDay[e.date] = (byDay[e.date] || 0) + sale;
+          });
+          const monthName = new Date(filterYear, filterMonth - 1, 1).toLocaleString("default", { month: "long" });
+          const firstDow = new Date(filterYear, filterMonth - 1, 1).getDay();
+          const cells = [];
+          for (let i = 0; i < firstDow; i++) cells.push(null);
+          for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+          const totalSaleMonth = Object.values(byDay).reduce((a, b) => a + b, 0);
+          const workedDays = Object.values(byDay).filter(v => v > 0).length;
+          return (
+            <Modal isOpen onClose={() => setStaffSalesCal(null)} title={`${s.name} — Daily Sales · ${monthName} ${filterYear}`} width={560}>
+              <div style={{ padding: 16 }}>
+                <div style={{ display: "flex", gap: 16, marginBottom: 14, flexWrap: "wrap" }}>
+                  <div><div style={{ fontSize: 9, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase" }}>Month Sale</div><div style={{ fontSize: 16, fontWeight: 800, color: "var(--green)" }}>{INR(totalSaleMonth)}</div></div>
+                  <div><div style={{ fontSize: 9, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase" }}>Days w/ Sale</div><div style={{ fontSize: 16, fontWeight: 800, color: "var(--blue, #60a5fa)" }}>{workedDays}</div></div>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4 }}>
+                  {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => (
+                    <div key={i} style={{ textAlign: "center", fontSize: 9, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", padding: "2px 0" }}>{d}</div>
+                  ))}
+                  {cells.map((d, i) => {
+                    if (d === null) return <div key={`e${i}`} />;
+                    const dateStr = `${filterYear}-${String(filterMonth).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+                    const sale = byDay[dateStr] || 0;
+                    const has = sale > 0;
+                    return (
+                      <div key={dateStr} title={`${fmtShort(dateStr)}: ${INR(sale)}`}
+                        style={{ minHeight: 52, borderRadius: 8, padding: "5px 4px", background: has ? "rgba(74,222,128,0.10)" : "var(--bg3)", border: has ? "1px solid rgba(74,222,128,0.3)" : "1px solid var(--border2)", display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)" }}>{d}</div>
+                        <div style={{ fontSize: 10.5, fontWeight: 800, color: has ? "var(--green)" : "var(--text3)", textAlign: "right" }}>{has ? INR(sale) : "₹0"}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </Modal>
+          );
+        })()}
         </>);
         })()}
 
