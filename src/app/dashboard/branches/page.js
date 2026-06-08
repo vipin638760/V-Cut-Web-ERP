@@ -473,8 +473,16 @@ export default function BranchesPage() {
     return () => { clearTimeout(t); clearTimeout(clear); };
   }, [staffFocusId, selectedBranch]);
   const [brTypeFilter, setBrTypeFilter] = useState("all");
-  const [brSortCol, setBrSortCol] = useState("name");
-  const [brSortDir, setBrSortDir] = useState("asc");
+  const [brSortCol, setBrSortCol] = useState(() => {
+    if (typeof window === "undefined") return "income";
+    try { const s = localStorage.getItem("vcut_branch_sort"); if (s) return JSON.parse(s).col || "income"; } catch {}
+    return "income";
+  });
+  const [brSortDir, setBrSortDir] = useState(() => {
+    if (typeof window === "undefined") return "desc";
+    try { const s = localStorage.getItem("vcut_branch_sort"); if (s) return JSON.parse(s).dir || "desc"; } catch {}
+    return "desc";
+  });
   // Honour ?view=summary|table|card from the URL so deep-links (e.g. from
   // the dashboard's Operating Cost card) land on the right tab. Read straight
   // from window.location — useSearchParams() in Next 16 / React 19 requires
@@ -3190,6 +3198,17 @@ export default function BranchesPage() {
             buttonStyle={{ padding: "4px 8px", border: "1px solid var(--border2)", borderRadius: 16, fontSize: 11, background: "var(--bg4)", color: "var(--text)", fontFamily: "var(--font-outfit)" }}
           />
           <ToggleGroup options={[["asc","Asc ↑"],["desc","Desc ↓"]]} value={brSortDir} onChange={setBrSortDir} />
+          <button
+            title="Save current sort as default"
+            onClick={() => {
+              try { localStorage.setItem("vcut_branch_sort", JSON.stringify({ col: brSortCol, dir: brSortDir })); } catch {}
+              const colLabel = { income: "Income", pl: "Net P&L", expense: "Expenses", name: "Name" }[brSortCol] || brSortCol;
+              toast({ title: "Default saved", message: `Branch sort: ${colLabel} ${brSortDir === "desc" ? "↓" : "↑"}`, type: "success" });
+            }}
+            style={{ padding: "4px 8px", borderRadius: 16, fontSize: 10, fontWeight: 700, background: "var(--bg4)", border: "1px solid var(--border2)", color: "var(--accent)", cursor: "pointer", letterSpacing: ".5px", textTransform: "uppercase" }}
+          >
+            Save default
+          </button>
         </div>
         <div style={{ marginLeft: "auto" }}>
           <ToggleGroup label="View" options={[["card","⬛ Cards"],["table","☰ Table"],["summary","📋 Summary"]]} value={brView} onChange={setBrView} />
