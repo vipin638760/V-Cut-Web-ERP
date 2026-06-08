@@ -2408,10 +2408,15 @@ export default function BranchesPage() {
             totalSale:  r => r.totalSale,
           });
 
-          // Split roster into currently-employed (no exit date) vs exited.
-          // Active staff grouped under the "Active" tab, exited under "Inactive".
-          const activeRows = sortedRows.filter(r => !r.s.exit_date);
-          const inactiveRows = sortedRows.filter(r => r.s.exit_date);
+          // Active/inactive is relative to the SELECTED period, not just whether an
+          // exit date exists. A staff who worked any days in the period — or whose
+          // exit falls on/after the period start — counts as Active for that period
+          // (so their pro-rata salary + billing land in the Active total and P&L).
+          // Inactive = exited before the period began with zero contribution.
+          const periodStart = filterMode === "month" ? `${filterPrefix}-01` : `${filterYear}-01-01`;
+          const isActiveInPeriod = (r) => r.daysWorked > 0 || !r.s.exit_date || r.s.exit_date >= periodStart;
+          const activeRows = sortedRows.filter(isActiveInPeriod);
+          const inactiveRows = sortedRows.filter(r => !isActiveInPeriod(r));
           const shownRows = staffTab === "inactive" ? inactiveRows : activeRows;
           const totSalary = shownRows.reduce((sum, r) => sum + r.curSalary, 0);
           const totBilling = shownRows.reduce((sum, r) => sum + r.billing, 0);
