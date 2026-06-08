@@ -18,6 +18,8 @@ export default function FixedExpTab() {
   const [salaryHistory, setSalaryHistory] = useState([]);
   const [globalSettings, setGlobalSettings] = useState({});
   const [monthlyExpenses, setMonthlyExpenses] = useState([]);
+  const [leaves, setLeaves] = useState([]);
+  const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(true);
   
   const [filterMode, setFilterMode] = useState("month");
@@ -33,6 +35,8 @@ export default function FixedExpTab() {
       onSnapshot(collection(db, "branches"), sn => setBranches(sn.docs.map(d => ({ ...d.data(), id: d.id })))),
       onSnapshot(collection(db, "staff"), sn => setStaff(sn.docs.map(d => ({ ...d.data(), id: d.id })))),
       onSnapshot(collection(db, "salary_history"), sn => setSalaryHistory(sn.docs.map(d => ({ ...d.data(), id: d.id })))),
+      onSnapshot(collection(db, "leaves"), sn => setLeaves(sn.docs.map(d => ({ ...d.data(), id: d.id })))),
+      onSnapshot(collection(db, "entries"), sn => setEntries(sn.docs.map(d => ({ ...d.data(), id: d.id })))),
       onSnapshot(collection(db, "settings"), sn => {
         const gs = {}; sn.docs.forEach(d => gs[d.id] = d.data()); setGlobalSettings(gs);
       }),
@@ -75,7 +79,7 @@ export default function FixedExpTab() {
   const getBranchSalary = (bid, period) => {
     return staff
       .filter(s => s.branch_id === bid && staffOverallStatus(s, period) === "active")
-      .reduce((s, st) => s + proRataSalary(st, period, branches, salaryHistory, staff, globalSettings.main), 0);
+      .reduce((s, st) => s + proRataSalary(st, period, branches, salaryHistory, staff, globalSettings.main, leaves, entries), 0);
   };
 
   useEffect(() => {

@@ -98,6 +98,7 @@ export default function PayrollTab() {
   const [staff, setStaff] = useState([]);
   const [advances, setAdvances] = useState([]);
   const [leaves, setLeaves] = useState([]);
+  const [entries, setEntries] = useState([]);
   const [salHistory, setSalHistory] = useState([]);
   const [payrollReleases, setPayrollReleases] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -149,6 +150,7 @@ export default function PayrollTab() {
       onSnapshot(collection(db, "staff"), sn => setStaff(sn.docs.map(d => ({ ...d.data(), id: d.id })))),
       onSnapshot(collection(db, "salary_history"), sn => setSalHistory(sn.docs.map(d => ({ ...d.data(), id: d.id })))),
       onSnapshot(collection(db, "leaves"), sn => setLeaves(sn.docs.map(d => ({ ...d.data(), id: d.id })))),
+      onSnapshot(collection(db, "entries"), sn => setEntries(sn.docs.map(d => ({ ...d.data(), id: d.id })))),
       onSnapshot(collection(db, "payroll_releases"), sn => setPayrollReleases(sn.docs.map(d => ({ ...d.data(), id: d.id })))),
       onSnapshot(query(collection(db, "staff_advances"), orderBy("date", "desc")), sn => {
         setAdvances(sn.docs.map(d => ({ ...d.data(), id: d.id })));
@@ -310,9 +312,9 @@ export default function PayrollTab() {
           let earned = 0;
           if (filterMode === 'year') {
             const limit = (filterYear === new Date().getFullYear()) ? new Date().getMonth() + 1 : 12;
-            for (let m = 1; m <= limit; m++) earned += proRataSalary(s, `${filterYear}-${String(m).padStart(2,'0')}`, branches, salHistory, staff);
+            for (let m = 1; m <= limit; m++) earned += proRataSalary(s, `${filterYear}-${String(m).padStart(2,'0')}`, branches, salHistory, staff, {}, leaves, entries);
           } else {
-            earned = proRataSalary(s, filterPrefix, branches, salHistory, staff);
+            earned = proRataSalary(s, filterPrefix, branches, salHistory, staff, {}, leaves, entries);
           }
           const advs = getStaffAdvances(s.id);
           const advApproved = advs.filter(a => a.status === 'approved').reduce((sum, a) => sum + Number(a.amount), 0);
@@ -359,9 +361,9 @@ export default function PayrollTab() {
             let earned = 0;
             if (filterMode === 'year') {
               const limit = (filterYear === new Date().getFullYear()) ? new Date().getMonth() + 1 : 12;
-              for (let m = 1; m <= limit; m++) earned += proRataSalary(s, `${filterYear}-${String(m).padStart(2, '0')}`, branches, salHistory, staff);
+              for (let m = 1; m <= limit; m++) earned += proRataSalary(s, `${filterYear}-${String(m).padStart(2, '0')}`, branches, salHistory, staff, {}, leaves, entries);
             } else {
-              earned = proRataSalary(s, filterPrefix, branches, salHistory, staff);
+              earned = proRataSalary(s, filterPrefix, branches, salHistory, staff, {}, leaves, entries);
             }
             const periodAdvances = getStaffAdvances(s.id);
             const advApproved = periodAdvances.filter(a => a.status === 'approved').reduce((sum, a) => sum + Number(a.amount), 0);
@@ -520,9 +522,9 @@ export default function PayrollTab() {
                 let earned = 0;
                 if (filterMode === 'year') {
                   const limit = (filterYear === new Date().getFullYear()) ? new Date().getMonth() + 1 : 12;
-                  for (let m = 1; m <= limit; m++) earned += proRataSalary(s, `${filterYear}-${String(m).padStart(2,'0')}`, branches, salHistory, staff);
+                  for (let m = 1; m <= limit; m++) earned += proRataSalary(s, `${filterYear}-${String(m).padStart(2,'0')}`, branches, salHistory, staff, {}, leaves, entries);
                 } else {
-                  earned = proRataSalary(s, filterPrefix, branches, salHistory, staff);
+                  earned = proRataSalary(s, filterPrefix, branches, salHistory, staff, {}, leaves, entries);
                 }
                 const periodAdvancesPre = getStaffAdvances(s.id);
                 const advApprovedPre = periodAdvancesPre.filter(a => a.status === 'approved').reduce((sum, a) => sum + Number(a.amount), 0);

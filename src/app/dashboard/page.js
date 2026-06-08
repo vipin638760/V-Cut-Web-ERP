@@ -476,7 +476,7 @@ export default function DashboardPage() {
     const currentM = NOW.getMonth() + 1;
     const currentMPrefix = `${filterYear}-${String(currentM).padStart(2, '0')}`;
     const isCurrentYear = filterYear === NOW.getFullYear();
-    const currentMonthSalary = proRataSalary(myProfile, isYearly ? currentMPrefix : filterPrefix, branches, salHistory, staff, globalSettings);
+    const currentMonthSalary = proRataSalary(myProfile, isYearly ? currentMPrefix : filterPrefix, branches, salHistory, staff, globalSettings, leaves, entries);
     
     const isMyAdvance = (a) => a.staff_id === myProfile.id || a.staff_id === currentUser.id || a.staff_id === currentUser.staff_id;
     const targetPrefix = isYearly ? currentMPrefix : filterPrefix;

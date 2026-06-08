@@ -83,6 +83,7 @@ export default function MyPayrollPage() {
   const [branches, setBranches] = useState([]);
   const [salaryHistory, setSalaryHistory] = useState([]);
   const [leaves, setLeaves] = useState([]);
+  const [entries, setEntries] = useState([]);
   const [globalSettings, setGlobalSettings] = useState({});
   const [loading, setLoading] = useState(true);
   const [selectedCard, setSelectedCard] = useState('balance');
@@ -140,8 +141,12 @@ export default function MyPayrollPage() {
       setLeaves(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     });
 
+    const unsubEntries = onSnapshot(collection(db, "entries"), (snap) => {
+      setEntries(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+
     setLoading(false);
-    return () => { unsubStaff(); unsubAdv(); unsubBranches(); unsubHistory(); unsubSettings(); unsubLeaves(); };
+    return () => { unsubStaff(); unsubAdv(); unsubBranches(); unsubHistory(); unsubSettings(); unsubLeaves(); unsubEntries(); };
   }, [currentUser]);
 
   const handleRequestAdvance = async (e) => {
@@ -192,16 +197,16 @@ export default function MyPayrollPage() {
     const limitPast = isCurrentYear ? currentM - 1 : 12;
     for (let m = 1; m <= limitPast; m++) {
       const mPrefix = `${filterYear}-${String(m).padStart(2, '0')}`;
-      pastSalaryPaid += proRataSalary(staffData, mPrefix, branches, salaryHistory, [staffData], globalSettings);
+      pastSalaryPaid += proRataSalary(staffData, mPrefix, branches, salaryHistory, [staffData], globalSettings, leaves, entries);
       displayAdvancesCleared += myAdvances.filter(a => a.status === 'approved' && ((a.month_str && a.month_str === mPrefix) || (a.date && a.date.startsWith(mPrefix)))).reduce((sum, a) => sum + (Number(a.amount) || 0), 0);
     }
     if (isCurrentYear) {
-      currentMonthSalary = proRataSalary(staffData, currentMPrefix, branches, salaryHistory, [staffData], globalSettings);
+      currentMonthSalary = proRataSalary(staffData, currentMPrefix, branches, salaryHistory, [staffData], globalSettings, leaves, entries);
     }
     displayAdvances = myAdvances.filter(a => a.status === 'approved' && ((a.month_str && a.month_str.startsWith(String(filterYear))) || (a.date && a.date.startsWith(String(filterYear))))).reduce((sum, a) => sum + (Number(a.amount) || 0), 0);
     displayAdvancesPending = myAdvances.filter(a => a.status === 'pending' && ((a.month_str && a.month_str.startsWith(String(filterYear))) || (a.date && a.date.startsWith(String(filterYear))))).reduce((sum, a) => sum + (Number(a.amount) || 0), 0);
   } else {
-    currentMonthSalary = staffData ? proRataSalary(staffData, selectedMonthStr, branches, salaryHistory, [staffData], globalSettings) : 0;
+    currentMonthSalary = staffData ? proRataSalary(staffData, selectedMonthStr, branches, salaryHistory, [staffData], globalSettings, leaves, entries) : 0;
     displayAdvances = myAdvances.filter(a => a.status === 'approved' && (a.month_str === selectedMonthStr || (a.date && a.date.startsWith(selectedMonthStr)))).reduce((sum, a) => sum + (Number(a.amount) || 0), 0);
     displayAdvancesPending = myAdvances.filter(a => a.status === 'pending' && (a.month_str === selectedMonthStr || (a.date && a.date.startsWith(selectedMonthStr)))).reduce((sum, a) => sum + (Number(a.amount) || 0), 0);
   }
@@ -398,7 +403,7 @@ export default function MyPayrollPage() {
                     <tbody>
                       {Array.from({ length: factor }, (_, i) => i + 1).map(m => {
                         const mPrefix = `${filterYear}-${String(m).padStart(2, '0')}`;
-                        const mSal = proRataSalary(staffData, mPrefix, branches, salaryHistory, [staffData], globalSettings);
+                        const mSal = proRataSalary(staffData, mPrefix, branches, salaryHistory, [staffData], globalSettings, leaves, entries);
                         const mAdv = myAdvances.filter(a => a.status === 'approved' && (a.month_str === mPrefix || (a.date && a.date.startsWith(mPrefix)))).reduce((sum, a) => sum + (Number(a.amount) || 0), 0);
                         const mNet = mSal - mAdv;
                         const mName = new Date(filterYear, m - 1).toLocaleString('default', { month: 'long' });
