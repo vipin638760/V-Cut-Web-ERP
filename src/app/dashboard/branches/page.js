@@ -495,16 +495,21 @@ export default function BranchesPage() {
     return () => { clearTimeout(t); clearTimeout(clear); };
   }, [staffFocusId, selectedBranch]);
   const [brTypeFilter, setBrTypeFilter] = useState("all");
-  const [brSortCol, setBrSortCol] = useState(() => {
-    if (typeof window === "undefined") return "income";
-    try { const s = localStorage.getItem("vcut_branch_sort"); if (s) return JSON.parse(s).col || "income"; } catch {}
-    return "income";
-  });
-  const [brSortDir, setBrSortDir] = useState(() => {
-    if (typeof window === "undefined") return "desc";
-    try { const s = localStorage.getItem("vcut_branch_sort"); if (s) return JSON.parse(s).dir || "desc"; } catch {}
-    return "desc";
-  });
+  // Default sort = income desc. Saved preference is applied after mount (in an
+  // effect, not the useState initializer) so server + first client render agree
+  // and there is no hydration mismatch.
+  const [brSortCol, setBrSortCol] = useState("income");
+  const [brSortDir, setBrSortDir] = useState("desc");
+  useEffect(() => {
+    try {
+      const s = localStorage.getItem("vcut_branch_sort");
+      if (s) {
+        const { col, dir } = JSON.parse(s);
+        if (col) setBrSortCol(col);
+        if (dir) setBrSortDir(dir);
+      }
+    } catch {}
+  }, []);
   // Honour ?view=summary|table|card from the URL so deep-links (e.g. from
   // the dashboard's Operating Cost card) land on the right tab. Read straight
   // from window.location — useSearchParams() in Next 16 / React 19 requires
