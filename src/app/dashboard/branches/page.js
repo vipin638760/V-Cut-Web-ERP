@@ -4,10 +4,32 @@ import { collection, onSnapshot, query, orderBy, where, getDocs, deleteDoc, doc,
 import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
 import { INR, branchIncomeInPeriod, makeFilterPrefix, periodLabel, proRataSalary, staffLeavesInMonth, staffStatusForMonth, parseLocalDate, MASK, effectiveCashInHand, computeIncentiveExpense, getMonthlyFixed } from "@/lib/calculations";
-import { Icon, IconBtn, Pill, Card, PeriodWidget, ToggleGroup, TH, TD, Modal, SearchSelect, BranchEmployeeSearch, useConfirm, useToast, useSort } from "@/components/ui";
+import { Icon, IconBtn, Pill, Card, PeriodWidget, ToggleGroup, TH, TD, Modal, SearchSelect, BranchEmployeeSearch, useConfirm, useToast } from "@/components/ui";
 import { useRouter } from "next/navigation";
 import VLoader from "@/components/VLoader";
 
+function useSort(defaultCol = null, defaultDir = "asc") {
+  const [sortCol, setSortCol] = useState(defaultCol);
+  const [sortDir, setSortDir] = useState(defaultDir);
+  const toggle = (col) => {
+    if (sortCol === col) setSortDir(d => d === "asc" ? "desc" : "asc");
+    else { setSortCol(col); setSortDir("asc"); }
+  };
+  const sortRows = (rows, keyFns) => {
+    if (!sortCol || !keyFns || typeof keyFns[sortCol] !== "function") return rows;
+    const fn = keyFns[sortCol];
+    const mult = sortDir === "asc" ? 1 : -1;
+    return [...rows].sort((a, b) => {
+      const av = fn(a), bv = fn(b);
+      if (av == null && bv == null) return 0;
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      if (typeof av === "number" && typeof bv === "number") return (av - bv) * mult;
+      return String(av).localeCompare(String(bv), undefined, { numeric: true }) * mult;
+    });
+  };
+  return { sortCol, sortDir, toggle, sortRows };
+}
 
 const NOW = new Date();
 
