@@ -816,7 +816,11 @@ export default function BranchesPage() {
     const endM   = isYearly ? factor : filterMonth;
     for (let m = startM; m <= endM; m++) {
       const mPrefix = `${filterYear}-${String(m).padStart(2, '0')}`;
-      const activeStaffInMonth = staff.filter(s => s.branch_id === b.id && staffStatusForMonth(s, mPrefix).status !== 'inactive');
+      // Transfer-aware staff set (matches the roster): a staff is "at" this branch
+      // for the month based on effectiveBranchOnDate at month-end, not their raw
+      // home branch_id — so transferred staff's salary lands on the right branch.
+      const mRefDate = `${mPrefix}-${String(new Date(filterYear, m, 0).getDate()).padStart(2, '0')}`;
+      const activeStaffInMonth = staff.filter(s => effectiveBranchOnDate(s, mRefDate, transfers) === b.id && staffStatusForMonth(s, mPrefix).status !== 'inactive');
       actualSalary += activeStaffInMonth.reduce((s, st) => s + proRataSalary(st, mPrefix, branches, salHistory, staff, globalSettings, leaves, entries), 0);
       actualLeaves += activeStaffInMonth.reduce((s, st) => s + staffLeavesInMonth(st.id, mPrefix, leaves), 0);
     }
@@ -1888,7 +1892,7 @@ export default function BranchesPage() {
         
         const mfYearly = getMonthlyFixed(b, monthPrefix, monthlyExpenses, fixedExpenses);
         const mFixed = mfYearly.shop_rent + mfYearly.room_rent + mfYearly.wifi + mfYearly.shop_elec + mfYearly.room_elec;
-        const activeStaffInMonth = staff.filter(s => s.branch_id === b.id && staffStatusForMonth(s, monthPrefix).status !== 'inactive');
+        const activeStaffInMonth = branchStaff.filter(s => staffStatusForMonth(s, monthPrefix).status !== 'inactive');
         const mActualSalary = activeStaffInMonth.reduce((s, st) => s + proRataSalary(st, monthPrefix, branches, salHistory, staff, globalSettings, leaves, entries), 0);
         const mLeaves = activeStaffInMonth.reduce((s, st) => s + staffLeavesInMonth(st.id, monthPrefix, leaves), 0);
 
@@ -1946,7 +1950,11 @@ export default function BranchesPage() {
       const mOtherExp = mEntries.reduce((s, e) => s + (e.others || 0) + (e.petrol || 0), 0);
       const mf = getMonthlyFixed(b, monthPrefix, monthlyExpenses, fixedExpenses);
       const mFixed = mf.shop_rent + mf.room_rent + mf.wifi + mf.shop_elec + mf.room_elec;
-      const actSal = staff.filter(as => as.branch_id === b.id && staffStatusForMonth(as, monthPrefix).status !== 'inactive').reduce((s, st) => s + proRataSalary(st, monthPrefix, branches, salHistory, staff, globalSettings, leaves, entries), 0);
+      // Transfer-aware: use the same branchStaff universe as the roster so the
+      // Salary line in the expense breakdown matches the staff table total
+      // (staff transferred INTO the branch belong here even if their home
+      // branch_id still points elsewhere).
+      const actSal = branchStaff.filter(as => staffStatusForMonth(as, monthPrefix).status !== 'inactive').reduce((s, st) => s + proRataSalary(st, monthPrefix, branches, salHistory, staff, globalSettings, leaves, entries), 0);
 
       totalOnline += mOnline; totalCash += mCash; totalMatInc += mMatInc;
       totalIncentiveExp += mIncExp; totalMatExp += mMatExp; totalOtherExp += mOtherExp;
