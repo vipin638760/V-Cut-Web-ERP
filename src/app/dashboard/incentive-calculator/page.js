@@ -1,6 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useEffect, useState, useMemo } from "react";
+import { useSearchParams } from "next/navigation";
 import { collection, onSnapshot, query, where, orderBy, addDoc, writeBatch, doc, deleteDoc, getDocs } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
@@ -33,6 +34,21 @@ export default function IncentiveCalculatorPage() {
     return d.toISOString().slice(0, 10);
   });
   const [dateTo, setDateTo] = useState(() => new Date().toISOString().slice(0, 10));
+
+  // Deep-link from the Branch "Staff Incentives" breakdown row:
+  // ?branch=ID&month=YYYY-MM preselects that branch and sets the date range to
+  // the whole month, so the clicked figure is traceable per staff/day.
+  const searchParams = useSearchParams();
+  useEffect(() => {
+    const qBranch = searchParams.get("branch");
+    if (qBranch) setBranchFilter(qBranch);
+    const qMonth = searchParams.get("month");
+    if (qMonth && /^\d{4}-\d{2}$/.test(qMonth)) {
+      const [y, m] = qMonth.split("-").map(Number);
+      setDateFrom(`${qMonth}-01`);
+      setDateTo(`${qMonth}-${String(new Date(y, m, 0).getDate()).padStart(2, "0")}`);
+    }
+  }, [searchParams]);
 
   // Selection for batch release
   const [selected, setSelected] = useState(new Set());

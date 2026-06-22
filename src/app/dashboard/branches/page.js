@@ -2189,7 +2189,7 @@ export default function BranchesPage() {
                 const q = `?branch=${b.id}` + (filterMode === "month" ? `&month=${filterPrefix}` : "");
                 const matTo = `/dashboard/materials${q}`;
                 return [
-                  ["Staff Incentives", INR(totalIncentiveExp), "var(--red)", `/dashboard/entry${q}`],
+                  ["Staff Incentives", INR(totalIncentiveExp), "var(--red)", `/dashboard/incentive-calculator${q}`],
                   ["Material Cost", INR(totalMatExp), "var(--red)", matTo],
                   ["Other / Petrol", INR(totalOtherExp), "var(--red)", `/dashboard/entry${q}`],
                   ["Shop Rent", INR(totalShopRent), "var(--orange)", "/dashboard/expenses"],
