@@ -3,7 +3,7 @@ import { useEffect, useState, useRef } from "react";
 import { collection, onSnapshot, query, orderBy, where, getDocs, deleteDoc, doc, addDoc, updateDoc, writeBatch } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
-import { INR, branchIncomeInPeriod, makeFilterPrefix, periodLabel, proRataSalary, salaryByBranchForMonth, branchSalaryShare, getStaffSalaryForMonth, staffLeavesInMonth, staffStatusForMonth, parseLocalDate, MASK, effectiveCashInHand, computeIncentiveExpense, getMonthlyFixed, effectiveBranchOnDate } from "@/lib/calculations";
+import { INR, branchIncomeInPeriod, makeFilterPrefix, periodLabel, proRataSalary, salaryByBranchForMonth, getStaffSalaryForMonth, staffLeavesInMonth, staffStatusForMonth, parseLocalDate, MASK, effectiveCashInHand, computeIncentiveExpense, getMonthlyFixed, effectiveBranchOnDate } from "@/lib/calculations";
 import { Icon, IconBtn, Pill, Card, PeriodWidget, ToggleGroup, TH, TD, Modal, SearchSelect, BranchEmployeeSearch, useConfirm, useToast } from "@/components/ui";
 import { useRouter } from "next/navigation";
 import VLoader from "@/components/VLoader";
@@ -2394,27 +2394,31 @@ export default function BranchesPage() {
             const monthlyDays = []; // year mode: [{ m: "Jan", days }] for months with any worked days
 
             if (filterMode === 'month') {
-              // Salary shown = this branch's share of the attendance-gated month
-              // salary (present-days here ÷ present-days everywhere). A staff who
-              // worked part of the month at another branch shows only the portion
-              // earned here, matching the DAYS column (also branch-scoped).
-              curSalary = Math.round(proRataSalary(s, filterPrefix, branches, salHistory, staff, globalSettings, leaves, entries) * branchSalaryShare(s.id, filterPrefix, b.id, entries, s.branch_id));
               leavesTaken = staffLeavesInMonth(s.id, filterPrefix, leaves);
               daysWorked = presentDaysInMonth(s.id, filterPrefix);
               paidLeaves = Math.min(leavesTaken, quotaPerMonth);
               lop = Math.max(0, leavesTaken - quotaPerMonth);
-              // Days paid = days present + paid-leave days (mirrors salary).
+              // Days paid = days present at THIS branch + paid-leave days.
               payrollDays = daysWorked + paidLeaves;
+              // Salary earned here = days paid × per-day rate (monthly ÷ days in
+              // month). Matches the "N days paid" line and the Monthly Sal /day
+              // figure, so e.g. 7 days × ₹500 = ₹3,500.
+              curSalary = Math.round(payrollDays * (monthlySalary / daysInRefMonth));
             } else {
               for (let m = 1; m <= endMonth; m++) {
                 const mPrefix = `${filterYear}-${String(m).padStart(2, '0')}`;
-                curSalary += Math.round(proRataSalary(s, mPrefix, branches, salHistory, staff, globalSettings, leaves, entries) * branchSalaryShare(s.id, mPrefix, b.id, entries, s.branch_id));
+                const [my, mm] = mPrefix.split('-').map(Number);
+                const mDaysInMonth = new Date(my, mm, 0).getDate();
+                const mMonthlySal = getStaffSalaryForMonth(s.id, mPrefix, salHistory, staff);
                 const mLeaves = staffLeavesInMonth(s.id, mPrefix, leaves);
-                leavesTaken += mLeaves;
-                paidLeaves += Math.min(mLeaves, quotaPerMonth);
-                lop += Math.max(0, mLeaves - quotaPerMonth);
                 const mDays = presentDaysInMonth(s.id, mPrefix);
+                const mPaidLeave = Math.min(mLeaves, quotaPerMonth);
+                leavesTaken += mLeaves;
+                paidLeaves += mPaidLeave;
+                lop += Math.max(0, mLeaves - quotaPerMonth);
                 daysWorked += mDays;
+                // Per-month: days paid here × that month's per-day rate.
+                curSalary += Math.round((mDays + mPaidLeave) * (mMonthlySal / mDaysInMonth));
                 if (mDays > 0) monthlyDays.push({ m: new Date(filterYear, m - 1, 1).toLocaleString("default", { month: "short" }), days: mDays });
               }
               payrollDays = daysWorked + paidLeaves;
