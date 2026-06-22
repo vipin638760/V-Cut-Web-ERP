@@ -2369,7 +2369,20 @@ export default function BranchesPage() {
           const presentDaysInMonth = (sid, prefix) =>
             periodEntries.filter(e => e.date?.startsWith(prefix) && (e.staff_billing || []).some(x => x.staff_id === sid && x.present !== false)).length;
 
-          const rawRows = branchStaff.map((s) => {
+          // Borrowed-in staff: present in this branch's entries this period but
+          // home elsewhere. Surface them so the roster + its salary total
+          // reconcile with the branch P&L, which already charges their
+          // here-portion of salary to this branch.
+          const homeIds = new Set(branchStaff.map(s => s.id));
+          const borrowedIds = new Set();
+          periodEntries.forEach(e => (e.staff_billing || []).forEach(sb => {
+            if (sb.staff_id && !homeIds.has(sb.staff_id) && (sb.present !== false)) borrowedIds.add(sb.staff_id);
+          }));
+          const borrowedStaff = [...borrowedIds].map(id => staff.find(x => x.id === id)).filter(Boolean);
+          const rosterStaff = [...branchStaff, ...borrowedStaff];
+
+          const rawRows = rosterStaff.map((s) => {
+            const borrowed = !homeIds.has(s.id);
             let billing = 0, matSale = 0, tips = 0, staffTInc = 0;
             let curSalary = 0, leavesTaken = 0, daysWorked = 0, paidLeaves = 0, lop = 0, payrollDays = 0;
             const monthlyDays = []; // year mode: [{ m: "Jan", days }] for months with any worked days
@@ -2412,7 +2425,7 @@ export default function BranchesPage() {
             });
             const totalSale = billing + matSale + tips;
             const pct = Math.min(Math.round(billing / (s.target || 50000) * 100), 100);
-            return { s, billing, matSale, tips, staffTInc, totalSale, pct, curSalary, daysWorked, paidLeaves, lop, payrollDays, monthlyDays };
+            return { s, borrowed, billing, matSale, tips, staffTInc, totalSale, pct, curSalary, daysWorked, paidLeaves, lop, payrollDays, monthlyDays };
           });
 
           // Active rows sort after exited rows when sorting by End date; use
@@ -2480,8 +2493,9 @@ export default function BranchesPage() {
             </tr></thead>
             <tbody>
               {shownRows.map((row, i) => {
-                const { s, billing, staffTInc, totalSale, pct, curSalary, daysWorked, paidLeaves, lop, payrollDays, monthlyDays } = row;
+                const { s, borrowed, billing, staffTInc, totalSale, pct, curSalary, daysWorked, paidLeaves, lop, payrollDays, monthlyDays } = row;
                 const hasExit = !!s.exit_date;
+                const homeBranchName = borrowed ? (branches.find(x => x.id === s.branch_id)?.name || "another branch") : null;
                 const isFocused = staffFocusId === s.id;
                 return (
                   <tr key={s.id} id={`staff-row-${s.id}`}
@@ -2491,7 +2505,15 @@ export default function BranchesPage() {
                       transition: "background 0.6s ease",
                     } : undefined}>
                     <TD style={{ color: "var(--text3)" }}>{i + 1}</TD>
-                    <TD style={{ fontWeight: 600 }}>{s.name}</TD>
+                    <TD style={{ fontWeight: 600 }}>
+                      {s.name}
+                      {borrowed && (
+                        <span title={`Borrowed from ${homeBranchName} — salary shown is this branch's share`}
+                          style={{ marginLeft: 6, fontSize: 9, fontWeight: 800, textTransform: "uppercase", letterSpacing: 0.5, color: "var(--gold)", background: "rgba(234,179,8,0.12)", border: "1px solid rgba(234,179,8,0.35)", borderRadius: 5, padding: "1px 5px", verticalAlign: "middle" }}>
+                          Loan
+                        </span>
+                      )}
+                    </TD>
                     <TD><Pill label={s.role || "—"} color="blue" /></TD>
                     <TD style={{ color: "var(--text2)", fontSize: 11, fontWeight: 600 }} title={s.join && s.join < periodStart ? `Joined ${fmtShort(s.join)} — showing this period's start` : undefined}>
                       {/* In month view, a staff who was already employed before the month
