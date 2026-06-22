@@ -2382,6 +2382,8 @@ export default function BranchesPage() {
           const rosterStaff = [...branchStaff, ...borrowedStaff];
 
           const monthlySalaryRef = filterMode === "month" ? filterPrefix : `${filterYear}-${String(endMonth).padStart(2, '0')}`;
+          const [refYr, refMo] = monthlySalaryRef.split('-').map(Number);
+          const daysInRefMonth = new Date(refYr, refMo, 0).getDate(); // per-day rate denominator (matches proRataSalary)
           const rawRows = rosterStaff.map((s) => {
             const borrowed = !homeIds.has(s.id);
             // Full contracted monthly salary (history-aware) — reference figure,
@@ -2545,7 +2547,14 @@ export default function BranchesPage() {
                     </TD>
                     <TD right style={{ fontWeight: 700, color: paidLeaves > 0 ? "var(--green)" : "var(--text3)" }}>{paidLeaves}</TD>
                     <TD right style={{ fontWeight: 700, color: lop > 0 ? "var(--red)" : "var(--text3)" }}>{lop}</TD>
-                    {isAdmin && <TD right style={{ color: "var(--text2)", fontWeight: 600 }}>{INR(monthlySalary)}</TD>}
+                    {isAdmin && (
+                      <TD right style={{ color: "var(--text2)", fontWeight: 600 }}>
+                        {INR(monthlySalary)}
+                        <div style={{ fontSize: 10, color: "var(--text3)", marginTop: 2, fontWeight: 600 }} title={`Per-day rate = monthly salary ÷ ${daysInRefMonth} days`}>
+                          {INR(Math.round(monthlySalary / daysInRefMonth))}/day
+                        </div>
+                      </TD>
+                    )}
                     {isAdmin && (
                       <TD right style={{ color: "var(--gold)", fontWeight: 600 }}>
                         {INR(curSalary)}
