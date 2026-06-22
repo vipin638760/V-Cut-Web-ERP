@@ -173,19 +173,41 @@ export function effectiveCashInHand(entry) {
   return Number(entry.cash_in_hand) || 0;
 }
 
-/** Get staff salary for a given month from salary_history or fallback to base */
+/** Get staff salary for a given month from salary_history or fallback to base.
+ *
+ * **Why the live-value override:** `s.salary` is the current contracted figure
+ * (what Staff Management shows). `salary_history` is meant to hold superseded
+ * values keyed by when they took effect. If a salary edit didn't get logged to
+ * history — or a history row carries a stale amount — the most-recent applicable
+ * row can disagree with `s.salary`, making the current month read an old number
+ * while Staff Management reads the new one. So when the newest history row's
+ * amount differs from `s.salary`, we treat `s.salary` as effective from the
+ * current month onward: the current/future months use the live value, genuinely
+ * past months keep their historical value. */
 export function getStaffSalaryForMonth(staffId, monthStr, salaryHistory, staffList) {
   const s = staffList?.find(x => x.id === staffId);
   if (!s) return 0;
-  if (!salaryHistory || salaryHistory.length === 0) return s.salary || 0;
+  const current = Number(s.salary) || 0;
+  if (!salaryHistory || salaryHistory.length === 0) return current;
 
-  // Find the most recent history entry effective ON or BEFORE monthStr
-  const relevant = salaryHistory
-    .filter(h => h.staff_id === staffId && h.effective_from && h.effective_from <= (monthStr + '-31'))
-    .sort((a, b) => b.effective_from.localeCompare(a.effective_from));
+  const hist = salaryHistory
+    .filter(h => h.staff_id === staffId && h.effective_from)
+    .sort((a, b) => String(b.effective_from).localeCompare(String(a.effective_from)));
+  if (hist.length === 0) return current;
 
-  if (relevant.length > 0) return relevant[0].salary || s.salary || 0;
-  return s.salary || 0;
+  // The newest logged amount disagrees with the live salary → the live value is
+  // a later (unlogged) change; apply it from the current month onward.
+  const newest = hist[0];
+  if (Number(newest.salary) !== current) {
+    const now = new Date();
+    const nowMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    if (monthStr >= nowMonth) return current;
+  }
+
+  // Otherwise: most recent history entry effective ON or BEFORE monthStr.
+  const applicable = hist.find(h => h.effective_from <= (monthStr + '-31'));
+  if (applicable) return Number(applicable.salary) || current;
+  return current;
 }
 
 /** Pro-rata salary for a staff member in a given month
