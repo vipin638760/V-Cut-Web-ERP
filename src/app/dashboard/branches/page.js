@@ -3,7 +3,7 @@ import { useEffect, useState, useRef } from "react";
 import { collection, onSnapshot, query, orderBy, where, getDocs, deleteDoc, doc, addDoc, updateDoc, writeBatch } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
-import { INR, branchIncomeInPeriod, makeFilterPrefix, periodLabel, proRataSalary, salaryByBranchForMonth, branchSalaryShare, staffLeavesInMonth, staffStatusForMonth, parseLocalDate, MASK, effectiveCashInHand, computeIncentiveExpense, getMonthlyFixed, effectiveBranchOnDate } from "@/lib/calculations";
+import { INR, branchIncomeInPeriod, makeFilterPrefix, periodLabel, proRataSalary, salaryByBranchForMonth, branchSalaryShare, getStaffSalaryForMonth, staffLeavesInMonth, staffStatusForMonth, parseLocalDate, MASK, effectiveCashInHand, computeIncentiveExpense, getMonthlyFixed, effectiveBranchOnDate } from "@/lib/calculations";
 import { Icon, IconBtn, Pill, Card, PeriodWidget, ToggleGroup, TH, TD, Modal, SearchSelect, BranchEmployeeSearch, useConfirm, useToast } from "@/components/ui";
 import { useRouter } from "next/navigation";
 import VLoader from "@/components/VLoader";
@@ -2381,8 +2381,12 @@ export default function BranchesPage() {
           const borrowedStaff = [...borrowedIds].map(id => staff.find(x => x.id === id)).filter(Boolean);
           const rosterStaff = [...branchStaff, ...borrowedStaff];
 
+          const monthlySalaryRef = filterMode === "month" ? filterPrefix : `${filterYear}-${String(endMonth).padStart(2, '0')}`;
           const rawRows = rosterStaff.map((s) => {
             const borrowed = !homeIds.has(s.id);
+            // Full contracted monthly salary (history-aware) — reference figure,
+            // independent of attendance / branch split shown in the Salary column.
+            const monthlySalary = getStaffSalaryForMonth(s.id, monthlySalaryRef, salHistory, staff);
             let billing = 0, matSale = 0, tips = 0, staffTInc = 0;
             let curSalary = 0, leavesTaken = 0, daysWorked = 0, paidLeaves = 0, lop = 0, payrollDays = 0;
             const monthlyDays = []; // year mode: [{ m: "Jan", days }] for months with any worked days
@@ -2425,7 +2429,7 @@ export default function BranchesPage() {
             });
             const totalSale = billing + matSale + tips;
             const pct = Math.min(Math.round(billing / (s.target || 50000) * 100), 100);
-            return { s, borrowed, billing, matSale, tips, staffTInc, totalSale, pct, curSalary, daysWorked, paidLeaves, lop, payrollDays, monthlyDays };
+            return { s, borrowed, billing, matSale, tips, staffTInc, totalSale, pct, curSalary, monthlySalary, daysWorked, paidLeaves, lop, payrollDays, monthlyDays };
           });
 
           // Active rows sort after exited rows when sorting by End date; use
@@ -2439,6 +2443,7 @@ export default function BranchesPage() {
             days:       r => r.daysWorked,
             paid:       r => r.paidLeaves,
             lop:        r => r.lop,
+            monthly:    r => r.monthlySalary,
             salary:     r => r.curSalary,
             billing:    r => r.billing,
             staffTInc:  r => r.staffTInc,
@@ -2461,6 +2466,7 @@ export default function BranchesPage() {
           const inactiveRows = sortedRows.filter(r => !isActiveInPeriod(r));
           const shownRows = staffTab === "inactive" ? inactiveRows : activeRows;
           const totSalary = shownRows.reduce((sum, r) => sum + r.curSalary, 0);
+          const totMonthly = shownRows.reduce((sum, r) => sum + r.monthlySalary, 0);
           const totBilling = shownRows.reduce((sum, r) => sum + r.billing, 0);
           const totStaffInc = shownRows.reduce((sum, r) => sum + r.staffTInc, 0);
           const totSale = shownRows.reduce((sum, r) => sum + r.totalSale, 0);
@@ -2485,6 +2491,7 @@ export default function BranchesPage() {
               <TH right title="Days the staff was active in this period (join/exit-aware, excludes LOP)" sort={staffRosterSort} sortKey="days">Days</TH>
               <TH right title="Approved leaves within the monthly quota" sort={staffRosterSort} sortKey="paid">Paid</TH>
               <TH right title="Loss-of-pay: leaves beyond the monthly quota" sort={staffRosterSort} sortKey="lop">LOP</TH>
+              {isAdmin && <TH right title="Full contracted monthly salary (before attendance / branch split)" sort={staffRosterSort} sortKey="monthly">Monthly Sal</TH>}
               {isAdmin && <TH right sort={staffRosterSort} sortKey="salary">Salary</TH>}
               <TH right sort={staffRosterSort} sortKey="billing">Billing ({plabel})</TH>
               <TH right sort={staffRosterSort} sortKey="staffTInc">Staff T.Inc</TH>
@@ -2493,7 +2500,7 @@ export default function BranchesPage() {
             </tr></thead>
             <tbody>
               {shownRows.map((row, i) => {
-                const { s, borrowed, billing, staffTInc, totalSale, pct, curSalary, daysWorked, paidLeaves, lop, payrollDays, monthlyDays } = row;
+                const { s, borrowed, billing, staffTInc, totalSale, pct, curSalary, monthlySalary, daysWorked, paidLeaves, lop, payrollDays, monthlyDays } = row;
                 const hasExit = !!s.exit_date;
                 const homeBranchName = borrowed ? (branches.find(x => x.id === s.branch_id)?.name || "another branch") : null;
                 const isFocused = staffFocusId === s.id;
@@ -2538,6 +2545,7 @@ export default function BranchesPage() {
                     </TD>
                     <TD right style={{ fontWeight: 700, color: paidLeaves > 0 ? "var(--green)" : "var(--text3)" }}>{paidLeaves}</TD>
                     <TD right style={{ fontWeight: 700, color: lop > 0 ? "var(--red)" : "var(--text3)" }}>{lop}</TD>
+                    {isAdmin && <TD right style={{ color: "var(--text2)", fontWeight: 600 }}>{INR(monthlySalary)}</TD>}
                     {isAdmin && (
                       <TD right style={{ color: "var(--gold)", fontWeight: 600 }}>
                         {INR(curSalary)}
@@ -2577,12 +2585,13 @@ export default function BranchesPage() {
                   </tr>
                 );
               })}
-              {shownRows.length === 0 && <tr><td colSpan={isAdmin ? 13 : 12} style={{ textAlign: "center", padding: 24, color: "var(--text3)" }}>No {staffTab} staff in this branch</td></tr>}
+              {shownRows.length === 0 && <tr><td colSpan={isAdmin ? 14 : 12} style={{ textAlign: "center", padding: 24, color: "var(--text3)" }}>No {staffTab} staff in this branch</td></tr>}
               {shownRows.length > 0 && (
                 <tr className="totals-row" style={{ background: "var(--bg3)", borderTop: "2px solid var(--border2)" }}>
                   <TD colSpan={8} style={{ fontWeight: 800, color: "var(--gold)" }}>
                     TOTAL ({shownRows.length} {staffTab})
                   </TD>
+                  {isAdmin && <TD right style={{ fontWeight: 800, color: "var(--text2)" }}>{INR(totMonthly)}</TD>}
                   {isAdmin && <TD right style={{ fontWeight: 800, color: "var(--gold)" }}>{INR(totSalary)}</TD>}
                   <TD right style={{ fontWeight: 800, color: "var(--blue)" }}>{INR(totBilling)}</TD>
                   <TD right style={{ fontWeight: 800, color: "var(--text2)" }}>{INR(totStaffInc)}</TD>
