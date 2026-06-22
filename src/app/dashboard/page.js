@@ -3,7 +3,7 @@ import { useEffect, useState, useRef, useMemo, Fragment } from "react";
 import { collection, onSnapshot, query, orderBy, doc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
-import { INR, staffBillingInPeriod, makeFilterPrefix, periodLabel, proRataSalary, staffLeavesInMonth, staffStatusForMonth, staffIncentivesInPeriod, parseLocalDate, getMonthlyFixed, MASK, computeIncentiveExpense, toTitleCase } from "@/lib/calculations";
+import { INR, staffBillingInPeriod, makeFilterPrefix, periodLabel, proRataSalary, salaryByBranchForMonth, branchSalaryShare, staffLeavesInMonth, staffStatusForMonth, staffIncentivesInPeriod, parseLocalDate, getMonthlyFixed, MASK, computeIncentiveExpense, toTitleCase } from "@/lib/calculations";
 import { PeriodWidget, ToggleGroup, Card, Pill, TH, TD, Icon, Modal, TabNav, ProgressBar, BranchEmployeeSearch, useToast } from "@/components/ui";
 import { useRouter } from "next/navigation";
 // ExcelJS is ~200KB — load only when Export is actually used.
@@ -275,9 +275,19 @@ export default function DashboardPage() {
       const mStart = new Date(yr, mo - 1, 1);
       const mEnd = new Date(yr, mo, 0);
       const activeStaffInMonth = staff.filter(s => s.branch_id === b.id && staffStatusForMonth(s, mPrefix).status !== 'inactive');
-      actualSalary += activeStaffInMonth.reduce((s, st) => s + proRataSalary(st, mPrefix, branches, salHistory, staff, globalSettings, leaves, entries), 0);
+      // Salary expense follows where work physically happened: this branch's
+      // share of every staff member's attendance-gated month salary, split by
+      // days present per branch.
+      actualSalary += (salaryByBranchForMonth(mPrefix, entries, branches, salHistory, staff, globalSettings, leaves).get(b.id) || 0);
       actualLeaves += activeStaffInMonth.reduce((s, st) => s + staffLeavesInMonth(st.id, mPrefix, leaves), 0);
-      projectedSalary += activeStaffInMonth.reduce((s, st) => {
+      // Projected (un-capped) salary, same branch split. Iterate ALL staff and
+      // weight by this branch's present-days share so staff borrowed in are
+      // counted and staff lent out only contribute their here-portion. Current
+      // month's share is days-so-far — projection assumes the mix holds.
+      projectedSalary += staff.reduce((s, st) => {
+        const share = branchSalaryShare(st.id, mPrefix, b.id, entries, st.branch_id);
+        if (!share) return s;
+        if (staffStatusForMonth(st, mPrefix).status === 'inactive') return s;
         const baseSal = Number(st.salary) || 0;
         if (!baseSal) return s;
         const jd = parseLocalDate(st.join);
@@ -293,7 +303,7 @@ export default function DashboardPage() {
         const mL = staffLeavesInMonth(st.id, mPrefix, leaves);
         const unpaid = Math.max(0, mL - proPaid);
         const payable = Math.max(0, cal - unpaid);
-        return s + Math.round((baseSal / daysInMo) * payable);
+        return s + Math.round((baseSal / daysInMo) * payable * share);
       }, 0);
     }
 
@@ -879,7 +889,7 @@ export default function DashboardPage() {
             const mFixed = mfX.shop_rent + mfX.room_rent + mfX.wifi + mfX.shop_elec + mfX.room_elec;
             const dFixed = mFixed * dayFactor;
             const activeSt = staff.filter(s => s.branch_id === b.id && staffStatusForMonth(s, filterPrefix).status !== 'inactive');
-            const mActualSal = activeSt.reduce((s, st) => s + proRataSalary(st, filterPrefix, branches, salHistory, staff, globalSettings, leaves, entries), 0);
+            const mActualSal = salaryByBranchForMonth(filterPrefix, entries, branches, salHistory, staff, globalSettings, leaves).get(b.id) || 0;
             const dSalary = mActualSal * dayFactor;
             const dLeaves = leaves.filter(l => activeSt.some(as => as.id === l.staff_id) && l.status === 'approved' && l.date === dayPrefix).reduce((s, l) => s + (l.days || 1), 0);
             const dIncome = dOnline + dCash + dMatInc;
@@ -899,7 +909,7 @@ export default function DashboardPage() {
             const mfM = getMonthlyFixed(b, monthPrefix, monthlyExpenses, fixedExpenses);
             const mFixed = mfM.shop_rent + mfM.room_rent + mfM.wifi + mfM.shop_elec + mfM.room_elec;
             const activeSt = staff.filter(s => s.branch_id === b.id && staffStatusForMonth(s, monthPrefix).status !== 'inactive');
-            const mActualSal = activeSt.reduce((s, st) => s + proRataSalary(st, monthPrefix, branches, salHistory, staff, globalSettings, leaves, entries), 0);
+            const mActualSal = salaryByBranchForMonth(monthPrefix, entries, branches, salHistory, staff, globalSettings, leaves).get(b.id) || 0;
             const mLeaves = activeSt.reduce((s, st) => s + staffLeavesInMonth(st.id, monthPrefix, leaves), 0);
             const mIncome = mOnline + mCash + mMatInc;
             const mExpenses = mIncExp + mMatExp + mOtherExp + mFixed + mActualSal;

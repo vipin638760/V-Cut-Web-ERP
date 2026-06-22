@@ -3,7 +3,7 @@ import { useEffect, useState, useRef } from "react";
 import { collection, onSnapshot, query, orderBy, where, getDocs, deleteDoc, doc, addDoc, updateDoc, writeBatch } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
-import { INR, branchIncomeInPeriod, makeFilterPrefix, periodLabel, proRataSalary, staffLeavesInMonth, staffStatusForMonth, parseLocalDate, MASK, effectiveCashInHand, computeIncentiveExpense, getMonthlyFixed, effectiveBranchOnDate } from "@/lib/calculations";
+import { INR, branchIncomeInPeriod, makeFilterPrefix, periodLabel, proRataSalary, salaryByBranchForMonth, staffLeavesInMonth, staffStatusForMonth, parseLocalDate, MASK, effectiveCashInHand, computeIncentiveExpense, getMonthlyFixed, effectiveBranchOnDate } from "@/lib/calculations";
 import { Icon, IconBtn, Pill, Card, PeriodWidget, ToggleGroup, TH, TD, Modal, SearchSelect, BranchEmployeeSearch, useConfirm, useToast } from "@/components/ui";
 import { useRouter } from "next/navigation";
 import VLoader from "@/components/VLoader";
@@ -821,7 +821,11 @@ export default function BranchesPage() {
       // home branch_id — so transferred staff's salary lands on the right branch.
       const mRefDate = `${mPrefix}-${String(new Date(filterYear, m, 0).getDate()).padStart(2, '0')}`;
       const activeStaffInMonth = staff.filter(s => effectiveBranchOnDate(s, mRefDate, transfers) === b.id && staffStatusForMonth(s, mPrefix).status !== 'inactive');
-      actualSalary += activeStaffInMonth.reduce((s, st) => s + proRataSalary(st, mPrefix, branches, salHistory, staff, globalSettings, leaves, entries), 0);
+      // Salary expense follows where work physically happened: split each staff
+      // member's attendance-gated month salary across branches by days present,
+      // then take this branch's share (staff borrowed in counted here, ours lent
+      // out only contribute their here-portion).
+      actualSalary += (salaryByBranchForMonth(mPrefix, entries, branches, salHistory, staff, globalSettings, leaves).get(b.id) || 0);
       actualLeaves += activeStaffInMonth.reduce((s, st) => s + staffLeavesInMonth(st.id, mPrefix, leaves), 0);
     }
 
@@ -1893,7 +1897,7 @@ export default function BranchesPage() {
         const mfYearly = getMonthlyFixed(b, monthPrefix, monthlyExpenses, fixedExpenses);
         const mFixed = mfYearly.shop_rent + mfYearly.room_rent + mfYearly.wifi + mfYearly.shop_elec + mfYearly.room_elec;
         const activeStaffInMonth = branchStaff.filter(s => staffStatusForMonth(s, monthPrefix).status !== 'inactive');
-        const mActualSalary = activeStaffInMonth.reduce((s, st) => s + proRataSalary(st, monthPrefix, branches, salHistory, staff, globalSettings, leaves, entries), 0);
+        const mActualSalary = salaryByBranchForMonth(monthPrefix, entries, branches, salHistory, staff, globalSettings, leaves).get(b.id) || 0;
         const mLeaves = activeStaffInMonth.reduce((s, st) => s + staffLeavesInMonth(st.id, monthPrefix, leaves), 0);
 
         const mIncome = mOnline + mCash + mMatInc;
@@ -1954,7 +1958,7 @@ export default function BranchesPage() {
       // Salary line in the expense breakdown matches the staff table total
       // (staff transferred INTO the branch belong here even if their home
       // branch_id still points elsewhere).
-      const actSal = branchStaff.filter(as => staffStatusForMonth(as, monthPrefix).status !== 'inactive').reduce((s, st) => s + proRataSalary(st, monthPrefix, branches, salHistory, staff, globalSettings, leaves, entries), 0);
+      const actSal = salaryByBranchForMonth(monthPrefix, entries, branches, salHistory, staff, globalSettings, leaves).get(b.id) || 0;
 
       totalOnline += mOnline; totalCash += mCash; totalMatInc += mMatInc;
       totalIncentiveExp += mIncExp; totalMatExp += mMatExp; totalOtherExp += mOtherExp;

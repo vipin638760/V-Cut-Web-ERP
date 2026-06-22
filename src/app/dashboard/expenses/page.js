@@ -3,7 +3,7 @@ import { useEffect, useState, useMemo } from "react";
 import { collection, onSnapshot, query, orderBy, addDoc, deleteDoc, doc, setDoc, writeBatch, updateDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
-import { INR, proRataSalary } from "@/lib/calculations";
+import { INR, proRataSalary, salaryByBranchForMonth } from "@/lib/calculations";
 import { Icon, IconBtn, Pill, Card, PeriodWidget, TH, TD, Modal, BranchSelect, SearchSelect, useConfirm, useToast } from "@/components/ui";
 import VLoader from "@/components/VLoader";
 
@@ -236,8 +236,8 @@ export default function ExpensesPage() {
 
   const getBranchStats = (bid) => {
     if (filterMode !== "month") return { salary: 0, variable: 0 };
-    const bStaff = staffByBranch.get(bid) || [];
-    const salary = bStaff.reduce((s, st) => s + proRataSalary(st, filterPrefix, branches, salHistory, staff, {}, leaves, dailyEntries), 0);
+    // Salary split by days-present-per-branch (this branch's share incl. borrowed staff).
+    const salary = salaryByBranchForMonth(filterPrefix, dailyEntries, branches, salHistory, staff, {}, leaves).get(bid) || 0;
     const variable = dailyAggByBranchMonth.get(`${bid}|${filterPrefix}`)?.variable || 0;
     return { salary, variable };
   };
@@ -520,8 +520,8 @@ export default function ExpensesPage() {
       };
 
       const branchVariableAndSalary = (b, mPrefix) => {
-        const bStaff = staff.filter(s => s.branch_id === b.id);
-        const salary = bStaff.reduce((s, st) => s + proRataSalary(st, mPrefix, branches, salHistory, staff, {}, leaves, dailyEntries), 0);
+        // Salary split by days-present-per-branch (this branch's share incl. borrowed staff).
+        const salary = salaryByBranchForMonth(mPrefix, dailyEntries, branches, salHistory, staff, {}, leaves).get(b.id) || 0;
         const bEntries = dailyEntries.filter(e => e.branch_id === b.id && e.date?.startsWith(mPrefix));
         const variable = bEntries.reduce((s, e) => {
           const sb = e.staff_billing || [];
@@ -1116,8 +1116,8 @@ export default function ExpensesPage() {
                           // branch across all active categories in this month.
                           mTotal = variableCols.reduce((s, t) => s + (dailyOpsByKey.get(`${b.id}|${mPrefix}|${t}`) || 0), 0);
                         } else if (viewType === "total" && !isFuture) {
-                          const bStaff = staff.filter(s => s.branch_id === b.id);
-                          const mSalary = isAdmin ? bStaff.reduce((s, st) => s + proRataSalary(st, mPrefix, branches, salHistory, staff, {}, leaves, dailyEntries), 0) : 0;
+                          // Salary split by days-present-per-branch (this branch's share incl. borrowed staff).
+                          const mSalary = isAdmin ? (salaryByBranchForMonth(mPrefix, dailyEntries, branches, salHistory, staff, {}, leaves).get(b.id) || 0) : 0;
                           const bEntries = dailyEntries.filter(e => e.branch_id === b.id && e.date?.startsWith(mPrefix));
                           const mVar = bEntries.reduce((s, e) => {
                             const sb = e.staff_billing || [];
@@ -1212,8 +1212,8 @@ export default function ExpensesPage() {
                              bYearTotal += (mAct > 0 || isCurrent ? (mAct || (isCurrent ? activeCols.reduce((ss, t) => ss + (Number(localGrid[b.id]?.[t]?.val) || 0), 0) : mBase)) : mBase);
 
                              if (viewType === "total") {
-                                const bStaff = staff.filter(st => st.branch_id === b.id);
-                                bYearTotal += bStaff.reduce((ss, st) => ss + proRataSalary(st, pref, branches, salHistory, staff, {}, leaves, dailyEntries), 0);
+                                // Salary split by days-present-per-branch (this branch's share incl. borrowed staff).
+                                bYearTotal += (salaryByBranchForMonth(pref, dailyEntries, branches, salHistory, staff, {}, leaves).get(b.id) || 0);
                                 const bEntries = dailyEntries.filter(e => e.branch_id === b.id && e.date?.startsWith(pref));
                                 bYearTotal += bEntries.reduce((ss, e) => {
                                    const sb = e.staff_billing || [];

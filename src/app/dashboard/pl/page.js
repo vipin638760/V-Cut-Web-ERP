@@ -2,7 +2,7 @@
 import { useEffect, useState, useRef } from "react";
 import { db } from "@/lib/firebase";
 import { collection, onSnapshot, query, orderBy } from "firebase/firestore";
-import { INR, MASK, MONTHS, proRataSalary, staffStatusForMonth, getMonthlyFixed, computeIncentiveExpense } from "@/lib/calculations";
+import { INR, MASK, MONTHS, salaryByBranchForMonth, getMonthlyFixed, computeIncentiveExpense } from "@/lib/calculations";
 import { PeriodWidget, ToggleGroup, Card, Icon, TH, TD, Pill } from "@/components/ui";
 import VLoader from "@/components/VLoader";
 
@@ -123,9 +123,9 @@ export default function PLReportPage() {
     const mf = getMonthlyFixed(b, month, monthlyExpenses, fixedExpenses);
     const fixedCost = mf.shop_rent + mf.room_rent + mf.shop_elec + mf.room_elec + mf.wifi;
 
-    // Salary
-    const activeStaff = staff.filter(s => s.branch_id === bid && staffStatusForMonth(s, month).status !== "inactive");
-    const salaries = activeStaff.reduce((s, st) => s + proRataSalary(st, month, branches, salaryHistory, staff, globalSettings, leaves, entries), 0);
+    // Salary — attendance-gated month total split across branches by days
+    // present; this branch's share (incl. staff borrowed in).
+    const salaries = salaryByBranchForMonth(month, entries, branches, salaryHistory, staff, globalSettings, leaves).get(bid) || 0;
 
     // GST estimate — mirrors Dashboard's totalGst.
     const gstPct = globalSettings?.gst_pct || 0;

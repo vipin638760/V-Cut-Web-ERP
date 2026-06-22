@@ -279,6 +279,81 @@ export function proRataSalary(st, monthStr, branches, salaryHistory, staffList, 
   return Math.round((salary / daysInMonth) * payableDays);
 }
 
+// Distinct days a staff member was PRESENT at each branch in a month. Aligned
+// with [[staffPresentDaysInMonth]]'s gate: a `staff_billing` row with
+// `present !== false`. Borrowed/loan shifts land in the HOST branch's entry
+// (sale attribution → host), so `entry.branch_id` is the real "worked here"
+// branch. Returns Map<branchId, dayCount>. Pass the FULL entries array.
+export function presentDaysByBranch(sid, monthStr, entries = []) {
+  const sets = new Map();
+  for (const e of entries) {
+    if (!e || !e.date || !e.branch_id || !e.date.startsWith(monthStr)) continue;
+    if (!(e.staff_billing || []).some(x => x.staff_id === sid && x.present !== false)) continue;
+    let s = sets.get(e.branch_id);
+    if (!s) { s = new Set(); sets.set(e.branch_id, s); }
+    s.add(e.date);
+  }
+  const out = new Map();
+  sets.forEach((s, bid) => out.set(bid, s.size));
+  return out;
+}
+
+// Fraction of a staff member's month salary attributable to `branchId`, by days
+// present there ÷ total present days that month. No presence anywhere → home
+// branch carries the whole thing (1.0). Lets per-branch projections apply the
+// same split as [[salaryByBranchForMonth]] without the realized map.
+export function branchSalaryShare(sid, monthStr, branchId, entries = [], homeBranchId = null) {
+  const days = presentDaysByBranch(sid, monthStr, entries);
+  let total = 0;
+  days.forEach(n => total += n);
+  if (total === 0) return homeBranchId === branchId ? 1 : 0;
+  return (days.get(branchId) || 0) / total;
+}
+
+// Allocate every staff member's attendance-gated month salary across branches by
+// days actually present at each ([[presentDaysByBranch]]). The full amount comes
+// from proRataSalary WITH entries, so it already reflects attendance (a no-show,
+// no-leave month is ₹0). That total is then split by where the presence
+// happened, so a staff borrowed 6 of 20 days to another branch carries 6/20 of
+// the month's salary there. A pure paid-leave month (no presence anywhere) falls
+// back to the home branch so salary is never dropped from branch P&L. Rounding
+// drift lands on the largest share so per-branch parts re-sum to the full
+// salary. Returns Map<branchId, salary>.
+//
+// **Why:** salary EXPENSE must follow where work physically happened, not the
+// home/transfer branch. The EMPLOYEE payslip stays full (my-payroll keeps
+// calling proRataSalary directly) — this only splits the COST across branch P&L.
+//
+// **How to apply:** call once per month with the full entries array, then read
+// `.get(branchId) || 0` wherever a per-branch salary expense was previously
+// `staff.filter(home===branch).reduce(proRataSalary)`. Network totals don't need
+// it — sum-of-shares === full salary, so they're invariant.
+export function salaryByBranchForMonth(monthStr, entries, branches, salaryHistory, staffList, globalSettings = {}, leaves = []) {
+  const out = new Map();
+  (staffList || []).forEach(st => {
+    const full = proRataSalary(st, monthStr, branches, salaryHistory, staffList, globalSettings, leaves, entries);
+    if (!full) return;
+    const days = presentDaysByBranch(st.id, monthStr, entries);
+    let total = 0;
+    days.forEach(n => total += n);
+    if (total === 0) {
+      out.set(st.branch_id, (out.get(st.branch_id) || 0) + full);
+      return;
+    }
+    const parts = [];
+    let allocated = 0;
+    days.forEach((n, bid) => {
+      const amt = Math.round(full * n / total);
+      parts.push([bid, amt]);
+      allocated += amt;
+    });
+    const drift = full - allocated;
+    if (drift !== 0) { parts.sort((a, b) => b[1] - a[1]); parts[0][1] += drift; }
+    parts.forEach(([bid, amt]) => out.set(bid, (out.get(bid) || 0) + amt));
+  });
+  return out;
+}
+
 /** Staff overall status — active/inactive relative to a given month */
 export function staffOverallStatus(st, forMonth) {
   if (!st.exit_date) return 'active';
