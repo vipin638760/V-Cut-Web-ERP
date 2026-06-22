@@ -195,14 +195,15 @@ export function getStaffSalaryForMonth(staffId, monthStr, salaryHistory, staffLi
     .sort((a, b) => String(b.effective_from).localeCompare(String(a.effective_from)));
   if (hist.length === 0) return current;
 
-  // The newest logged amount disagrees with the live salary → the live value is
-  // a later (unlogged) change; apply it from the current month onward.
+  // The newest logged amount disagrees with the live salary → there's a later,
+  // unlogged change (the live `s.salary` is newer than anything in history).
+  // Apply the live value to that newest row's month and everything after, so the
+  // current contracted salary shows up wherever it's relevant. Months strictly
+  // before the last logged change still resolve to their historical value below.
+  // Clock-independent on purpose — must not depend on "today".
   const newest = hist[0];
-  if (Number(newest.salary) !== current) {
-    const now = new Date();
-    const nowMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-    if (monthStr >= nowMonth) return current;
-  }
+  const newestMonth = String(newest.effective_from).slice(0, 7);
+  if (Number(newest.salary) !== current && monthStr >= newestMonth) return current;
 
   // Otherwise: most recent history entry effective ON or BEFORE monthStr.
   const applicable = hist.find(h => h.effective_from <= (monthStr + '-31'));
