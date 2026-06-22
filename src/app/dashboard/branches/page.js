@@ -2155,12 +2155,23 @@ export default function BranchesPage() {
           <Card style={{ padding: 0 }}>
             <div style={{ padding: "14px 16px", borderBottom: "1px solid var(--border)", fontWeight: 700, color: "var(--gold)", fontSize: 12, textTransform: "uppercase", letterSpacing: 1 }}>Income Breakdown</div>
             <div style={{ padding: 16 }}>
-              {[["Online / UPI", INR(totalOnline), "var(--green)"], ["Cash Collections", INR(totalCash), "var(--green)"], ["Material Sales", INR(totalMatInc), "var(--green)"]].map(([l, v, c]) => (
-                <div key={l} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid var(--border)", fontSize: 13 }}>
-                  <span style={{ color: "var(--text2)", fontWeight: 500 }}>{l}</span>
+              {/* Each line links to the page its number is computed from, so a
+                  wrong figure can be traced to source. `q` carries branch + month
+                  (entry/materials read these; the others just land on the page). */}
+              {(() => {
+                const q = `?branch=${b.id}` + (filterMode === "month" ? `&month=${filterPrefix}` : "");
+                return [
+                  ["Online / UPI", INR(totalOnline), "var(--green)", `/dashboard/entry${q}`],
+                  ["Cash Collections", INR(totalCash), "var(--green)", `/dashboard/entry${q}`],
+                  ["Material Sales", INR(totalMatInc), "var(--green)", `/dashboard/entry${q}`],
+                ].map(([l, v, c, to]) => (
+                <div key={l} onClick={() => router.push(to)} title={`Open source: ${to.split("?")[0]}`}
+                  style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid var(--border)", fontSize: 13, cursor: "pointer" }}>
+                  <span style={{ color: "var(--accent)", fontWeight: 500, textDecoration: "underline", textDecorationStyle: "dotted", textUnderlineOffset: 3 }}>{l}</span>
                   <span style={{ fontWeight: 600, color: c }}>{v}</span>
                 </div>
-              ))}
+                ));
+              })()}
               <div style={{ display: "flex", justifyContent: "space-between", padding: "10px 0", fontSize: 14, fontWeight: 700 }}>
                 <span style={{ color: "var(--gold)" }}>TOTAL</span>
                 <span style={{ color: "var(--green)" }}>{INR(totalIncSum)}</span>
@@ -2172,25 +2183,29 @@ export default function BranchesPage() {
           <Card style={{ padding: 0 }}>
             <div style={{ padding: "14px 16px", borderBottom: "1px solid var(--border)", fontWeight: 700, color: "var(--red)", fontSize: 12, textTransform: "uppercase", letterSpacing: 1 }}>Expense Breakdown</div>
             <div style={{ padding: 16 }}>
-              {[
-                ["Staff Incentives", INR(totalIncentiveExp), "var(--red)"],
-                ["Material Cost", INR(totalMatExp), "var(--red)"],
-                ["Other / Petrol", INR(totalOtherExp), "var(--red)"],
-                ["Shop Rent", INR(totalShopRent), "var(--orange)"],
-                ["Room Rent", INR(totalRoomRent), "var(--orange)"],
-                ["Electricity", INR(totalElec), "var(--orange)"],
-                ["WiFi", INR(totalWifi), "var(--orange)"],
-                ...(isAdmin ? [["Salary", INR(totalSalary), "var(--orange)"]] : []),
-              ].map(([l, v, c]) => (
-                <div key={l} style={{ display: "flex", justifyContent: "space-between", padding: "7px 0", borderBottom: "1px solid var(--border)", fontSize: 12 }}>
-                  <span style={{ color: "var(--text2)", fontWeight: 500 }}>{l}</span>
+              {/* Each line links to its source page so a wrong figure is traceable.
+                  entry/materials filter by ?branch&month; expenses/payroll just land. */}
+              {(() => {
+                const q = `?branch=${b.id}` + (filterMode === "month" ? `&month=${filterPrefix}` : "");
+                const matTo = `/dashboard/materials${q}`;
+                return [
+                  ["Staff Incentives", INR(totalIncentiveExp), "var(--red)", `/dashboard/entry${q}`],
+                  ["Material Cost", INR(totalMatExp), "var(--red)", matTo],
+                  ["Other / Petrol", INR(totalOtherExp), "var(--red)", `/dashboard/entry${q}`],
+                  ["Shop Rent", INR(totalShopRent), "var(--orange)", "/dashboard/expenses"],
+                  ["Room Rent", INR(totalRoomRent), "var(--orange)", "/dashboard/expenses"],
+                  ["Electricity", INR(totalElec), "var(--orange)", "/dashboard/expenses"],
+                  ["WiFi", INR(totalWifi), "var(--orange)", "/dashboard/expenses"],
+                  ...(isAdmin ? [["Salary", INR(totalSalary), "var(--orange)", "/dashboard/payroll"]] : []),
+                  [`GST Extraction (${gstPct}%)`, INR(totalGstEst), "var(--red)", `/dashboard/entry${q}`],
+                ].map(([l, v, c, to]) => (
+                <div key={l} onClick={() => router.push(to)} title={`Open source: ${to.split("?")[0]}`}
+                  style={{ display: "flex", justifyContent: "space-between", padding: "7px 0", borderBottom: "1px solid var(--border)", fontSize: 12, cursor: "pointer" }}>
+                  <span style={{ color: "var(--accent)", fontWeight: 500, textDecoration: "underline", textDecorationStyle: "dotted", textUnderlineOffset: 3 }}>{l}</span>
                   <span style={{ fontWeight: 600, color: c }}>{v}</span>
                 </div>
-              ))}
-              <div style={{ display: "flex", justifyContent: "space-between", padding: "7px 0", borderBottom: "1px solid var(--border)", fontSize: 12 }}>
-                <span style={{ color: "var(--text2)", fontWeight: 500 }}>GST Extraction ({gstPct}%)</span>
-                <span style={{ fontWeight: 600, color: "var(--red)" }}>{INR(totalGstEst)}</span>
-              </div>
+                ));
+              })()}
               <div style={{ display: "flex", justifyContent: "space-between", padding: "10px 0 4px", fontSize: 14, fontWeight: 700 }}>
                 <span style={{ color: "var(--red)" }}>TOTAL</span>
                 <span style={{ color: "var(--red)" }}>{INR(totalVarExp + totalShopRent + totalRoomRent + totalElec + totalWifi + (isAdmin ? totalSalary : 0) + totalGstEst)}</span>
