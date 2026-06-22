@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState, useMemo } from "react";
+import { useSearchParams } from "next/navigation";
 import { collection, onSnapshot, query, orderBy, addDoc, deleteDoc, doc, setDoc, writeBatch, updateDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
@@ -52,6 +53,20 @@ export default function ExpensesPage() {
   const [filterYear, setFilterYear]   = useState(NOW.getFullYear());
   const [filterMonth, setFilterMonth] = useState(NOW.getMonth() + 1);
   const filterPrefix = `${filterYear}-${String(filterMonth).padStart(2, "0")}`;
+
+  // Deep-link from the Branch breakdown rows: ?month=YYYY-MM preselects the
+  // period so a figure clicked there lands on the same month here. (This page
+  // is an all-branch grid, so ?branch is used to switch to Total view and
+  // scroll, not to single out one branch.)
+  const searchParams = useSearchParams();
+  useEffect(() => {
+    const qMonth = searchParams.get("month");
+    if (qMonth && /^\d{4}-\d{2}$/.test(qMonth)) {
+      const [y, m] = qMonth.split("-").map(Number);
+      setFilterMode("month"); setFilterYear(y); setFilterMonth(m);
+    }
+    if (searchParams.get("branch")) setViewType("total");
+  }, [searchParams]);
 
   // Fixed-tab columns: 6 core essentials + opt-in expense_types where
   // category === "fixed". Anything without an explicit "fixed" category

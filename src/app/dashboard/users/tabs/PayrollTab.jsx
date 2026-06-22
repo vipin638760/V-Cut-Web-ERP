@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState, Fragment, useRef } from "react";
+import { useSearchParams } from "next/navigation";
 import { collection, onSnapshot, doc, setDoc, addDoc, deleteDoc, query, orderBy } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useCurrentUser, getCurrentUser } from "@/lib/currentUser";
@@ -120,6 +121,19 @@ export default function PayrollTab() {
   // Branch filter — empty Set = show every branch. Non-empty = show only those branches.
   const [branchFilter, setBranchFilter] = useState(() => new Set());
   const [branchFilterOpen, setBranchFilterOpen] = useState(false);
+
+  // Deep-link from the Branch breakdown "Salary" row: ?branch=ID&month=YYYY-MM
+  // preselects that branch + period so the figure is traceable to its staff.
+  const searchParams = useSearchParams();
+  useEffect(() => {
+    const qBranch = searchParams.get("branch");
+    if (qBranch) setBranchFilter(new Set([qBranch]));
+    const qMonth = searchParams.get("month");
+    if (qMonth && /^\d{4}-\d{2}$/.test(qMonth)) {
+      const [y, m] = qMonth.split("-").map(Number);
+      setFilterMode("month"); setFilterYear(y); setFilterMonth(m);
+    }
+  }, [searchParams]);
   const [branchSearch, setBranchSearch] = useState("");
   const branchFilterRef = useRef(null);
 
