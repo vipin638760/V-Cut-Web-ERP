@@ -349,7 +349,11 @@ function BranchExpenseChart({ breakdownStats = [], filterYear, salaryBreakup = {
 // breakdownStats.pl so it matches the P&L table. Hover shows income/expense/net.
 function BranchPLTrendChart({ breakdownStats = [], filterYear }) {
   const [hover, setHover] = useState(null);
-  const buckets = breakdownStats.map(s => ({ label: s.label, key: s.monthPrefix || s.label, pl: s.pl || 0, income: s.income || 0 }));
+  // Only months with business (income > 0) — idle months (rent/salary, no sales)
+  // are dropped so the trend reflects operating performance.
+  const buckets = breakdownStats
+    .filter(s => (s.income || 0) > 0)
+    .map(s => ({ label: s.label, key: s.monthPrefix || s.label, pl: s.pl || 0, income: s.income || 0 }));
   if (buckets.length === 0) return null;
 
   const maxMag = Math.max(1, ...buckets.map(b => Math.abs(b.pl)));
