@@ -243,7 +243,7 @@ function BranchExpenseChart({ breakdownStats = [], filterYear, salaryBreakup = {
   const W = LEFT + buckets.length * (BAR_W + GAP);
 
   return (
-    <Card style={{ padding: 16, marginBottom: 12 }}>
+    <Card style={{ padding: 16, marginBottom: 12, overflow: "visible" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 10, marginBottom: 10 }}>
         <div>
           <div style={{ fontSize: 11, fontWeight: 800, color: "var(--red)", textTransform: "uppercase", letterSpacing: 1.5 }}>💸 Expense Trend</div>
@@ -267,7 +267,8 @@ function BranchExpenseChart({ breakdownStats = [], filterYear, salaryBreakup = {
       {total === 0 ? (
         <div style={{ height: H, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text3)", fontStyle: "italic", fontSize: 12 }}>No expense recorded for this period.</div>
       ) : (
-        <div style={{ position: "relative", overflowX: "auto" }}>
+        <div style={{ position: "relative" }}>
+          <div style={{ overflowX: "auto" }}>
           <svg width={W} height={H + PAD_TOP + PAD_BOTTOM} style={{ display: "block" }}>
             <defs>
               <linearGradient id="bexp-red" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#fb7185" /><stop offset="100%" stopColor="rgba(225,29,72,0.45)" /></linearGradient>
@@ -304,10 +305,11 @@ function BranchExpenseChart({ breakdownStats = [], filterYear, salaryBreakup = {
               );
             })}
           </svg>
+          </div>
           {hover && (() => {
             const staffList = salaryBreakup[hover.b.key] || [];
             return (
-            <div style={{ position: "absolute", left: Math.min(LEFT + hover.i * (BAR_W + GAP) + BAR_W + 10, W - 244), top: 4, pointerEvents: "none", width: 230, background: "linear-gradient(160deg, rgba(30,18,20,0.98), rgba(18,12,14,0.98))", border: "1px solid rgba(248,113,113,0.45)", borderRadius: 10, padding: "10px 12px", fontSize: 11, zIndex: 3, boxShadow: "0 10px 34px rgba(0,0,0,0.65)" }}>
+            <div style={{ position: "absolute", left: W + 16, top: 8, pointerEvents: "none", width: 230, background: "linear-gradient(160deg, rgba(30,18,20,0.98), rgba(18,12,14,0.98))", border: "1px solid rgba(248,113,113,0.45)", borderRadius: 10, padding: "10px 12px", fontSize: 11, zIndex: 5, boxShadow: "0 10px 34px rgba(0,0,0,0.65)" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8, paddingBottom: 6, borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
                 <span style={{ fontSize: 13, fontWeight: 800, color: "var(--text)" }}>{hover.b.label} {filterYear}</span>
                 <span style={{ fontSize: 14, fontWeight: 900, color: "var(--red)" }}>{INR(hover.b.value)}</span>
