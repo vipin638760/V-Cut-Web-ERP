@@ -1258,6 +1258,11 @@ export default function DashboardPage() {
         <MonthlyExpenseChart branches={branches} filterYear={filterYear} monthlyExpense={monthlyNetExpense} byMoBranchExp={monthlyExpenseByBranch} />
       )}
 
+      {/* Branch-wise profit / loss — diverging bars, this period */}
+      {isAdmin && (dashView === "all" || dashView === "shop") && branchData.length > 0 && (
+        <BranchPLChart branchData={branchData} />
+      )}
+
       {/* Daily material consumption bar chart — respects the global
           material-source toggles so it lines up with what P&L uses. */}
       {filterMode === "month" && (dashView === "all" || dashView === "shop") && (
@@ -2781,6 +2786,103 @@ function DailyBusinessChart({ entries, branches = [], filterYear, filterMonth })
           })()}
         </div>
       )}
+    </Card>
+  );
+}
+
+// Branch-wise Profit / Loss — one diverging bar per branch for the selected
+// period. Profit rises green above the zero line, loss drops red below, sorted
+// most-profitable first. Hover shows income, expense, and net.
+function BranchPLChart({ branchData = [] }) {
+  const [hover, setHover] = useState(null);
+  const rows = branchData
+    .filter(d => d && d.b)
+    .map(d => ({ id: d.b.id, name: (d.b.name || "").replace(/^V-?CUT\s*/i, ""), n: d.n || 0, i: d.i || 0 }))
+    .sort((a, b) => b.n - a.n);
+  if (rows.length === 0) return null;
+
+  const maxMag = Math.max(1, ...rows.map(r => Math.abs(r.n)));
+  const profitCount = rows.filter(r => r.n > 0).length;
+  const lossCount = rows.filter(r => r.n < 0).length;
+  const totalPL = rows.reduce((s, r) => s + r.n, 0);
+
+  const H = 260, halfH = H / 2, BAR_W = 34, GAP = 16, LEFT = 56, PAD_TOP = 20, PAD_BOTTOM = 66, BAR_R = 5;
+  const W = LEFT + rows.length * (BAR_W + GAP) + 8;
+  const zeroY = PAD_TOP + halfH;
+  const shortAmt = (v) => { const a = Math.abs(v); return (v < 0 ? "-" : "") + (a >= 10000000 ? `${(a / 10000000).toFixed(2)}Cr` : a >= 100000 ? `${(a / 100000).toFixed(1)}L` : a >= 1000 ? `${Math.round(a / 1000)}k` : a); };
+
+  return (
+    <Card style={{ padding: 18, marginBottom: 24, overflow: "visible" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12, marginBottom: 14 }}>
+        <div>
+          <div style={{ fontSize: 11, fontWeight: 800, color: "var(--accent)", textTransform: "uppercase", letterSpacing: 2 }}>Branch Profit / Loss</div>
+          <div style={{ fontSize: 10, color: "var(--text3)", marginTop: 2 }}>Full Net P&L per branch · this period</div>
+        </div>
+        <div style={{ display: "flex", gap: 20, alignItems: "center", flexWrap: "wrap" }}>
+          <div style={{ textAlign: "right" }}>
+            <div style={{ fontSize: 9, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, fontWeight: 700 }}>Profit</div>
+            <div style={{ fontSize: 15, fontWeight: 800, color: "var(--green)" }}>{profitCount} branch{profitCount === 1 ? "" : "es"}</div>
+          </div>
+          <div style={{ textAlign: "right" }}>
+            <div style={{ fontSize: 9, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, fontWeight: 700 }}>Loss</div>
+            <div style={{ fontSize: 15, fontWeight: 800, color: "var(--red)" }}>{lossCount} branch{lossCount === 1 ? "" : "es"}</div>
+          </div>
+          <div style={{ textAlign: "right" }}>
+            <div style={{ fontSize: 9, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, fontWeight: 700 }}>Net</div>
+            <div style={{ fontSize: 15, fontWeight: 800, color: totalPL >= 0 ? "var(--green)" : "var(--red)" }}>{INR(totalPL)}</div>
+          </div>
+        </div>
+      </div>
+      <div style={{ position: "relative" }}>
+        <div style={{ overflowX: "auto" }}>
+        <svg width={W} height={H + PAD_TOP + PAD_BOTTOM} style={{ display: "block" }}>
+          <defs>
+            <linearGradient id="pl-green" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#7df094" /><stop offset="100%" stopColor="#22a354" stopOpacity="0.7" /></linearGradient>
+            <linearGradient id="pl-red" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#e11d48" stopOpacity="0.7" /><stop offset="100%" stopColor="#fb7185" /></linearGradient>
+          </defs>
+          {/* profit/loss gridlines at ±½, ±1 of max */}
+          {[1, 0.5, -0.5, -1].map((f, i) => {
+            const y = zeroY - f * halfH;
+            return <line key={i} x1={LEFT} y1={y} x2={W - 4} y2={y} stroke="rgba(255,255,255,0.04)" strokeDasharray="2 4" />;
+          })}
+          <text x={LEFT - 8} y={zeroY - halfH + 3} fontSize={9} fill="var(--text3)" textAnchor="end" fontWeight={600}>{shortAmt(maxMag)}</text>
+          <text x={LEFT - 8} y={zeroY + halfH + 3} fontSize={9} fill="var(--text3)" textAnchor="end" fontWeight={600}>{shortAmt(-maxMag)}</text>
+          <line x1={LEFT} y1={zeroY} x2={W - 4} y2={zeroY} stroke="rgba(255,255,255,0.22)" strokeWidth={1.2} />
+          {rows.map((r, i) => {
+            const x = LEFT + i * (BAR_W + GAP);
+            const cx = x + BAR_W / 2;
+            const barH = Math.max(2, (Math.abs(r.n) / maxMag) * halfH);
+            const profit = r.n >= 0;
+            const y = profit ? zeroY - barH : zeroY;
+            const fill = profit ? "url(#pl-green)" : "url(#pl-red)";
+            const dim = hover && hover.i !== i ? 0.4 : 1;
+            const labelY = profit ? y - 6 : y + barH + 12;
+            return (
+              <g key={r.id} opacity={dim}
+                onMouseEnter={() => setHover({ i, r })} onMouseLeave={() => setHover(null)}
+                style={{ cursor: "pointer", transition: "opacity .15s" }}>
+                <rect x={x} y={y} width={BAR_W} height={barH} rx={BAR_R} fill={fill} />
+                <text x={cx} y={labelY} fontSize={9.5} fontWeight={800} fill={profit ? "var(--green)" : "var(--red)"} textAnchor="middle">{shortAmt(r.n)}</text>
+                <text x={cx} y={PAD_TOP + H + 16} fontSize={9.5} fill={profit ? "var(--green)" : "var(--red)"} textAnchor="end" fontWeight={700}
+                  transform={`rotate(-40 ${cx} ${PAD_TOP + H + 16})`}>{r.name}</text>
+              </g>
+            );
+          })}
+        </svg>
+        </div>
+        {hover && (() => {
+          const r = hover.r;
+          const exp = r.i - r.n;
+          return (
+            <div style={{ position: "absolute", left: Math.min(LEFT + hover.i * (BAR_W + GAP) + BAR_W + 12, W - 210), top: 4, pointerEvents: "none", width: 196, background: "linear-gradient(160deg, rgba(18,22,30,0.98), rgba(12,14,20,0.98))", border: `1px solid ${r.n >= 0 ? "rgba(74,222,128,0.45)" : "rgba(248,113,113,0.45)"}`, borderRadius: 10, padding: "10px 12px", fontSize: 11, zIndex: 5, boxShadow: "0 10px 34px rgba(0,0,0,0.65)" }}>
+              <div style={{ fontSize: 13, fontWeight: 800, color: "var(--text)", marginBottom: 8, paddingBottom: 6, borderBottom: "1px solid rgba(255,255,255,0.08)" }}>{r.name}</div>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginBottom: 3 }}><span style={{ color: "var(--text3)" }}>Income</span><span style={{ fontWeight: 700, color: "var(--green)" }}>{INR(r.i)}</span></div>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginBottom: 3 }}><span style={{ color: "var(--text3)" }}>Expense</span><span style={{ fontWeight: 700, color: "var(--red)" }}>{INR(exp)}</span></div>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginTop: 5, paddingTop: 5, borderTop: "1px dashed rgba(255,255,255,0.1)" }}><span style={{ color: "var(--text2)", fontWeight: 700 }}>Net P&L</span><span style={{ fontWeight: 900, color: r.n >= 0 ? "var(--green)" : "var(--red)" }}>{INR(r.n)}</span></div>
+            </div>
+          );
+        })()}
+      </div>
     </Card>
   );
 }
