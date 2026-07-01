@@ -2805,9 +2805,17 @@ function DailyBusinessChart({ entries, branches = [], filterYear, filterMonth })
 // most-profitable first. Hover shows income, expense, and net.
 function BranchPLChart({ branchData = [], branchMonthly = new Map() }) {
   const [hover, setHover] = useState(null);
+  // P&L is summed over BUSINESS months only (income > 0). Idle months — rent /
+  // salary with no sales — are excluded so a branch that trades profitably in
+  // its active months isn't dragged into loss by off-season fixed cost.
   const rows = branchData
     .filter(d => d && d.b)
-    .map(d => ({ id: d.b.id, name: (d.b.name || "").replace(/^V-?CUT\s*/i, ""), n: d.n || 0, i: d.i || 0 }))
+    .map(d => {
+      const mos = branchMonthly.get(d.b.id) || [];
+      const i = mos.reduce((s, m) => s + m.income, 0);
+      const e = mos.reduce((s, m) => s + m.expense, 0);
+      return { id: d.b.id, name: (d.b.name || "").replace(/^V-?CUT\s*/i, ""), n: i - e, i, e };
+    })
     .sort((a, b) => b.n - a.n);
   if (rows.length === 0) return null;
 
@@ -2826,7 +2834,7 @@ function BranchPLChart({ branchData = [], branchMonthly = new Map() }) {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12, marginBottom: 14 }}>
         <div>
           <div style={{ fontSize: 11, fontWeight: 800, color: "var(--accent)", textTransform: "uppercase", letterSpacing: 2 }}>Branch Profit / Loss</div>
-          <div style={{ fontSize: 10, color: "var(--text3)", marginTop: 2 }}>Full Net P&L per branch · this period</div>
+          <div style={{ fontSize: 10, color: "var(--text3)", marginTop: 2 }}>Net P&L per branch · business months only</div>
         </div>
         <div style={{ display: "flex", gap: 20, alignItems: "center", flexWrap: "wrap" }}>
           <div style={{ textAlign: "right" }}>
@@ -2910,7 +2918,7 @@ function BranchPLChart({ branchData = [], branchMonthly = new Map() }) {
               <div style={{ display: "grid", gridTemplateColumns: "34px 1fr 1fr 1fr", gap: "0 8px", fontSize: 11, alignItems: "baseline", marginTop: 5, paddingTop: 5, borderTop: "1px dashed rgba(255,255,255,0.12)", fontWeight: 800 }}>
                 <span style={{ color: "var(--text2)" }}>Total</span>
                 <span style={{ textAlign: "right", color: "var(--green)" }}>{short(r.i)}</span>
-                <span style={{ textAlign: "right", color: "var(--red)" }}>{short(r.i - r.n)}</span>
+                <span style={{ textAlign: "right", color: "var(--red)" }}>{short(r.e)}</span>
                 <span style={{ textAlign: "right", color: r.n >= 0 ? "var(--green)" : "var(--red)" }}>{short(r.n)}</span>
               </div>
             </div>
