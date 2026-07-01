@@ -214,6 +214,11 @@ export default function DashboardPage() {
   // `${branchId}|${mIdx}` → that branch's operating cost that month (for the
   // Monthly Expense chart's per-branch hover breakdown).
   const monthlyExpenseByBranch = new Map();
+  // branchId → [{ label, income, expense, net }] for months the branch had
+  // BUSINESS (income > 0). Feeds the Branch P&L chart's month-wise hover popup.
+  // Months with cost but zero income are skipped on purpose.
+  const branchMonthlyPL = new Map();
+  const _MONS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   const _gstPct = globalSettings?.gst_pct || 0;
   for (let m = 0; m < 12; m++) {
     const mPrefix = `${filterYear}-${String(m + 1).padStart(2, '0')}`;
@@ -235,6 +240,11 @@ export default function DashboardPage() {
       const exp = vInc + vMat + vOther + fixed + salary + (online * _gstPct / 100);
       if (exp > 0) monthlyExpenseByBranch.set(`${b.id}|${m}`, exp);
       monthlyNetExpense[m] += exp;
+      const income = bEntries.reduce((s, e) => s + (e.online || 0) + (e.cash || 0) + (e.staff_billing || []).reduce((ss, sb) => ss + (sb.material || 0), 0), 0);
+      if (income > 0) {
+        if (!branchMonthlyPL.has(b.id)) branchMonthlyPL.set(b.id, []);
+        branchMonthlyPL.get(b.id).push({ label: _MONS[m], income, expense: exp, net: income - exp });
+      }
     });
   }
 
@@ -1260,7 +1270,7 @@ export default function DashboardPage() {
 
       {/* Branch-wise profit / loss — diverging bars, this period */}
       {isAdmin && (dashView === "all" || dashView === "shop") && branchData.length > 0 && (
-        <BranchPLChart branchData={branchData} />
+        <BranchPLChart branchData={branchData} branchMonthly={branchMonthlyPL} />
       )}
 
       {/* Daily material consumption bar chart — respects the global
@@ -2793,7 +2803,7 @@ function DailyBusinessChart({ entries, branches = [], filterYear, filterMonth })
 // Branch-wise Profit / Loss — one diverging bar per branch for the selected
 // period. Profit rises green above the zero line, loss drops red below, sorted
 // most-profitable first. Hover shows income, expense, and net.
-function BranchPLChart({ branchData = [] }) {
+function BranchPLChart({ branchData = [], branchMonthly = new Map() }) {
   const [hover, setHover] = useState(null);
   const rows = branchData
     .filter(d => d && d.b)
@@ -2872,13 +2882,31 @@ function BranchPLChart({ branchData = [] }) {
         </div>
         {hover && (() => {
           const r = hover.r;
-          const exp = r.i - r.n;
+          const months = branchMonthly.get(r.id) || [];
+          const TIP_W = 296;
+          const left = Math.min(LEFT + hover.i * (BAR_W + GAP) + BAR_W + 12, Math.max(4, W - TIP_W - 4));
+          const short = (v) => { const a = Math.abs(v); return (v < 0 ? "-" : "") + (a >= 100000 ? `${(a / 100000).toFixed(1)}L` : a >= 1000 ? `${Math.round(a / 1000)}k` : Math.round(a)); };
           return (
-            <div style={{ position: "absolute", left: Math.min(LEFT + hover.i * (BAR_W + GAP) + BAR_W + 12, W - 210), top: 4, pointerEvents: "none", width: 196, background: "linear-gradient(160deg, rgba(18,22,30,0.98), rgba(12,14,20,0.98))", border: `1px solid ${r.n >= 0 ? "rgba(74,222,128,0.45)" : "rgba(248,113,113,0.45)"}`, borderRadius: 10, padding: "10px 12px", fontSize: 11, zIndex: 5, boxShadow: "0 10px 34px rgba(0,0,0,0.65)" }}>
-              <div style={{ fontSize: 13, fontWeight: 800, color: "var(--text)", marginBottom: 8, paddingBottom: 6, borderBottom: "1px solid rgba(255,255,255,0.08)" }}>{r.name}</div>
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginBottom: 3 }}><span style={{ color: "var(--text3)" }}>Income</span><span style={{ fontWeight: 700, color: "var(--green)" }}>{INR(r.i)}</span></div>
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginBottom: 3 }}><span style={{ color: "var(--text3)" }}>Expense</span><span style={{ fontWeight: 700, color: "var(--red)" }}>{INR(exp)}</span></div>
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginTop: 5, paddingTop: 5, borderTop: "1px dashed rgba(255,255,255,0.1)" }}><span style={{ color: "var(--text2)", fontWeight: 700 }}>Net P&L</span><span style={{ fontWeight: 900, color: r.n >= 0 ? "var(--green)" : "var(--red)" }}>{INR(r.n)}</span></div>
+            <div style={{ position: "absolute", left, top: 4, pointerEvents: "none", width: TIP_W, background: "linear-gradient(160deg, rgba(18,22,30,0.98), rgba(12,14,20,0.98))", border: `1px solid ${r.n >= 0 ? "rgba(74,222,128,0.45)" : "rgba(248,113,113,0.45)"}`, borderRadius: 10, padding: "10px 12px", fontSize: 11, zIndex: 5, boxShadow: "0 10px 34px rgba(0,0,0,0.65)" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8, paddingBottom: 6, borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
+                <span style={{ fontSize: 13, fontWeight: 800, color: "var(--text)" }}>{r.name}</span>
+                <span style={{ fontSize: 13, fontWeight: 900, color: r.n >= 0 ? "var(--green)" : "var(--red)" }}>{INR(r.n)}</span>
+              </div>
+              {/* Month-wise rows — only months with business (income > 0). */}
+              <div style={{ display: "grid", gridTemplateColumns: "34px 1fr 1fr 1fr", gap: "2px 8px", fontSize: 9, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 3 }}>
+                <span>Mon</span><span style={{ textAlign: "right" }}>Biz</span><span style={{ textAlign: "right" }}>Exp</span><span style={{ textAlign: "right" }}>Net</span>
+              </div>
+              <div style={{ maxHeight: 220, overflow: "hidden", display: "flex", flexDirection: "column", gap: 2 }}>
+                {months.length === 0 && <div style={{ fontSize: 10.5, color: "var(--text3)", fontStyle: "italic" }}>No business months.</div>}
+                {months.map(mo => (
+                  <div key={mo.label} style={{ display: "grid", gridTemplateColumns: "34px 1fr 1fr 1fr", gap: "0 8px", fontSize: 10.5, alignItems: "baseline" }}>
+                    <span style={{ color: "var(--text2)", fontWeight: 700 }}>{mo.label}</span>
+                    <span style={{ textAlign: "right", color: "var(--green)" }}>{short(mo.income)}</span>
+                    <span style={{ textAlign: "right", color: "var(--red)" }}>{short(mo.expense)}</span>
+                    <span style={{ textAlign: "right", fontWeight: 800, color: mo.net >= 0 ? "var(--green)" : "var(--red)" }}>{short(mo.net)}</span>
+                  </div>
+                ))}
+              </div>
             </div>
           );
         })()}
