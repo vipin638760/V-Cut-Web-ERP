@@ -207,6 +207,118 @@ function BranchCollectionChart({ periodEntries, filterMode, filterYear, filterMo
   );
 }
 
+// Monthly EXPENSE bar chart for a single branch (year view). Twin of the
+// Collection Trend chart but red bars = operating cost, with a per-category
+// breakdown on hover (Salary / Incentives / Material / Rent / Elec / WiFi /
+// Other / GST). Fed straight from breakdownStats so it matches the P&L table.
+function BranchExpenseChart({ breakdownStats = [], filterYear }) {
+  const [hover, setHover] = useState(null);
+  const buckets = breakdownStats.map(s => {
+    const exp = (s.income || 0) - (s.pl || 0);
+    const rent = (s.shopRent || 0) + (s.roomRent || 0);
+    const known = (s.salary || 0) + (s.incentives || 0) + rent + (s.elec || 0) + (s.wifi || 0) + (s.others || 0) + (s.gst || 0);
+    const material = Math.max(0, exp - known);
+    return {
+      label: s.label, key: s.monthPrefix || s.label, value: exp,
+      cats: [
+        ["Salary", s.salary || 0, "var(--blue, #60a5fa)"],
+        ["Incentives", s.incentives || 0, "var(--orange)"],
+        ["Material", material, "var(--accent)"],
+        ["Rent", rent, "#c084fc"],
+        ["Electricity", s.elec || 0, "var(--gold)"],
+        ["WiFi", s.wifi || 0, "var(--blue, #60a5fa)"],
+        ["Other / Petrol", s.others || 0, "var(--text3)"],
+        ["GST Est.", s.gst || 0, "var(--red)"],
+      ].filter(c => c[1] > 0),
+    };
+  });
+
+  const max = Math.max(1, ...buckets.map(b => b.value));
+  const total = buckets.reduce((s, b) => s + b.value, 0);
+  const active = buckets.filter(b => b.value > 0).length;
+  const avg = active ? Math.round(total / active) : 0;
+  const worstIdx = buckets.reduce((w, b, i) => (b.value > buckets[w].value ? i : w), 0);
+
+  const H = 180, BAR_W = 42, GAP = 6, LEFT = 44, PAD_TOP = 14, PAD_BOTTOM = 28;
+  const W = LEFT + buckets.length * (BAR_W + GAP);
+
+  return (
+    <Card style={{ padding: 16, marginBottom: 12 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 10, marginBottom: 10 }}>
+        <div>
+          <div style={{ fontSize: 11, fontWeight: 800, color: "var(--red)", textTransform: "uppercase", letterSpacing: 1.5 }}>💸 Expense Trend</div>
+          <div style={{ fontSize: 10, color: "var(--text3)", marginTop: 2 }}>Monthly operating cost · hover for split</div>
+        </div>
+        <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+          <div style={{ textAlign: "right" }}>
+            <div style={{ fontSize: 9, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase" }}>Total</div>
+            <div style={{ fontSize: 14, fontWeight: 800, color: "var(--red)" }}>{INR(total)}</div>
+          </div>
+          <div style={{ textAlign: "right" }}>
+            <div style={{ fontSize: 9, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase" }}>Monthly Avg</div>
+            <div style={{ fontSize: 14, fontWeight: 800, color: "var(--orange)" }}>{INR(avg)}</div>
+          </div>
+          <div style={{ textAlign: "right" }}>
+            <div style={{ fontSize: 9, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase" }}>Highest</div>
+            <div style={{ fontSize: 14, fontWeight: 800, color: "var(--red)" }}>{buckets[worstIdx]?.value > 0 ? `${buckets[worstIdx].label} · ${INR(buckets[worstIdx].value)}` : "—"}</div>
+          </div>
+        </div>
+      </div>
+      {total === 0 ? (
+        <div style={{ height: H, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text3)", fontStyle: "italic", fontSize: 12 }}>No expense recorded for this period.</div>
+      ) : (
+        <div style={{ position: "relative", overflowX: "auto" }}>
+          <svg width={W} height={H + PAD_TOP + PAD_BOTTOM} style={{ display: "block" }}>
+            <defs>
+              <linearGradient id="bexp-red" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="rgba(251,113,133,0.9)" /><stop offset="100%" stopColor="rgba(225,29,72,0.4)" /></linearGradient>
+            </defs>
+            {Array.from({ length: 5 }, (_, i) => {
+              const y = PAD_TOP + (1 - i / 4) * H;
+              const v = Math.round(max * (i / 4));
+              return (
+                <g key={i}>
+                  <line x1={LEFT} y1={y} x2={W} y2={y} stroke="rgba(255,255,255,0.05)" />
+                  <text x={LEFT - 5} y={y + 3} fontSize={9} fill="var(--text3)" textAnchor="end">{v >= 100000 ? `${(v / 100000).toFixed(1)}L` : v >= 1000 ? `${Math.round(v / 1000)}k` : v}</text>
+                </g>
+              );
+            })}
+            {buckets.map((b, i) => {
+              const x = LEFT + i * (BAR_W + GAP);
+              const h = b.value > 0 ? (b.value / max) * H : 2;
+              const y = PAD_TOP + H - h;
+              const isWorst = i === worstIdx && b.value > 0;
+              return (
+                <g key={i}>
+                  <rect x={x} y={y} width={BAR_W} height={h} rx={4} fill="url(#bexp-red)"
+                    onMouseEnter={() => setHover({ i, b })} onMouseLeave={() => setHover(null)}
+                    opacity={hover && hover.i !== i ? 0.45 : 1} style={{ transition: "opacity .15s" }} />
+                  <text x={x + BAR_W / 2} y={PAD_TOP + H + 14} fontSize={9} fill={isWorst ? "var(--red)" : "var(--text3)"} textAnchor="middle" fontWeight={isWorst ? 800 : 600}>{b.label}</text>
+                </g>
+              );
+            })}
+          </svg>
+          {hover && (
+            <div style={{ position: "absolute", left: Math.min(LEFT + hover.i * (BAR_W + GAP) + BAR_W + 10, W - 190), top: 4, pointerEvents: "none", width: 180, background: "var(--bg4)", border: "1px solid rgba(248,113,113,0.4)", borderRadius: 8, padding: "8px 10px", fontSize: 11, zIndex: 3, boxShadow: "0 6px 20px rgba(0,0,0,0.5)" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
+                <span style={{ fontSize: 12, fontWeight: 800, color: "var(--text)" }}>{hover.b.label}</span>
+                <span style={{ fontSize: 13, fontWeight: 900, color: "var(--red)" }}>{INR(hover.b.value)}</span>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                {hover.b.cats.map(([label, val, col]) => (
+                  <div key={label} style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 10.5 }}>
+                    <span style={{ color: "var(--text2)" }}>{label}</span>
+                    <span style={{ fontWeight: 700, color: col }}>{INR(val)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </Card>
+  );
+}
+
 // Stacked bar chart — per-day (or per-month) sale split by staff member.
 // Value = sb.billing + sb.material (service sale + material sale), coloured by staff.
 function BranchStaffSalesChart({ periodEntries, branchStaff, allStaff, filterMode, filterYear, filterMonth, endMonth, onDayClick }) {
@@ -2277,6 +2389,7 @@ export default function BranchesPage() {
           return (<>
             <BranchCollectionChart periodEntries={periodEntries} filterMode={filterMode} filterYear={filterYear} filterMonth={filterMonth} endMonth={endMonth} onDayClick={openDay}
               monthlyExpense={Object.fromEntries(breakdownStats.filter(s => s.monthPrefix).map(s => [s.monthPrefix, (s.income || 0) - (s.pl || 0)]))} />
+            {filterMode === "year" && isAdmin && <BranchExpenseChart breakdownStats={breakdownStats} filterYear={filterYear} />}
             <BranchStaffSalesChart periodEntries={periodEntries} branchStaff={branchStaff} allStaff={staff} filterMode={filterMode} filterYear={filterYear} filterMonth={filterMonth} endMonth={endMonth} onDayClick={openDay} />
           </>);
         })()}
