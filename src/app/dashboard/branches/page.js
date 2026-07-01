@@ -35,7 +35,7 @@ const NOW = new Date();
 
 // Inline SVG chart — branch-scoped daily/monthly collection (cash + online + mat sale).
 // Uses the same bar-chart idiom as dashboard's DailyBusinessChart but branch-only + supports yearly mode.
-function BranchCollectionChart({ periodEntries, filterMode, filterYear, filterMonth, endMonth, onDayClick }) {
+function BranchCollectionChart({ periodEntries, filterMode, filterYear, filterMonth, endMonth, onDayClick, monthlyExpense = {} }) {
   const [hover, setHover] = useState(null);
   const isMonth = filterMode === "month";
 
@@ -63,7 +63,10 @@ function BranchCollectionChart({ periodEntries, filterMode, filterYear, filterMo
     }
   }
 
-  const max = Math.max(1, ...buckets.map(b => b.value));
+  // Year mode: per-month expense (Operating Cost) for the red overlay line.
+  const bucketExp = buckets.map(b => isMonth ? 0 : (Number(monthlyExpense[b.key]) || 0));
+  const totalExp = bucketExp.reduce((s, v) => s + v, 0);
+  const max = Math.max(1, ...buckets.map(b => b.value), ...bucketExp);
   const total = buckets.reduce((s, b) => s + b.value, 0);
   const working = buckets.filter(b => b.value > 0).length;
   const avg = working ? Math.round(total / working) : 0;
@@ -89,6 +92,14 @@ function BranchCollectionChart({ periodEntries, filterMode, filterYear, filterMo
             <div style={{ fontSize: 9, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase" }}>Total</div>
             <div style={{ fontSize: 14, fontWeight: 800, color: "var(--green)" }}>{INR(total)}</div>
           </div>
+          {!isMonth && totalExp > 0 && (
+            <div style={{ textAlign: "right" }}>
+              <div style={{ fontSize: 9, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", display: "flex", alignItems: "center", gap: 4, justifyContent: "flex-end" }}>
+                <span style={{ width: 10, height: 2, background: "var(--red)", display: "inline-block", borderRadius: 1 }} />Expense
+              </div>
+              <div style={{ fontSize: 14, fontWeight: 800, color: "var(--red)" }}>{INR(totalExp)}</div>
+            </div>
+          )}
           <div style={{ textAlign: "right" }}>
             <div style={{ fontSize: 9, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase" }}>{isMonth ? "Daily Avg" : "Monthly Avg"}</div>
             <div style={{ fontSize: 14, fontWeight: 800, color: "var(--blue, #60a5fa)" }}>{INR(avg)}</div>
@@ -134,6 +145,23 @@ function BranchCollectionChart({ periodEntries, filterMode, filterYear, filterMo
                 </g>
               );
             })}
+            {/* Year mode: per-month EXPENSE overlay (red line + dots). */}
+            {!isMonth && (() => {
+              const pts = bucketExp
+                .map((e, i) => ({ i, e, x: LEFT + i * (BAR_W + GAP) + BAR_W / 2, y: PAD_TOP + H - (e / max) * H }))
+                .filter(p => p.e > 0);
+              if (pts.length === 0) return null;
+              const d = pts.map((p, k) => `${k === 0 ? "M" : "L"}${p.x},${p.y}`).join(" ");
+              return (
+                <g>
+                  {pts.length > 1 && <path d={d} fill="none" stroke="var(--red)" strokeWidth={2} strokeLinejoin="round" opacity={0.9} />}
+                  {pts.map(p => (
+                    <circle key={p.i} cx={p.x} cy={p.y} r={3} fill="var(--red)" stroke="var(--bg4)" strokeWidth={1.5}
+                      opacity={hover && hover.i !== p.i ? 0.4 : 1} />
+                  ))}
+                </g>
+              );
+            })()}
             <defs>
               <linearGradient id="bcol-blue" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stopColor="rgba(96,165,250,0.85)" />
@@ -154,7 +182,20 @@ function BranchCollectionChart({ periodEntries, filterMode, filterYear, filterMo
               padding: "6px 10px", fontSize: 11, zIndex: 3, boxShadow: "0 6px 20px rgba(0,0,0,0.5)",
             }}>
               <div style={{ fontSize: 9, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase" }}>{hover.b.key}</div>
-              <div style={{ fontSize: 13, fontWeight: 800, color: "var(--green)", marginTop: 2 }}>{INR(hover.b.value)}</div>
+              <div style={{ fontSize: 9, color: "var(--green)", fontWeight: 700, marginTop: 3, textTransform: "uppercase" }}>Income</div>
+              <div style={{ fontSize: 13, fontWeight: 800, color: "var(--green)" }}>{INR(hover.b.value)}</div>
+              {!isMonth && (bucketExp[hover.i] || 0) > 0 && (() => {
+                const exp = bucketExp[hover.i] || 0;
+                const net = hover.b.value - exp;
+                return (
+                  <>
+                    <div style={{ fontSize: 9, color: "var(--red)", fontWeight: 700, marginTop: 4, textTransform: "uppercase" }}>Expense</div>
+                    <div style={{ fontSize: 12, fontWeight: 800, color: "var(--red)" }}>{INR(exp)}</div>
+                    <div style={{ fontSize: 9, color: net >= 0 ? "var(--green)" : "var(--red)", fontWeight: 700, marginTop: 4, textTransform: "uppercase" }}>Net P&L</div>
+                    <div style={{ fontSize: 12, fontWeight: 800, color: net >= 0 ? "var(--green)" : "var(--red)" }}>{INR(net)}</div>
+                  </>
+                );
+              })()}
               {isMonth && hover.b.value > 0 && onDayClick && (
                 <div style={{ fontSize: 9, color: "var(--blue, #60a5fa)", marginTop: 3, fontWeight: 700 }}>Click → open Daily Entry</div>
               )}
@@ -2234,7 +2275,8 @@ export default function BranchesPage() {
             router.push(`/dashboard/entry?${params.toString()}`);
           };
           return (<>
-            <BranchCollectionChart periodEntries={periodEntries} filterMode={filterMode} filterYear={filterYear} filterMonth={filterMonth} endMonth={endMonth} onDayClick={openDay} />
+            <BranchCollectionChart periodEntries={periodEntries} filterMode={filterMode} filterYear={filterYear} filterMonth={filterMonth} endMonth={endMonth} onDayClick={openDay}
+              monthlyExpense={Object.fromEntries(breakdownStats.filter(s => s.monthPrefix).map(s => [s.monthPrefix, (s.income || 0) - (s.pl || 0)]))} />
             <BranchStaffSalesChart periodEntries={periodEntries} branchStaff={branchStaff} allStaff={staff} filterMode={filterMode} filterYear={filterYear} filterMonth={filterMonth} endMonth={endMonth} onDayClick={openDay} />
           </>);
         })()}

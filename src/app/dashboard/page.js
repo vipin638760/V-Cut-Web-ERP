@@ -205,6 +205,31 @@ export default function DashboardPage() {
   const staffByIdMap = new Map(staff.map(s => [s.id, s]));
   const branchesByIdMap = new Map(branches.map(b => [b.id, b]));
 
+  // Per-month network EXPENSE (Jan..Dec of filterYear) for the yearly
+  // Monthly-Business chart's expense overlay. Mirrors the Operating Cost
+  // formula — variable (incentive + material + other/petrol) + fixed + salary +
+  // GST est — so the overlay agrees with the KPI. Only months with entries get
+  // a value (empty/future months stay 0, matching the income bars).
+  const monthlyNetExpense = new Array(12).fill(0);
+  for (let m = 0; m < 12; m++) {
+    const mPrefix = `${filterYear}-${String(m + 1).padStart(2, '0')}`;
+    const mEntries = entries.filter(e => e.date && e.date.startsWith(mPrefix));
+    if (mEntries.length === 0) continue;
+    const releasesM = incentiveReleases.filter(r => (r.period_from || (r.released_at || "").slice(0, 10) || "").startsWith(mPrefix));
+    const vInc = computeIncentiveExpense(mEntries, staffByIdMap, releasesM, branchesByIdMap, globalSettings);
+    const vMatAlloc = allocsTotal(materialAllocations.filter(a => (a.date || (a.transferred_at || "").slice(0, 10) || "").startsWith(mPrefix)));
+    const vMatLump = mEntries.reduce((s, e) => s + (Number(e.mat_expense) || 0), 0);
+    const vMat = (matUseAllocations ? vMatAlloc : 0) + (matUseLumpsum ? vMatLump : 0);
+    const vOther = mEntries.reduce((s, e) => s + (e.others || 0) + (e.petrol || 0), 0);
+    let fixed = 0;
+    branches.forEach(b => { const mf = getMonthlyFixed(b, mPrefix, monthlyExpenses, fixedExpenses); fixed += mf.shop_rent + mf.room_rent + mf.wifi + mf.shop_elec + mf.room_elec; });
+    let salary = 0;
+    staff.forEach(st => { salary += proRataSalary(st, mPrefix, branches, salHistory, staff, globalSettings, leaves, entries); });
+    const online = mEntries.reduce((s, e) => s + (e.online || 0), 0);
+    const gst = online * (globalSettings?.gst_pct || 0) / 100;
+    monthlyNetExpense[m] = vInc + vMat + vOther + fixed + salary + gst;
+  }
+
   // Network totals are derived from branchData below so Operating Cost =
   // Full Net P&L's expense side: vInc + vMatE + vOther + fixed + actual
   // salary + GST estimate. Earlier these were computed ad-hoc with
@@ -1217,7 +1242,7 @@ export default function DashboardPage() {
 
       {/* Monthly business bar chart — year mode only (12 bars instead of 365) */}
       {filterMode === "year" && (dashView === "all" || dashView === "shop") && (
-        <MonthlyBusinessChart entries={entries} branches={branches} filterYear={filterYear} />
+        <MonthlyBusinessChart entries={entries} branches={branches} filterYear={filterYear} monthlyExpense={monthlyNetExpense} />
       )}
 
       {/* Daily material consumption bar chart — respects the global
@@ -2750,9 +2775,10 @@ function DailyBusinessChart({ entries, branches = [], filterYear, filterMonth })
 // Year-mode twin of DailyBusinessChart — 12 bars, one per month, with the same
 // stacked cash / non-cash split and a hover popup that breaks down Online,
 // Cash, and Material for quick month-to-month verification.
-function MonthlyBusinessChart({ entries, branches = [], filterYear }) {
+function MonthlyBusinessChart({ entries, branches = [], filterYear, monthlyExpense = [] }) {
   const [hover, setHover] = useState(null);
   const [showAvg, setShowAvg] = useState(false);
+  const byMoExp = new Array(12).fill(0).map((_, i) => Number(monthlyExpense[i]) || 0);
   const NOW = new Date();
   const currentYm = NOW.getFullYear() === filterYear ? NOW.getMonth() : 11;
 
@@ -2780,8 +2806,9 @@ function MonthlyBusinessChart({ entries, branches = [], filterYear }) {
     }
   });
 
-  const max = Math.max(1, ...byMo);
+  const max = Math.max(1, ...byMo, ...byMoExp);
   const totalBusiness = byMo.reduce((s, v) => s + v, 0);
+  const totalExpense = byMoExp.reduce((s, v) => s + v, 0);
   const totalCash = byMoCash.reduce((s, v) => s + v, 0);
   const totalNonCash = byMoNonCash.reduce((s, v) => s + v, 0);
   // Active months = months with any entries — used as avg denominator so a
@@ -2820,6 +2847,12 @@ function MonthlyBusinessChart({ entries, branches = [], filterYear }) {
               <span style={{ color: "var(--text3)", margin: "0 4px" }}>·</span>
               <span style={{ color: "var(--blue)" }}>{INR(totalNonCash)}</span>
             </div>
+          </div>
+          <div style={{ textAlign: "right" }}>
+            <div style={{ fontSize: 9, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, fontWeight: 700, display: "flex", alignItems: "center", gap: 4, justifyContent: "flex-end" }}>
+              <span style={{ width: 10, height: 2, background: "var(--red)", display: "inline-block", borderRadius: 1 }} />Expense
+            </div>
+            <div style={{ fontSize: 15, fontWeight: 800, color: "var(--red)" }}>{INR(totalExpense)}</div>
           </div>
           <div style={{ textAlign: "right" }}>
             <div style={{ fontSize: 9, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, fontWeight: 700 }}>Monthly Avg</div>
@@ -2890,7 +2923,7 @@ function MonthlyBusinessChart({ entries, branches = [], filterYear }) {
               return (
                 <g key={i}
                   onMouseEnter={() => hasValue && setHover({
-                    i, v, cash: byMoCash[i], online: byMoOnline[i], mat: byMoMat[i], nonCash: byMoNonCash[i],
+                    i, v, exp: byMoExp[i], cash: byMoCash[i], online: byMoOnline[i], mat: byMoMat[i], nonCash: byMoNonCash[i],
                     byBranch: branches
                       .map(b => ({ id: b.id, name: (b.name || "").replace("V-CUT ", ""), v: byMoBranch.get(`${b.id}|${i}`) || 0 }))
                       .sort((a, b) => b.v - a.v),
@@ -2947,6 +2980,24 @@ function MonthlyBusinessChart({ entries, branches = [], filterYear }) {
                 </g>
               );
             })}
+            {/* Per-month EXPENSE overlay — red line + dots so income bars vs
+                monthly operating cost read at a glance in year view. */}
+            {(() => {
+              const pts = byMoExp
+                .map((e, i) => ({ i, e, x: LEFT + i * (BAR_W + GAP) + BAR_W / 2, y: PAD_TOP + H - (e / max) * H }))
+                .filter(p => p.e > 0);
+              if (pts.length === 0) return null;
+              const d = pts.map((p, k) => `${k === 0 ? "M" : "L"}${p.x},${p.y}`).join(" ");
+              return (
+                <g>
+                  {pts.length > 1 && <path d={d} fill="none" stroke="var(--red)" strokeWidth={2} strokeLinejoin="round" opacity={0.9} />}
+                  {pts.map(p => (
+                    <circle key={p.i} cx={p.x} cy={p.y} r={3.2} fill="var(--red)" stroke="var(--bg4)" strokeWidth={1.5}
+                      opacity={hover && hover.i !== p.i ? 0.4 : 1} />
+                  ))}
+                </g>
+              );
+            })()}
             {showAvg && avg > 0 && (() => {
               const yAvg = PAD_TOP + H - (avg / max) * H;
               return (
@@ -2987,8 +3038,19 @@ function MonthlyBusinessChart({ entries, branches = [], filterYear }) {
                     <div style={{ fontSize: 16, fontWeight: 800, color: "var(--text)", fontFamily: "var(--font-headline, var(--font-outfit))" }}>{MONTHS_SHORT[hover.i]}</div>
                   </div>
                   <div style={{ textAlign: "right" }}>
-                    <div style={{ fontSize: 9, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.2, fontWeight: 700 }}>Total</div>
+                    <div style={{ fontSize: 9, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.2, fontWeight: 700 }}>Income</div>
                     <div style={{ fontSize: 18, fontWeight: 900, color: "var(--green)", fontFamily: "var(--font-headline, var(--font-outfit))" }}>{INR(hover.v)}</div>
+                  </div>
+                </div>
+                {/* Expense + Net for the month (year view). Net = income − expense. */}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 10 }}>
+                  <div style={{ padding: "6px 8px", borderRadius: 8, background: "rgba(248,113,113,0.10)", border: "1px solid rgba(248,113,113,0.3)" }}>
+                    <div style={{ fontSize: 8.5, color: "var(--red)", textTransform: "uppercase", letterSpacing: 1, fontWeight: 800 }}>Expense</div>
+                    <div style={{ fontSize: 12.5, fontWeight: 800, color: "var(--red)" }}>{INR(hover.exp || 0)}</div>
+                  </div>
+                  <div style={{ padding: "6px 8px", borderRadius: 8, background: (hover.v - (hover.exp || 0)) >= 0 ? "rgba(74,222,128,0.10)" : "rgba(248,113,113,0.10)", border: `1px solid ${(hover.v - (hover.exp || 0)) >= 0 ? "rgba(74,222,128,0.3)" : "rgba(248,113,113,0.3)"}` }}>
+                    <div style={{ fontSize: 8.5, color: (hover.v - (hover.exp || 0)) >= 0 ? "var(--green)" : "var(--red)", textTransform: "uppercase", letterSpacing: 1, fontWeight: 800 }}>Net P&L</div>
+                    <div style={{ fontSize: 12.5, fontWeight: 800, color: (hover.v - (hover.exp || 0)) >= 0 ? "var(--green)" : "var(--red)" }}>{INR(hover.v - (hover.exp || 0))}</div>
                   </div>
                 </div>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, marginBottom: 10 }}>
