@@ -3,7 +3,7 @@ import { useEffect, useState, useRef } from "react";
 import { collection, onSnapshot, query, orderBy, where, getDocs, deleteDoc, doc, addDoc, updateDoc, writeBatch } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
-import { INR, branchIncomeInPeriod, makeFilterPrefix, periodLabel, proRataSalary, salaryByBranchForMonth, getStaffSalaryForMonth, staffLeavesInMonth, staffStatusForMonth, parseLocalDate, MASK, effectiveCashInHand, computeIncentiveExpense, getMonthlyFixed, effectiveBranchOnDate } from "@/lib/calculations";
+import { INR, branchIncomeInPeriod, makeFilterPrefix, periodLabel, proRataSalary, salaryByBranchForMonth, branchSalaryShare, getStaffSalaryForMonth, staffLeavesInMonth, staffStatusForMonth, parseLocalDate, MASK, effectiveCashInHand, computeIncentiveExpense, getMonthlyFixed, effectiveBranchOnDate } from "@/lib/calculations";
 import { Icon, IconBtn, Pill, Card, PeriodWidget, ToggleGroup, TH, TD, Modal, SearchSelect, BranchEmployeeSearch, useConfirm, useToast } from "@/components/ui";
 import { useRouter } from "next/navigation";
 import VLoader from "@/components/VLoader";
@@ -211,7 +211,7 @@ function BranchCollectionChart({ periodEntries, filterMode, filterYear, filterMo
 // Collection Trend chart but red bars = operating cost, with a per-category
 // breakdown on hover (Salary / Incentives / Material / Rent / Elec / WiFi /
 // Other / GST). Fed straight from breakdownStats so it matches the P&L table.
-function BranchExpenseChart({ breakdownStats = [], filterYear }) {
+function BranchExpenseChart({ breakdownStats = [], filterYear, salaryBreakup = {} }) {
   const [hover, setHover] = useState(null);
   const buckets = breakdownStats.map(s => {
     const exp = (s.income || 0) - (s.pl || 0);
@@ -270,7 +270,10 @@ function BranchExpenseChart({ breakdownStats = [], filterYear }) {
         <div style={{ position: "relative", overflowX: "auto" }}>
           <svg width={W} height={H + PAD_TOP + PAD_BOTTOM} style={{ display: "block" }}>
             <defs>
-              <linearGradient id="bexp-red" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="rgba(251,113,133,0.9)" /><stop offset="100%" stopColor="rgba(225,29,72,0.4)" /></linearGradient>
+              <linearGradient id="bexp-red" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#fb7185" /><stop offset="100%" stopColor="rgba(225,29,72,0.45)" /></linearGradient>
+              <linearGradient id="bexp-hi" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#fca5a5" /><stop offset="100%" stopColor="#dc2626" stopOpacity="0.7" /></linearGradient>
+              <linearGradient id="bexp-sheen" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="rgba(255,255,255,0.28)" /><stop offset="70%" stopColor="rgba(255,255,255,0)" /></linearGradient>
+              <filter id="bexp-glow" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="3.5" /></filter>
             </defs>
             {Array.from({ length: 5 }, (_, i) => {
               const y = PAD_TOP + (1 - i / 4) * H;
@@ -288,31 +291,51 @@ function BranchExpenseChart({ breakdownStats = [], filterYear }) {
               const y = PAD_TOP + H - h;
               const isWorst = i === worstIdx && b.value > 0;
               return (
-                <g key={i}>
-                  <rect x={x} y={y} width={BAR_W} height={h} rx={4} fill="url(#bexp-red)"
-                    onMouseEnter={() => setHover({ i, b })} onMouseLeave={() => setHover(null)}
-                    opacity={hover && hover.i !== i ? 0.45 : 1} style={{ transition: "opacity .15s" }} />
+                <g key={i} onMouseEnter={() => b.value > 0 && setHover({ i, b })} onMouseLeave={() => setHover(null)}
+                  style={{ cursor: b.value > 0 ? "pointer" : "default", transition: "opacity .15s" }}
+                  opacity={hover && hover.i !== i ? 0.4 : 1}>
+                  {isWorst && b.value > 0 && (
+                    <rect x={x - 3} y={y - 3} width={BAR_W + 6} height={h + 6} rx={6} fill="rgba(248,113,113,0.35)" filter="url(#bexp-glow)" />
+                  )}
+                  <rect x={x} y={y} width={BAR_W} height={h} rx={4} fill={isWorst ? "url(#bexp-hi)" : "url(#bexp-red)"} />
+                  {b.value > 0 && <rect x={x} y={y} width={BAR_W} height={Math.min(h * 0.4, 16)} rx={4} fill="url(#bexp-sheen)" />}
                   <text x={x + BAR_W / 2} y={PAD_TOP + H + 14} fontSize={9} fill={isWorst ? "var(--red)" : "var(--text3)"} textAnchor="middle" fontWeight={isWorst ? 800 : 600}>{b.label}</text>
                 </g>
               );
             })}
           </svg>
-          {hover && (
-            <div style={{ position: "absolute", left: Math.min(LEFT + hover.i * (BAR_W + GAP) + BAR_W + 10, W - 190), top: 4, pointerEvents: "none", width: 180, background: "var(--bg4)", border: "1px solid rgba(248,113,113,0.4)", borderRadius: 8, padding: "8px 10px", fontSize: 11, zIndex: 3, boxShadow: "0 6px 20px rgba(0,0,0,0.5)" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
-                <span style={{ fontSize: 12, fontWeight: 800, color: "var(--text)" }}>{hover.b.label}</span>
-                <span style={{ fontSize: 13, fontWeight: 900, color: "var(--red)" }}>{INR(hover.b.value)}</span>
+          {hover && (() => {
+            const staffList = salaryBreakup[hover.b.key] || [];
+            return (
+            <div style={{ position: "absolute", left: Math.min(LEFT + hover.i * (BAR_W + GAP) + BAR_W + 10, W - 244), top: 4, pointerEvents: "none", width: 230, background: "linear-gradient(160deg, rgba(30,18,20,0.98), rgba(18,12,14,0.98))", border: "1px solid rgba(248,113,113,0.45)", borderRadius: 10, padding: "10px 12px", fontSize: 11, zIndex: 3, boxShadow: "0 10px 34px rgba(0,0,0,0.65)" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8, paddingBottom: 6, borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
+                <span style={{ fontSize: 13, fontWeight: 800, color: "var(--text)" }}>{hover.b.label} {filterYear}</span>
+                <span style={{ fontSize: 14, fontWeight: 900, color: "var(--red)" }}>{INR(hover.b.value)}</span>
               </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                 {hover.b.cats.map(([label, val, col]) => (
-                  <div key={label} style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 10.5 }}>
-                    <span style={{ color: "var(--text2)" }}>{label}</span>
-                    <span style={{ fontWeight: 700, color: col }}>{INR(val)}</span>
+                  <div key={label}>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 10.5 }}>
+                      <span style={{ color: "var(--text2)", fontWeight: 600 }}>{label}</span>
+                      <span style={{ fontWeight: 700, color: col }}>{INR(val)}</span>
+                    </div>
+                    {/* Admin-only per-staff salary breakup, indented under Salary. */}
+                    {label === "Salary" && staffList.length > 0 && (
+                      <div style={{ marginTop: 3, marginLeft: 8, paddingLeft: 8, borderLeft: "2px solid rgba(96,165,250,0.35)", display: "flex", flexDirection: "column", gap: 2 }}>
+                        {staffList.map(s => (
+                          <div key={s.name} style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 9.5 }}>
+                            <span style={{ color: "var(--text3)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.name}</span>
+                            <span style={{ fontWeight: 600, color: "var(--blue, #60a5fa)" }}>{INR(s.amt)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
             </div>
-          )}
+            );
+          })()}
         </div>
       )}
     </Card>
@@ -2389,7 +2412,18 @@ export default function BranchesPage() {
           return (<>
             <BranchCollectionChart periodEntries={periodEntries} filterMode={filterMode} filterYear={filterYear} filterMonth={filterMonth} endMonth={endMonth} onDayClick={openDay}
               monthlyExpense={Object.fromEntries(breakdownStats.filter(s => s.monthPrefix).map(s => [s.monthPrefix, (s.income || 0) - (s.pl || 0)]))} />
-            {filterMode === "year" && isAdmin && <BranchExpenseChart breakdownStats={breakdownStats} filterYear={filterYear} />}
+            {filterMode === "year" && isAdmin && (
+              <BranchExpenseChart breakdownStats={breakdownStats} filterYear={filterYear}
+                salaryBreakup={Object.fromEntries(breakdownStats.filter(s => s.monthPrefix).map(s => [
+                  s.monthPrefix,
+                  staff.map(st => {
+                    const share = branchSalaryShare(st.id, s.monthPrefix, b.id, entries, st.branch_id);
+                    if (!share) return null;
+                    const amt = Math.round(proRataSalary(st, s.monthPrefix, branches, salHistory, staff, globalSettings, leaves, entries) * share);
+                    return amt > 0 ? { name: st.name, amt } : null;
+                  }).filter(Boolean).sort((a, b) => b.amt - a.amt),
+                ]))} />
+            )}
             <BranchStaffSalesChart periodEntries={periodEntries} branchStaff={branchStaff} allStaff={staff} filterMode={filterMode} filterYear={filterYear} filterMonth={filterMonth} endMonth={endMonth} onDayClick={openDay} />
           </>);
         })()}
