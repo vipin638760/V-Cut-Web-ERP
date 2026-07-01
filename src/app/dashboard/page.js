@@ -211,23 +211,31 @@ export default function DashboardPage() {
   // GST est — so the overlay agrees with the KPI. Only months with entries get
   // a value (empty/future months stay 0, matching the income bars).
   const monthlyNetExpense = new Array(12).fill(0);
+  // `${branchId}|${mIdx}` → that branch's operating cost that month (for the
+  // Monthly Expense chart's per-branch hover breakdown).
+  const monthlyExpenseByBranch = new Map();
+  const _gstPct = globalSettings?.gst_pct || 0;
   for (let m = 0; m < 12; m++) {
     const mPrefix = `${filterYear}-${String(m + 1).padStart(2, '0')}`;
     const mEntries = entries.filter(e => e.date && e.date.startsWith(mPrefix));
     if (mEntries.length === 0) continue;
-    const releasesM = incentiveReleases.filter(r => (r.period_from || (r.released_at || "").slice(0, 10) || "").startsWith(mPrefix));
-    const vInc = computeIncentiveExpense(mEntries, staffByIdMap, releasesM, branchesByIdMap, globalSettings);
-    const vMatAlloc = allocsTotal(materialAllocations.filter(a => (a.date || (a.transferred_at || "").slice(0, 10) || "").startsWith(mPrefix)));
-    const vMatLump = mEntries.reduce((s, e) => s + (Number(e.mat_expense) || 0), 0);
-    const vMat = (matUseAllocations ? vMatAlloc : 0) + (matUseLumpsum ? vMatLump : 0);
-    const vOther = mEntries.reduce((s, e) => s + (e.others || 0) + (e.petrol || 0), 0);
-    let fixed = 0;
-    branches.forEach(b => { const mf = getMonthlyFixed(b, mPrefix, monthlyExpenses, fixedExpenses); fixed += mf.shop_rent + mf.room_rent + mf.wifi + mf.shop_elec + mf.room_elec; });
-    let salary = 0;
-    staff.forEach(st => { salary += proRataSalary(st, mPrefix, branches, salHistory, staff, globalSettings, leaves, entries); });
-    const online = mEntries.reduce((s, e) => s + (e.online || 0), 0);
-    const gst = online * (globalSettings?.gst_pct || 0) / 100;
-    monthlyNetExpense[m] = vInc + vMat + vOther + fixed + salary + gst;
+    const salMap = salaryByBranchForMonth(mPrefix, entries, branches, salHistory, staff, globalSettings, leaves);
+    branches.forEach(b => {
+      const bEntries = mEntries.filter(e => e.branch_id === b.id);
+      const releasesB = incentiveReleases.filter(r => r.branch_id === b.id && (r.period_from || (r.released_at || "").slice(0, 10) || "").startsWith(mPrefix));
+      const vInc = computeIncentiveExpense(bEntries, staffByIdMap, releasesB, branchesByIdMap, globalSettings);
+      const vMatAlloc = allocsTotal(materialAllocations.filter(a => a.branch_id === b.id && (a.date || (a.transferred_at || "").slice(0, 10) || "").startsWith(mPrefix)));
+      const vMatLump = bEntries.reduce((s, e) => s + (Number(e.mat_expense) || 0), 0);
+      const vMat = (matUseAllocations ? vMatAlloc : 0) + (matUseLumpsum ? vMatLump : 0);
+      const vOther = bEntries.reduce((s, e) => s + (e.others || 0) + (e.petrol || 0), 0);
+      const mf = getMonthlyFixed(b, mPrefix, monthlyExpenses, fixedExpenses);
+      const fixed = mf.shop_rent + mf.room_rent + mf.wifi + mf.shop_elec + mf.room_elec;
+      const salary = salMap.get(b.id) || 0;
+      const online = bEntries.reduce((s, e) => s + (e.online || 0), 0);
+      const exp = vInc + vMat + vOther + fixed + salary + (online * _gstPct / 100);
+      if (exp > 0) monthlyExpenseByBranch.set(`${b.id}|${m}`, exp);
+      monthlyNetExpense[m] += exp;
+    });
   }
 
   // Network totals are derived from branchData below so Operating Cost =
@@ -1243,6 +1251,11 @@ export default function DashboardPage() {
       {/* Monthly business bar chart — year mode only (12 bars instead of 365) */}
       {filterMode === "year" && (dashView === "all" || dashView === "shop") && (
         <MonthlyBusinessChart entries={entries} branches={branches} filterYear={filterYear} monthlyExpense={monthlyNetExpense} />
+      )}
+
+      {/* Monthly expense bar chart — twin of the business chart, per-branch cost */}
+      {filterMode === "year" && isAdmin && (dashView === "all" || dashView === "shop") && (
+        <MonthlyExpenseChart branches={branches} filterYear={filterYear} monthlyExpense={monthlyNetExpense} byMoBranchExp={monthlyExpenseByBranch} />
       )}
 
       {/* Daily material consumption bar chart — respects the global
@@ -2762,6 +2775,178 @@ function DailyBusinessChart({ entries, branches = [], filterYear, filterMonth })
                       <div style={{ lineHeight: 1.5 }}>{empty.map(b => b.name).join(" · ")}</div>
                     </div>
                   )}
+                </div>
+              </div>
+            );
+          })()}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+// Expense twin of MonthlyBusinessChart — 12 red bars of monthly operating cost
+// with a per-branch breakdown on hover (mirrors the income chart so cost and
+// revenue read side by side in year view).
+function MonthlyExpenseChart({ branches = [], filterYear, monthlyExpense = [], byMoBranchExp = new Map() }) {
+  const [hover, setHover] = useState(null);
+  const NOW = new Date();
+  const currentYm = NOW.getFullYear() === filterYear ? NOW.getMonth() : 11;
+
+  const byMo = new Array(12).fill(0).map((_, i) => Number(monthlyExpense[i]) || 0);
+  const max = Math.max(1, ...byMo);
+  const total = byMo.reduce((s, v) => s + v, 0);
+  const activeMonths = byMo.filter(v => v > 0).length;
+  const avg = activeMonths ? Math.round(total / activeMonths) : 0;
+  const worstIdx = byMo.indexOf(Math.max(...byMo));
+
+  const H = 230, BAR_W = 40, GAP = 20, LEFT = 56, PAD_TOP = 22, PAD_BOTTOM = 34, BAR_R = 7, yTicks = 4;
+  const W = LEFT + 12 * (BAR_W + GAP) + 8;
+  const MONTHS_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+  return (
+    <Card style={{ padding: 18, marginBottom: 24, overflow: "visible" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12, marginBottom: 14 }}>
+        <div>
+          <div style={{ fontSize: 11, fontWeight: 800, color: "var(--red)", textTransform: "uppercase", letterSpacing: 2 }}>Monthly Expense</div>
+          <div style={{ fontSize: 18, fontWeight: 800, color: "var(--gold)", fontFamily: "var(--font-headline, var(--font-outfit))", marginTop: 2 }}>{filterYear}</div>
+        </div>
+        <div style={{ display: "flex", gap: 20, alignItems: "center", flexWrap: "wrap" }}>
+          <div style={{ textAlign: "right" }}>
+            <div style={{ fontSize: 9, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, fontWeight: 700 }}>Total</div>
+            <div style={{ fontSize: 15, fontWeight: 800, color: "var(--red)" }}>{INR(total)}</div>
+          </div>
+          <div style={{ textAlign: "right" }}>
+            <div style={{ fontSize: 9, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, fontWeight: 700 }}>Monthly Avg</div>
+            <div style={{ fontSize: 15, fontWeight: 800, color: "var(--orange)" }}>{INR(avg)}</div>
+          </div>
+          <div style={{ textAlign: "right" }}>
+            <div style={{ fontSize: 9, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, fontWeight: 700 }}>Highest</div>
+            <div style={{ fontSize: 15, fontWeight: 800, color: "var(--red)" }}>{byMo[worstIdx] > 0 ? `${MONTHS_SHORT[worstIdx]} · ${INR(byMo[worstIdx])}` : "—"}</div>
+          </div>
+        </div>
+      </div>
+
+      {total === 0 ? (
+        <div style={{ height: H, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text3)", fontStyle: "italic", fontSize: 13 }}>No expense recorded for {filterYear} yet.</div>
+      ) : (
+        <div style={{ position: "relative" }}>
+          <div style={{ overflowX: "auto" }}>
+          <svg width={W} height={H + PAD_TOP + PAD_BOTTOM} style={{ display: "block" }}>
+            <defs>
+              <linearGradient id="ebar-red" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#fb7185" /><stop offset="100%" stopColor="#e11d48" stopOpacity="0.8" /></linearGradient>
+              <linearGradient id="ebar-cur" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#fca5a5" /><stop offset="100%" stopColor="#dc2626" stopOpacity="0.85" /></linearGradient>
+              <linearGradient id="ebar-sheen" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="rgba(255,255,255,0.22)" /><stop offset="60%" stopColor="rgba(255,255,255,0)" /></linearGradient>
+            </defs>
+            {Array.from({ length: yTicks + 1 }, (_, i) => {
+              const frac = i / yTicks;
+              const y = PAD_TOP + (1 - frac) * H;
+              const v = Math.round(max * frac);
+              const isBaseline = i === 0;
+              return (
+                <g key={i}>
+                  <line x1={LEFT} y1={y} x2={W - 4} y2={y} stroke={isBaseline ? "rgba(255,255,255,0.14)" : "rgba(255,255,255,0.04)"} strokeDasharray={isBaseline ? undefined : "2 4"} strokeWidth={1} />
+                  {!isBaseline && (
+                    <text x={LEFT - 8} y={y + 3} fontSize={9} fill="var(--text3)" textAnchor="end" fontWeight={600}>
+                      {v >= 100000 ? `${(v / 100000).toFixed(1)}L` : v >= 1000 ? `${Math.round(v / 1000)}k` : v}
+                    </text>
+                  )}
+                </g>
+              );
+            })}
+            {byMo.map((v, i) => {
+              const x = LEFT + i * (BAR_W + GAP);
+              const hasValue = v > 0;
+              const h = hasValue ? Math.max(2, (v / max) * H) : 2;
+              const yTop = PAD_TOP + H - h;
+              const baselineY = PAD_TOP + H;
+              const isCurrent = i === currentYm;
+              const isHovered = hover && hover.i === i;
+              const dim = hover && hover.i !== i ? 0.35 : 1;
+              const clipId = `ebar-clip-${filterYear}-${i}`;
+              return (
+                <g key={i}
+                  onMouseEnter={() => hasValue && setHover({
+                    i, v,
+                    byBranch: branches
+                      .map(b => ({ id: b.id, name: (b.name || "").replace("V-CUT ", ""), v: byMoBranchExp.get(`${b.id}|${i}`) || 0 }))
+                      .sort((a, b) => b.v - a.v),
+                  })}
+                  onMouseLeave={() => setHover(null)}
+                  style={{ cursor: hasValue ? "pointer" : "default", transition: "opacity .15s" }}
+                  opacity={dim}>
+                  <defs>
+                    <clipPath id={clipId}>
+                      <path d={`M${x},${yTop + BAR_R} Q${x},${yTop} ${x + BAR_R},${yTop} H${x + BAR_W - BAR_R} Q${x + BAR_W},${yTop} ${x + BAR_W},${yTop + BAR_R} V${baselineY} H${x} Z`} />
+                    </clipPath>
+                  </defs>
+                  {hasValue ? (
+                    <g clipPath={`url(#${clipId})`}>
+                      <rect x={x} y={yTop} width={BAR_W} height={h} fill={isCurrent ? "url(#ebar-cur)" : "url(#ebar-red)"} />
+                      <rect x={x} y={yTop} width={BAR_W} height={Math.min(h * 0.35, 20)} fill="url(#ebar-sheen)" />
+                    </g>
+                  ) : (
+                    <rect x={x} y={baselineY - 2} width={BAR_W} height={2} rx={1} fill="rgba(255,255,255,0.06)" />
+                  )}
+                  {(isHovered) && hasValue && (() => {
+                    const label = v >= 10000000 ? `₹${(v / 10000000).toFixed(2)}Cr` : v >= 100000 ? `₹${(v / 100000).toFixed(1)}L` : v >= 1000 ? `₹${Math.round(v / 1000)}k` : `₹${v}`;
+                    const chipW = label.length * 6.5 + 12;
+                    const chipX = x + BAR_W / 2 - chipW / 2;
+                    const chipY = Math.max(2, yTop - 16);
+                    return (
+                      <g>
+                        <rect x={chipX} y={chipY} width={chipW} height={14} rx={7} fill="var(--bg4)" stroke="var(--red)" strokeWidth={1} opacity={0.95} />
+                        <text x={x + BAR_W / 2} y={chipY + 10} fontSize={9} fontWeight={800} fill="var(--red)" textAnchor="middle">{label}</text>
+                      </g>
+                    );
+                  })()}
+                  <text x={x + BAR_W / 2} y={baselineY + 16} fontSize={11} fill={isCurrent ? "var(--red)" : "var(--text3)"} textAnchor="middle" fontWeight={isCurrent ? 800 : 600}>{MONTHS_SHORT[i]}</text>
+                </g>
+              );
+            })}
+          </svg>
+          </div>
+
+          {hover && (() => {
+            const TIP_W = 300;
+            const barCenter = LEFT + hover.i * (BAR_W + GAP) + BAR_W / 2;
+            const preferRight = barCenter + BAR_W / 2 + 10 + TIP_W <= W;
+            const left = preferRight ? Math.min(barCenter + BAR_W / 2 + 10, W - TIP_W - 4) : Math.max(4, barCenter - BAR_W / 2 - 10 - TIP_W);
+            const filled = (hover.byBranch || []).filter(b => b.v > 0);
+            return (
+              <div style={{ position: "absolute", left, top: 4, pointerEvents: "none", width: TIP_W, background: "linear-gradient(160deg, rgba(30,18,20,0.98), rgba(18,12,14,0.98))", border: "1px solid rgba(248,113,113,0.45)", borderRadius: 12, padding: "14px 16px", boxShadow: "0 12px 40px rgba(0,0,0,0.7)", fontSize: 12, zIndex: 5 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 10 }}>
+                  <div>
+                    <div style={{ fontSize: 10, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.2, fontWeight: 700 }}>{filterYear}</div>
+                    <div style={{ fontSize: 16, fontWeight: 800, color: "var(--text)", fontFamily: "var(--font-headline, var(--font-outfit))" }}>{MONTHS_SHORT[hover.i]}</div>
+                  </div>
+                  <div style={{ textAlign: "right" }}>
+                    <div style={{ fontSize: 9, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.2, fontWeight: 700 }}>Expense</div>
+                    <div style={{ fontSize: 18, fontWeight: 900, color: "var(--red)", fontFamily: "var(--font-headline, var(--font-outfit))" }}>{INR(hover.v)}</div>
+                  </div>
+                </div>
+                <div style={{ fontSize: 9, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.2, fontWeight: 700, marginBottom: 6 }}>
+                  Branch-wise ({filled.length} reported)
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  {filled.length === 0 && <div style={{ fontSize: 11, color: "var(--text3)", fontStyle: "italic" }}>No branch-level cost for this month.</div>}
+                  {filled.map(b => {
+                    const pct = hover.v > 0 ? Math.round((b.v / hover.v) * 100) : 0;
+                    return (
+                      <div key={b.id} style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10, fontSize: 11.5 }}>
+                          <span style={{ color: "var(--text)", fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{b.name}</span>
+                          <span style={{ display: "flex", alignItems: "baseline", gap: 6, flexShrink: 0 }}>
+                            <span style={{ fontSize: 9.5, color: "var(--text3)", fontWeight: 700 }}>{pct}%</span>
+                            <span style={{ color: "var(--red)", fontWeight: 800 }}>{INR(b.v)}</span>
+                          </span>
+                        </div>
+                        <div style={{ height: 3, background: "rgba(255,255,255,0.06)", borderRadius: 2, overflow: "hidden" }}>
+                          <div style={{ height: "100%", width: `${pct}%`, background: "linear-gradient(90deg, var(--orange), var(--red))", borderRadius: 2 }} />
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             );
