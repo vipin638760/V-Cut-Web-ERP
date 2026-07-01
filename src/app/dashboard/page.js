@@ -2906,21 +2906,6 @@ function BranchPLChart({ branchData = [], branchMonthly = new Map() }) {
                     <span style={{ textAlign: "right", fontWeight: 800, color: mo.net >= 0 ? "var(--green)" : "var(--red)" }}>{short(mo.net)}</span>
                   </div>
                 ))}
-                {/* Reconcile to the bar: months with cost but no sales (idle rent/
-                    salary) are hidden above, so add their net as one line. */}
-                {(() => {
-                  const shownNet = months.reduce((s, mo) => s + mo.net, 0);
-                  const shownExp = months.reduce((s, mo) => s + mo.expense, 0);
-                  const other = r.n - shownNet;
-                  if (Math.abs(other) < 1) return null;
-                  return (
-                    <div style={{ display: "grid", gridTemplateColumns: "34px 1fr 1fr 1fr", gap: "0 8px", fontSize: 10, alignItems: "baseline", color: "var(--text3)", marginTop: 2 }}>
-                      <span style={{ gridColumn: "1 / 3" }}>Idle mo (no sales)</span>
-                      <span style={{ textAlign: "right", color: "var(--red)" }}>{short(-other)}</span>
-                      <span style={{ textAlign: "right", fontWeight: 800, color: other >= 0 ? "var(--green)" : "var(--red)" }}>{short(other)}</span>
-                    </div>
-                  );
-                })()}
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "34px 1fr 1fr 1fr", gap: "0 8px", fontSize: 11, alignItems: "baseline", marginTop: 5, paddingTop: 5, borderTop: "1px dashed rgba(255,255,255,0.12)", fontWeight: 800 }}>
                 <span style={{ color: "var(--text2)" }}>Total</span>
