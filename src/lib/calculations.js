@@ -266,9 +266,25 @@ export function proRataSalary(st, monthStr, branches, salaryHistory, staffList, 
   //   no leave earns ₹0, regardless of join/exit. Naturally "as of now" since only
   //   logged days exist — no need to cap to yesterday.
   if (entries) {
-    const presentDays = staffPresentDaysInMonth(st.id, monthStr, entries) || 0;
-    const paidLeaveDays = Math.min(totalLeaveDays, quotaPerMonth);
-    const payableDays = presentDays + paidLeaveDays;
+    // Build the set of PAID dates so overlap is counted once. A day that is both
+    // marked present (has a staff_billing entry) AND an approved leave must not be
+    // paid twice, and total paid days can never exceed the calendar month.
+    const paidDates = new Set();
+    for (const e of entries) {
+      if (!e.date || !e.date.startsWith(monthStr)) continue;
+      if ((e.staff_billing || []).some(x => x.staff_id === st.id && x.present !== false)) paidDates.add(e.date);
+    }
+    // Approved-leave dates, capped at the monthly paid-leave quota, only counted
+    // when not already a present day (else it's already paid).
+    const leaveDates = approvedLeaves.map(l => l.date).filter(Boolean).sort();
+    let paidLeaveUsed = 0;
+    for (const d of leaveDates) {
+      if (paidLeaveUsed >= quotaPerMonth) break;
+      if (paidDates.has(d)) continue;
+      paidDates.add(d);
+      paidLeaveUsed++;
+    }
+    const payableDays = Math.min(daysInMonth, paidDates.size);
     if (payableDays <= 0) return 0;
     return Math.round((salary / daysInMonth) * payableDays);
   }
