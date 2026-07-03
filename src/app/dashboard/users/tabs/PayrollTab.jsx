@@ -7,6 +7,7 @@ import { useCurrentUser, getCurrentUser } from "@/lib/currentUser";
 import { INR, proRataSalary, makeFilterPrefix, staffStatusForMonth, staffLeavesInMonth } from "@/lib/calculations";
 import { Card, Pill, TH, TD, PeriodWidget, Modal, Icon, useConfirm, useToast, useSort } from "@/components/ui";
 import VLoader from "@/components/VLoader";
+import AttendanceCalendarModal from "@/components/AttendanceCalendarModal";
 
 
 function generatePayslipPDF(employee, branch, earned, advApproved, advPending, net, baseSalary, period, periodAdvances, { daysWorked, leavesTaken, payMode: overrideMode, payDate: overrideDate } = {}) {
@@ -107,6 +108,7 @@ export default function PayrollTab() {
   const [viewTab, setViewTab] = useState("salary");
   const sort = useSort("name");
   const [releaseModal, setReleaseModal] = useState(null); // { staffId, name, net, earned, ... }
+  const [attendanceModal, setAttendanceModal] = useState(null); // { staff, month } for calendar
   const [releaseMode, setReleaseMode] = useState("Bank Transfer");
   const [releaseDate, setReleaseDate] = useState(new Date().toISOString().split("T")[0]);
   const [advModal, setAdvModal] = useState(null); // { request, status }
@@ -595,11 +597,16 @@ export default function PayrollTab() {
                     <TD right style={{ color: advPending > 0 ? "var(--orange)" : "var(--text3)", fontWeight: 700 }}>{advPending > 0 ? INR(advPending) : "—"}</TD>
                     <TD right style={{ fontSize: 14, fontWeight: 800, color: net < 0 ? "var(--red)" : "var(--accent)", fontFamily: "var(--font-headline, var(--font-outfit))" }}>{INR(net)}</TD>
                     <TD right>
-                      <button onClick={() => hasAdvances && setExpandedStaff(isExpanded ? null : s.id)}
-                        style={{ padding: "4px 10px", borderRadius: 6, background: isExpanded ? "var(--accent)" : "var(--bg4)", color: isExpanded ? "#000" : hasAdvances ? "var(--accent)" : "var(--text3)", border: "none", cursor: hasAdvances ? "pointer" : "default", fontSize: 10, fontWeight: 700, transition: "all .2s", display: "inline-flex", alignItems: "center", gap: 5, minWidth: 52, justifyContent: "center" }}>
-                        <Icon name="log" size={12} />
-                        {periodAdvances.length}
-                      </button>
+                      <div style={{ display: "inline-flex", alignItems: "center", gap: 6, justifyContent: "flex-end" }}>
+                        <button onClick={() => setAttendanceModal({ staff: s, month: filterMode === "month" ? filterPrefix : `${filterYear}-${String(new Date().getMonth() + 1).padStart(2, "0")}` })}
+                          title="Attendance calendar — days & shops worked"
+                          style={{ width: 30, height: 28, borderRadius: 8, background: "rgba(var(--accent-rgb),0.1)", border: "1px solid rgba(var(--accent-rgb),0.35)", color: "var(--accent)", cursor: "pointer", fontSize: 13, lineHeight: 1, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>📅</button>
+                        <button onClick={() => hasAdvances && setExpandedStaff(isExpanded ? null : s.id)}
+                          style={{ padding: "4px 10px", borderRadius: 6, background: isExpanded ? "var(--accent)" : "var(--bg4)", color: isExpanded ? "#000" : hasAdvances ? "var(--accent)" : "var(--text3)", border: "none", cursor: hasAdvances ? "pointer" : "default", fontSize: 10, fontWeight: 700, transition: "all .2s", display: "inline-flex", alignItems: "center", gap: 5, minWidth: 52, justifyContent: "center" }}>
+                          <Icon name="log" size={12} />
+                          {periodAdvances.length}
+                        </button>
+                      </div>
                     </TD>
                     <TD right>
                       {(() => {
@@ -858,6 +865,11 @@ export default function PayrollTab() {
           </div>
         )}
       </Modal>
+
+      {/* Attendance calendar — days worked + per-shop summary */}
+      <AttendanceCalendarModal target={attendanceModal} onClose={() => setAttendanceModal(null)}
+        entries={entries} leaves={leaves} branches={branches}
+        canEdit={isAdmin || currentUser.role === "accountant"} currentUser={currentUser} />
 
       {ConfirmDialog}
       {ToastContainer}

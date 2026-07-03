@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 import { useEffect, useState } from "react";
 import { collection, onSnapshot, query, orderBy, doc, deleteDoc, setDoc, addDoc, updateDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
@@ -11,6 +11,7 @@ import {
 } from "@/lib/calculations";
 import { MONTHS } from "@/lib/constants";
 import { Icon, IconBtn, Pill, Card, PeriodWidget, TH, TD, StatCard, ProgressBar, Modal, BranchSelect, SearchSelect, useConfirm, useToast, useSort } from "@/components/ui";
+import AttendanceCalendarModal from "@/components/AttendanceCalendarModal";
 
 
 const NOW = new Date();
@@ -40,22 +41,19 @@ export default function StaffPage() {
   // UI state
   const [branchFilter, setBranchFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("active");
-  const [branchTypeFilter, setBranchTypeFilter] = useState("all"); // all | mens | unisex — based on branch.type
-  // Attendance shape filter — splits the active period into:
-  //   whole         → status === "active" for the period (worked every day they were eligible)
-  //   partial-on    → partial coverage AND staff still active overall (mid-month join, current month, etc.)
-  //   partial-off   → partial coverage AND staff has exited (worked some days, no longer working)
+  const [branchTypeFilter, setBranchTypeFilter] = useState("all"); // all | mens | unisex â€” based on branch.type
+  // Attendance shape filter â€” splits the active period into:
+  //   whole         â†’ status === "active" for the period (worked every day they were eligible)
+  //   partial-on    â†’ partial coverage AND staff still active overall (mid-month join, current month, etc.)
+  //   partial-off   â†’ partial coverage AND staff has exited (worked some days, no longer working)
   // "all" disables this filter.
   const [attendanceFilter, setAttendanceFilter] = useState("all");
   const [staffSearch, setStaffSearch] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState(null);
 
-  // Attendance calendar (per-staff, per-month)
+  // Attendance calendar (per-staff, per-month) â€” modal is a shared component.
   const [attendanceModal, setAttendanceModal] = useState(null); // { staff, month: "YYYY-MM" }
-  const [attendanceOverrides, setAttendanceOverrides] = useState([]); // overlay rows from staff_attendance
-  const [editingDay, setEditingDay] = useState(null); // "YYYY-MM-DD" or null
-  const [dayDraft, setDayDraft] = useState({ present: true, branch_id: "", note: "" });
 
   // Form state
   const [form, setForm] = useState({ name: "", branch_id: "", role: "", mobile: "", salary: "", incentive_pct: "10", target: "", join: "", exit_date: "" });
@@ -89,25 +87,6 @@ export default function StaffPage() {
     return () => unsubs.forEach(u => u());
   }, []);
 
-  // Subscribe to staff_attendance overlay for the currently-viewed staff/month.
-  // Overlay wins over entries-derived presence when both exist for the same date.
-  useEffect(() => {
-    if (!db || !attendanceModal) return;
-    const { staff: s, month } = attendanceModal;
-    const [yr, mo] = month.split("-").map(Number);
-    const start = `${month}-01`;
-    const endDate = new Date(yr, mo, 0).toISOString().slice(0, 10);
-    const q = query(
-      collection(db, "staff_attendance"),
-      orderBy("date", "asc"),
-    );
-    const unsub = onSnapshot(q, sn => {
-      const rows = sn.docs.map(d => ({ ...d.data(), id: d.id }))
-        .filter(r => r.staff_id === s.id && r.date >= start && r.date <= endDate);
-      setAttendanceOverrides(rows);
-    });
-    return () => unsub();
-  }, [attendanceModal]);
 
   const statusRefMon = filterMode === "month" ? filterPrefix : filterYear + "-" + String(NOW.getMonth() + 1).padStart(2, "0");
 
@@ -115,7 +94,7 @@ export default function StaffPage() {
   let filtered = branchFilter ? staff.filter(s => s.branch_id === branchFilter) : [...staff];
   if (statusFilter === "active") filtered = filtered.filter(s => staffOverallStatus(s, statusRefMon) === "active");
   else if (statusFilter === "inactive") filtered = filtered.filter(s => staffOverallStatus(s, statusRefMon) !== "active");
-  // Attendance filter — period-aware. Uses staffStatusForMonth (capped to
+  // Attendance filter â€” period-aware. Uses staffStatusForMonth (capped to
   // yesterday so the current month doesn't falsely mark today as a missed
   // day) for monthly view; in yearly view we treat any partial month across
   // the active months as "partial".
@@ -159,8 +138,8 @@ export default function StaffPage() {
     if (!form.name || !form.branch_id) { confirm({ title: "Missing Fields", message: "Name and Branch are required.", confirmText: "OK", cancelText: "Close", type: "warning", onConfirm: () => {} }); return; }
     if (!form.join) { confirm({ title: "Joining Date Required", message: "Please select the joining date before saving.", confirmText: "OK", cancelText: "Close", type: "warning", onConfirm: () => {} }); return; }
 
-    // Accountant adding a new staff member: auto-apply default salary of ₹15,000 (they cannot edit salary).
-    // For edits, accountant must never change salary — preserve the existing value.
+    // Accountant adding a new staff member: auto-apply default salary of â‚¹15,000 (they cannot edit salary).
+    // For edits, accountant must never change salary â€” preserve the existing value.
     let effectiveSalary = Number(form.salary) || 0;
     if (isAccountant) {
       if (editId) {
@@ -327,7 +306,7 @@ export default function StaffPage() {
         created_by: currentUser?.name || "user",
         created_at: new Date().toISOString(),
       });
-      toast({ title: "Transfer Created", message: `${transferModal.name} → ${toBranch?.name}${transferForm.end_date ? ` until ${transferForm.end_date}` : ""}.`, type: "success" });
+      toast({ title: "Transfer Created", message: `${transferModal.name} â†’ ${toBranch?.name}${transferForm.end_date ? ` until ${transferForm.end_date}` : ""}.`, type: "success" });
       setTransferModal(null);
     } catch (err) {
       confirm({ title: "Transfer Failed", message: err.message, confirmText: "OK", cancelText: "Close", type: "danger", onConfirm: () => {} });
@@ -359,7 +338,7 @@ export default function StaffPage() {
 
   if (loading) return <VLoader fullscreen label="Loading Staff" />;
 
-  // Yearly salary helper — sum pro-rata across all months (honors approved leaves)
+  // Yearly salary helper â€” sum pro-rata across all months (honors approved leaves)
   const yearlyStaffSalary = (s) => {
     if (filterMode !== 'year') return proRataSalary(s, filterPrefix, branches, salaryHistory, staff, globalSettings, leaves, entries);
     const limit = filterYear === NOW.getFullYear() ? NOW.getMonth() + 1 : 12;
@@ -378,7 +357,7 @@ export default function StaffPage() {
       {/* Page Header */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20, flexWrap: "wrap", gap: 12 }}>
         <div className="page-title" style={{ fontSize: 24, fontWeight: 800, color: "var(--gold)", letterSpacing: 1, textTransform: "capitalize" }}>Staff</div>
-        <button onClick={() => { location.reload(); }} className="refresh-btn" style={{ width: 36, height: 36, borderRadius: "50%", background: "var(--bg3)", border: "1px solid var(--border2)", color: "var(--text2)", cursor: "pointer", fontSize: 16 }}>↻</button>
+        <button onClick={() => { location.reload(); }} className="refresh-btn" style={{ width: 36, height: 36, borderRadius: "50%", background: "var(--bg3)", border: "1px solid var(--border2)", color: "var(--text2)", cursor: "pointer", fontSize: 16 }}>â†»</button>
       </div>
 
       {/* Period Widget */}
@@ -394,9 +373,9 @@ export default function StaffPage() {
       {/* Filters & Controls */}
       <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid var(--border)", borderRadius: 16, padding: 12, marginBottom: 16, display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
         <div style={{ position: "relative", minWidth: 200 }}>
-          <input type="text" placeholder="Search staff name or mobile…" value={staffSearch} onChange={e => setStaffSearch(e.target.value)}
+          <input type="text" placeholder="Search staff name or mobileâ€¦" value={staffSearch} onChange={e => setStaffSearch(e.target.value)}
             style={{ padding: "8px 12px 8px 32px", border: "1px solid var(--border2)", borderRadius: 10, fontSize: 13, background: "var(--bg3)", color: "var(--text)", width: "100%", outline: "none" }} />
-          <span style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "var(--text3)", fontSize: 14, pointerEvents: "none" }}>🔍</span>
+          <span style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "var(--text3)", fontSize: 14, pointerEvents: "none" }}>ðŸ”</span>
         </div>
         <BranchSelect value={branchFilter} onChange={setBranchFilter} branches={branches} placeholder="All Branches" />
 
@@ -409,7 +388,7 @@ export default function StaffPage() {
           ))}
         </div>
 
-        {/* Branch-type filter — filters by the staff's branch.type (mens / unisex) */}
+        {/* Branch-type filter â€” filters by the staff's branch.type (mens / unisex) */}
         <div style={{ display: "inline-flex", background: "var(--bg3)", border: "1.5px solid var(--border2)", borderRadius: 12, padding: 3, gap: 2 }}>
           {[["all", "All"], ["mens", "Mens"], ["unisex", "Unisex"]].map(([val, label]) => (
             <button key={val} onClick={() => setBranchTypeFilter(val)}
@@ -419,13 +398,13 @@ export default function StaffPage() {
           ))}
         </div>
 
-        {/* Attendance shape filter — full month / partial still active / partial exited */}
+        {/* Attendance shape filter â€” full month / partial still active / partial exited */}
         <div style={{ display: "inline-flex", background: "var(--bg3)", border: "1.5px solid var(--border2)", borderRadius: 12, padding: 3, gap: 2 }} title="Attendance pattern in the selected period">
           {[
             ["all", "All", "var(--accent)"],
             ["whole", "Whole Month", "var(--green)"],
-            ["partial-on", "Partial · Active", "var(--blue, #60a5fa)"],
-            ["partial-off", "Partial · Exited", "var(--orange)"],
+            ["partial-on", "Partial Â· Active", "var(--blue, #60a5fa)"],
+            ["partial-off", "Partial Â· Exited", "var(--orange)"],
           ].map(([val, label, color]) => (
             <button key={val} onClick={() => setAttendanceFilter(val)}
               style={{ padding: "6px 14px", fontSize: 11, fontWeight: 700, color: attendanceFilter === val ? "#000" : "var(--text3)", background: attendanceFilter === val ? color : "transparent", border: "none", borderRadius: 9, cursor: "pointer", transition: "all 0.2s", textTransform: "uppercase", letterSpacing: 0.4 }}>
@@ -445,7 +424,7 @@ export default function StaffPage() {
       </div>
 
       <Modal isOpen={showForm} onClose={() => setShowForm(false)} title={editId ? "Edit Staff Details" : "Register New Staff"}>
-        {!isAdmin && <div style={{ fontSize: 11, color: "var(--red)", marginBottom: 16 }}>⚠️ Salary & Incentive % require Admin.</div>}
+        {!isAdmin && <div style={{ fontSize: 11, color: "var(--red)", marginBottom: 16 }}>âš ï¸ Salary & Incentive % require Admin.</div>}
         <form onSubmit={handleSave} style={{ display: "flex", flexDirection: "column", gap: 20 }}>
           <FormField label="Full Name"><input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="Enter name" /></FormField>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
@@ -468,12 +447,12 @@ export default function StaffPage() {
           {isAdmin && (
             <>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-                <FormField label="Monthly Salary (₹)"><input type="number" value={form.salary} onChange={e => { setForm({ ...form, salary: e.target.value }); setIncrement(""); }} placeholder="30000" /></FormField>
+                <FormField label="Monthly Salary (â‚¹)"><input type="number" value={form.salary} onChange={e => { setForm({ ...form, salary: e.target.value }); setIncrement(""); }} placeholder="30000" /></FormField>
                 <FormField label="Incentive %"><input type="number" value={form.incentive_pct} onChange={e => setForm({ ...form, incentive_pct: e.target.value })} placeholder="10" /></FormField>
               </div>
               {editId && (
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, alignItems: "end" }}>
-                  <FormField label="Increment Amount (₹)">
+                  <FormField label="Increment Amount (â‚¹)">
                     <input type="number" value={increment} placeholder="e.g. 2000" onChange={e => {
                       const inc = e.target.value;
                       setIncrement(inc);
@@ -494,7 +473,7 @@ export default function StaffPage() {
             </>
           )}
           
-          <FormField label="Monthly Billing Target (₹)"><input type="number" value={form.target} onChange={e => setForm({ ...form, target: e.target.value })} placeholder="60000" /></FormField>
+          <FormField label="Monthly Billing Target (â‚¹)"><input type="number" value={form.target} onChange={e => setForm({ ...form, target: e.target.value })} placeholder="60000" /></FormField>
           
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
             <FormField label="Joining Date *"><input type="date" required value={form.join} onChange={e => setForm({ ...form, join: e.target.value })} /></FormField>
@@ -532,431 +511,16 @@ export default function StaffPage() {
         );
       })()}
 
-      {/* Attendance Calendar Modal — per-staff, per-month, editable by admin/accountant */}
-      <Modal isOpen={!!attendanceModal} onClose={() => { setAttendanceModal(null); setAttendanceOverrides([]); setEditingDay(null); }} title={`Attendance · ${attendanceModal?.staff?.name || ""}`} width={1080}>
-        {attendanceModal && (() => {
-          const { staff: s, month } = attendanceModal;
-          const [yr, mo] = month.split("-").map(Number);
-          const daysInMonth = new Date(yr, mo, 0).getDate();
-          const firstDow = new Date(yr, mo - 1, 1).getDay(); // 0 = Sun
-          const todayStr = new Date().toISOString().slice(0, 10);
-          const joinDate = s.join || null;
-          const exitDate = s.exit_date || null;
-          const monEntries = entries.filter(e => e.date && e.date.startsWith(month));
-          const monLeaves = leaves.filter(l => l.staff_id === s.id && (l.date || "").startsWith(month) && (l.status === "approved" || !l.status));
-          const overrideByDate = new Map(attendanceOverrides.map(o => [o.date, o]));
-
-          // Per-day billing for this staff = service sale + material sale, summed across every
-          // entry on that date (staff may appear in multiple branches' staff_billing when loaned).
-          // **Why:** matches the Branches page "Daily sale split by staff · service + material" chart.
-          const billingForDay = (dateStr) => {
-            let total = 0;
-            monEntries.forEach(e => {
-              if (e.date !== dateStr) return;
-              const sb = (e.staff_billing || []).find(x => x.staff_id === s.id);
-              if (!sb) return;
-              total += (Number(sb.billing) || 0) + (Number(sb.material) || 0);
-            });
-            return total;
-          };
-
-          // Resolve per-day status. Priority: override > leave > entries > default.
-          const dayStatus = (dateStr) => {
-            if (overrideByDate.has(dateStr)) {
-              const o = overrideByDate.get(dateStr);
-              return { kind: o.present ? "present" : "absent", branch_id: o.branch_id || null, note: o.note || "", source: "override" };
-            }
-            const leave = monLeaves.find(l => l.date === dateStr);
-            if (leave) return { kind: "leave", branch_id: null, note: leave.type || "Leave", source: "leave", leaveType: leave.type || "Leave" };
-            const hits = monEntries.filter(e => e.date === dateStr && (e.staff_billing || []).some(sb => sb.staff_id === s.id && sb.present !== false));
-            if (hits.length > 0) {
-              const hit = hits[0];
-              return { kind: "present", branch_id: hit.branch_id, note: "", source: "entries" };
-            }
-            if (joinDate && dateStr < joinDate) return { kind: "before", branch_id: null, note: "", source: "lifecycle" };
-            if (exitDate && dateStr > exitDate) return { kind: "after", branch_id: null, note: "", source: "lifecycle" };
-            return { kind: "absent", branch_id: null, note: "", source: "default" };
-          };
-
-          // Compact INR for tight calendar cells (e.g. ₹2.5k, ₹1.2L).
-          const compactINR = (n) => {
-            const v = Number(n) || 0;
-            if (v >= 10000000) return `₹${(v / 10000000).toFixed(1)}Cr`;
-            if (v >= 100000) return `₹${(v / 100000).toFixed(1)}L`;
-            if (v >= 1000) return `₹${(v / 1000).toFixed(v >= 10000 ? 0 : 1)}k`;
-            return `₹${v}`;
-          };
-
-          const markHoliday = async (dateStr) => {
-            try {
-              // Holiday wins via leave priority — but a manual override would still trump it.
-              // Clear any same-day override so the holiday is what shows.
-              if (overrideByDate.has(dateStr)) {
-                await deleteDoc(doc(db, "staff_attendance", `${s.id}_${dateStr}`));
-              }
-              await setDoc(doc(db, "leaves", `holiday_${s.id}_${dateStr}`), {
-                staff_id: s.id,
-                staff_name: s.name,
-                date: dateStr,
-                days: 1,
-                type: "Holiday",
-                reason: "Marked from staff calendar",
-                status: "approved",
-                processed: false,
-                applied_by: currentUser?.id || "admin",
-                applied_at: new Date().toISOString(),
-                approved_by: currentUser?.name || "admin",
-                approved_at: new Date().toISOString(),
-                source: "staff_calendar",
-              });
-              toast({ title: "Marked Holiday", message: `${s.name} · ${dateStr}`, type: "success" });
-              setEditingDay(null);
-            } catch (err) {
-              toast({ title: "Mark Failed", message: err.message, type: "error" });
-            }
-          };
-
-          const removeHoliday = async (dateStr) => {
-            try {
-              await deleteDoc(doc(db, "leaves", `holiday_${s.id}_${dateStr}`));
-              toast({ title: "Holiday Removed", message: `${s.name} · ${dateStr}`, type: "success" });
-              setEditingDay(null);
-            } catch (err) {
-              toast({ title: "Remove Failed", message: err.message, type: "error" });
-            }
-          };
-
-          const saveDay = async (dateStr, draft) => {
-            try {
-              await setDoc(doc(db, "staff_attendance", `${s.id}_${dateStr}`), {
-                staff_id: s.id,
-                staff_name: s.name,
-                date: dateStr,
-                present: !!draft.present,
-                branch_id: draft.branch_id || null,
-                branch_name: branches.find(b => b.id === draft.branch_id)?.name || null,
-                note: draft.note || "",
-                edited_by: currentUser?.id || "unknown",
-                edited_by_name: currentUser?.name || "User",
-                edited_at: new Date().toISOString(),
-              });
-              toast({ title: "Attendance Saved", message: `${s.name} · ${dateStr} · ${draft.present ? "Present" : "Absent"}`, type: "success" });
-              setEditingDay(null);
-            } catch (err) {
-              toast({ title: "Save Failed", message: err.message, type: "error" });
-            }
-          };
-
-          const clearOverride = async (dateStr) => {
-            try {
-              await deleteDoc(doc(db, "staff_attendance", `${s.id}_${dateStr}`));
-              toast({ title: "Override Cleared", message: `${dateStr} reverted to computed attendance.`, type: "success" });
-              setEditingDay(null);
-            } catch (err) {
-              toast({ title: "Clear Failed", message: err.message, type: "error" });
-            }
-          };
-
-          const colorFor = (kind) => ({
-            present: { bg: "rgba(74,222,128,0.15)", border: "rgba(74,222,128,0.5)", text: "#4ade80" },
-            absent:  { bg: "rgba(248,113,113,0.12)", border: "rgba(248,113,113,0.35)", text: "#f87171" },
-            leave:   { bg: "rgba(96,165,250,0.15)", border: "rgba(96,165,250,0.45)", text: "#60a5fa" },
-            future:  { bg: "transparent", border: "var(--border)", text: "var(--text3)" },
-            before:  { bg: "var(--bg4)", border: "var(--border)", text: "var(--text3)" },
-            after:   { bg: "var(--bg4)", border: "var(--border)", text: "var(--text3)" },
-          }[kind] || { bg: "transparent", border: "var(--border)", text: "var(--text3)" });
-
-          const short = (bid) => (branches.find(b => b.id === bid)?.name || "").replace("V-CUT ", "").slice(0, 8);
-
-          const blanks = Array(firstDow).fill(null);
-          const days = Array.from({ length: daysInMonth }, (_, i) => {
-            const d = String(i + 1).padStart(2, "0");
-            return `${month}-${d}`;
-          });
-
-          // For the current month, counts stop at yesterday (today hasn't closed).
-          const nowDate = new Date();
-          const isCurrentMonthView = nowDate.getFullYear() === yr && nowDate.getMonth() + 1 === mo;
-          const cutoff = isCurrentMonthView
-            ? new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate() - 1).toISOString().slice(0, 10)
-            : null;
-          let presentCount = 0, leaveCount = 0, absentCount = 0, zeroSaleCount = 0, totalBilling = 0;
-          const branchTally = new Map(); // branch_id -> { days, billing } (present only)
-          const zeroSaleDays = [];
-          days.forEach(dateStr => {
-            if (cutoff && dateStr > cutoff) return;
-            const st = dayStatus(dateStr);
-            const billing = billingForDay(dateStr);
-            if (st.kind === "present") {
-              presentCount++;
-              totalBilling += billing;
-              if (st.branch_id) {
-                const cur = branchTally.get(st.branch_id) || { days: 0, billing: 0 };
-                branchTally.set(st.branch_id, { days: cur.days + 1, billing: cur.billing + billing });
-              }
-              if (billing === 0) { zeroSaleCount++; zeroSaleDays.push(dateStr); }
-            }
-            else if (st.kind === "leave") leaveCount++;
-            else if (st.kind === "absent") absentCount++;
-          });
-          // Stable colour swatch per branch for visual coding in day cells + legend.
-          const swatchPalette = ["#22d3ee", "#a78bfa", "#fb923c", "#4ade80", "#f472b6", "#60a5fa", "#fde047", "#f87171"];
-          const branchColour = new Map();
-          [...branchTally.keys()].forEach((bid, i) => branchColour.set(bid, swatchPalette[i % swatchPalette.length]));
-
-          return (
-            <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 320px", gap: 18, alignItems: "start" }}>
-            <div style={{ display: "flex", flexDirection: "column", gap: 14, minWidth: 0 }}>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 10, fontSize: 11, fontWeight: 700 }}>
-                <span style={{ padding: "6px 10px", borderRadius: 8, background: "rgba(74,222,128,0.12)", color: "var(--green)" }}>● Present {presentCount}</span>
-                <span style={{ padding: "6px 10px", borderRadius: 8, background: "rgba(96,165,250,0.12)", color: "var(--blue, #60a5fa)" }}>● Leave {leaveCount}</span>
-                <span style={{ padding: "6px 10px", borderRadius: 8, background: "rgba(248,113,113,0.1)", color: "var(--red)" }}>● Absent {absentCount}</span>
-                {zeroSaleCount > 0 && (
-                  <span title={`Days present with ₹0 billing: ${zeroSaleDays.join(", ")}`}
-                    style={{ padding: "6px 10px", borderRadius: 8, background: "rgba(250,204,21,0.15)", color: "#facc15", border: "1px solid rgba(250,204,21,0.4)" }}>
-                    ⚠ Zero-Sale {zeroSaleCount}
-                  </span>
-                )}
-                <span style={{ padding: "6px 10px", borderRadius: 8, background: "rgba(255,215,0,0.10)", color: "var(--gold)" }}>Total Billing {INR(totalBilling)}</span>
-                <span style={{ marginLeft: "auto", padding: "6px 10px", borderRadius: 8, background: "var(--bg4)", color: "var(--text3)" }}>Home: {(branches.find(b => b.id === s.branch_id)?.name || "—").replace("V-CUT ", "")}</span>
-              </div>
-
-              {/* Branch breakdown — one chip per branch the staff worked at this month, with day count + billing */}
-              {branchTally.size > 0 && (
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 8, padding: "8px 0", borderTop: "1px dashed var(--border)", borderBottom: "1px dashed var(--border)" }}>
-                  <div style={{ fontSize: 10, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.5 }}>Worked at {branchTally.size} branch{branchTally.size === 1 ? "" : "es"}:</div>
-                  {[...branchTally.entries()].sort((a, b) => b[1].billing - a[1].billing).map(([bid, info]) => {
-                    const bName = (branches.find(b => b.id === bid)?.name || "Branch").replace("V-CUT ", "");
-                    const isHome = bid === s.branch_id;
-                    return (
-                      <span key={bid} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 10px", borderRadius: 999, background: "var(--bg3)", border: `1px solid ${branchColour.get(bid)}`, color: "var(--text)", fontSize: 11, fontWeight: 700 }}>
-                        <span style={{ width: 8, height: 8, borderRadius: "50%", background: branchColour.get(bid) }} />
-                        {bName} · {info.days}d · {INR(info.billing)}
-                        {isHome && <span style={{ fontSize: 9, color: "var(--text3)", fontWeight: 600, textTransform: "uppercase", letterSpacing: 1 }}>home</span>}
-                      </span>
-                    );
-                  })}
-                </div>
-              )}
-
-              {/* Weekday header */}
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 6, fontSize: 10, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.2, textAlign: "center" }}>
-                {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(d => <div key={d}>{d}</div>)}
-              </div>
-
-              {/* Calendar grid */}
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 6 }}>
-                {blanks.map((_, i) => <div key={`b${i}`} />)}
-                {days.map(dateStr => {
-                  const st = dayStatus(dateStr);
-                  const isFuture = dateStr > todayStr;
-                  const isBeforeJoin = st.kind === "before";
-                  const isAfterExit = st.kind === "after";
-                  const isJoinDay = joinDate && dateStr === joinDate;
-                  const isInactive = isFuture && st.kind === "absent" || isBeforeJoin || isAfterExit;
-                  const effectiveKind = isInactive ? (isBeforeJoin ? "before" : isAfterExit ? "after" : "future") : st.kind;
-                  const c = colorFor(effectiveKind);
-                  const isToday = dateStr === todayStr;
-                  const bName = st.branch_id ? short(st.branch_id) : "";
-                  const hasOverride = st.source === "override";
-                  const isHoliday = st.kind === "leave" && (st.leaveType || "").toLowerCase() === "holiday";
-                  const branchDot = st.kind === "present" && st.branch_id ? branchColour.get(st.branch_id) : null;
-                  const billing = billingForDay(dateStr);
-                  const isZeroSale = st.kind === "present" && billing === 0 && !isFuture;
-                  return (
-                    <button key={dateStr}
-                      disabled={!canEdit || isInactive}
-                      onClick={() => { if (isInactive) return; setEditingDay(dateStr); setDayDraft({ present: st.kind === "present" || st.kind === "leave" ? (st.kind === "present") : false, branch_id: st.branch_id || s.branch_id || "", note: st.note || "" }); }}
-                      title={isZeroSale ? `Present at ${bName || "branch"} but ₹0 sale — consider marking as Holiday` : st.kind === "present" ? `${bName || "Branch"} · ${INR(billing)}` : isHoliday ? "Holiday" : undefined}
-                      style={{
-                        position: "relative",
-                        aspectRatio: "1 / 1",
-                        padding: 6,
-                        borderRadius: 10,
-                        background: isInactive ? "transparent" : c.bg,
-                        border: isToday ? "2px solid var(--accent)" : isJoinDay ? "2px solid var(--green)" : isZeroSale ? "2px dashed #facc15" : branchDot ? `2px solid ${branchDot}` : `1px solid ${c.border}`,
-                        color: isInactive ? "var(--text3)" : c.text,
-                        cursor: isInactive ? "default" : canEdit ? "pointer" : "default",
-                        opacity: isBeforeJoin || isAfterExit ? 0.25 : isFuture && st.kind === "absent" ? 0.35 : 1,
-                        display: "flex",
-                        flexDirection: "column",
-                        alignItems: "flex-start",
-                        justifyContent: "space-between",
-                        fontFamily: "var(--font-headline, var(--font-outfit))",
-                      }}>
-                      <div style={{ display: "flex", width: "100%", justifyContent: "space-between", alignItems: "center", fontSize: 12, fontWeight: 800 }}>
-                        <span>{Number(dateStr.slice(8, 10))}</span>
-                        <div style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
-                          {isZeroSale && <span title="Zero sale on a present day" style={{ fontSize: 10, color: "#facc15", lineHeight: 1 }}>⚠</span>}
-                          {hasOverride && <span title="Manually edited" style={{ fontSize: 8, color: "var(--accent)" }}>✎</span>}
-                        </div>
-                      </div>
-                      {isJoinDay && <div style={{ fontSize: 8, fontWeight: 800, color: "#4ade80", textTransform: "uppercase", letterSpacing: 0.5 }}>JOINED</div>}
-                      {bName && !isInactive && <div style={{ fontSize: 9, fontWeight: 800, color: branchDot || c.text, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%" }}>{bName}</div>}
-                      {st.kind === "present" && billing > 0 && (
-                        <div style={{ fontSize: 9, fontWeight: 800, color: "var(--gold)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%" }}>{compactINR(billing)}</div>
-                      )}
-                      {isZeroSale && (
-                        <div style={{ fontSize: 8, fontWeight: 800, color: "#facc15", textTransform: "uppercase", letterSpacing: 0.5 }}>0 SALE</div>
-                      )}
-                      {st.kind === "leave" && <div style={{ fontSize: 9, fontWeight: 800, color: "#60a5fa", textTransform: "uppercase", letterSpacing: 0.5 }}>{isHoliday ? "HOLIDAY" : "LEAVE"}</div>}
-                      {st.kind === "absent" && !isFuture && !isBeforeJoin && !isAfterExit && st.source === "default" && <div style={{ fontSize: 9, fontWeight: 700, opacity: 0.75 }}>—</div>}
-                    </button>
-                  );
-                })}
-              </div>
-
-              <div style={{ fontSize: 10, color: "var(--text3)", lineHeight: 1.5 }}>
-                Source priority: <strong>Manual override</strong> › Approved leave › Daily entries › Join/exit lifecycle.
-                {!canEdit && <> You have read-only access.</>}
-              </div>
-            </div>
-
-            {/* Side panel — branch-card styled day details / editor. Always rendered. */}
-            <aside style={{ position: "sticky", top: 0, alignSelf: "start", display: "flex", flexDirection: "column", gap: 12 }}>
-              {(() => {
-                if (!editingDay) {
-                  return (
-                    <div style={{ padding: "22px 24px", borderRadius: 16, background: "var(--bg3)", border: "1px solid rgba(34,211,238,0.18)", boxShadow: "0 0 18px rgba(34,211,238,0.08), 0 0 1px rgba(34,211,238,0.25) inset", textAlign: "center" }}>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.5, marginBottom: 10 }}>Day Details</div>
-                      <div style={{ fontSize: 13, color: "var(--text2)", lineHeight: 1.6 }}>Click any day on the calendar to view billing breakdown{canEdit ? " and edit attendance" : ""}.</div>
-                    </div>
-                  );
-                }
-                const st = dayStatus(editingDay);
-                const hasOverride = st.source === "override";
-                const dayBilling = billingForDay(editingDay);
-                const isHoliday = st.kind === "leave" && (st.leaveType || "").toLowerCase() === "holiday";
-                const isZeroSale = st.kind === "present" && dayBilling === 0;
-                const dispBranchId = st.branch_id || dayDraft.branch_id;
-                const dispBranch = (branches.find(b => b.id === dispBranchId)?.name || "").replace("V-CUT ", "");
-                const dotColour = dispBranchId ? branchColour.get(dispBranchId) : null;
-                const kindLabel = st.kind === "present" ? "Present" : st.kind === "leave" ? (isHoliday ? "Holiday" : "Leave") : st.kind === "absent" ? "Absent" : st.kind;
-                const kindColour = st.kind === "present" ? "var(--green)" : st.kind === "leave" ? "#60a5fa" : st.kind === "absent" ? "var(--red)" : "var(--text3)";
-                const kindRgb = st.kind === "present" ? "74,222,128" : st.kind === "leave" ? "96,165,250" : st.kind === "absent" ? "248,113,113" : "163,163,163";
-                const dateObj = new Date(editingDay);
-                const longDate = dateObj.toLocaleDateString("default", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
-                return (
-                  <div style={{ padding: "18px 20px", borderRadius: 16, background: "var(--bg3)", border: `1px solid rgba(${kindRgb},0.35)`, boxShadow: `0 0 20px rgba(${kindRgb},0.18), 0 0 1px rgba(${kindRgb},0.45) inset`, display: "flex", flexDirection: "column", gap: 14, position: "relative", overflow: "hidden" }}>
-                    <div style={{ position: "absolute", top: -20, right: -20, width: 90, height: 90, background: kindColour, opacity: 0.05, borderRadius: "50%", filter: "blur(22px)" }} />
-
-                    {/* Header */}
-                    <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
-                      <div>
-                        <div style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.5 }}>{longDate}</div>
-                        <div style={{ fontSize: 14, fontWeight: 800, color: kindColour, textTransform: "uppercase", letterSpacing: 1, marginTop: 4 }}>{kindLabel}</div>
-                      </div>
-                      <button type="button" onClick={() => setEditingDay(null)}
-                        style={{ background: "transparent", border: "none", color: "var(--text3)", cursor: "pointer", fontSize: 18, lineHeight: 1, padding: 4 }}>✕</button>
-                    </div>
-
-                    {/* Billing hero — like StatCard */}
-                    {st.kind === "present" && (
-                      <div>
-                        <div style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.5, marginBottom: 4 }}>Daily Sale</div>
-                        <div style={{ fontSize: 26, fontWeight: 800, color: "var(--gold)", lineHeight: 1.1, fontFamily: "var(--font-headline, var(--font-outfit))" }}>{INR(dayBilling)}</div>
-                        <div style={{ fontSize: 10, color: "var(--text3)", marginTop: 2 }}>Service + Material</div>
-                      </div>
-                    )}
-
-                    {/* Branch chip */}
-                    {dispBranchId && (
-                      <div>
-                        <div style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.5, marginBottom: 6 }}>Branch</div>
-                        <span style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "6px 12px", borderRadius: 999, background: "var(--bg4)", border: `1px solid ${dotColour || "var(--border2)"}`, color: "var(--text)", fontSize: 12, fontWeight: 700 }}>
-                          {dotColour && <span style={{ width: 8, height: 8, borderRadius: "50%", background: dotColour }} />}
-                          {dispBranch || "—"}
-                          {dispBranchId === s.branch_id && <span style={{ fontSize: 9, color: "var(--text3)", fontWeight: 600, textTransform: "uppercase", letterSpacing: 1 }}>home</span>}
-                        </span>
-                      </div>
-                    )}
-
-                    {/* Zero-sale callout */}
-                    {isZeroSale && !isHoliday && (
-                      <div style={{ padding: "10px 12px", borderRadius: 10, background: "rgba(250,204,21,0.12)", border: "1px solid rgba(250,204,21,0.35)", color: "#facc15", fontSize: 11, fontWeight: 700, lineHeight: 1.5 }}>
-                        ⚠ Staff was present but billed ₹0. You can mark this as a paid Holiday.
-                      </div>
-                    )}
-
-                    {/* Note (read-only display when present) */}
-                    {st.note && (
-                      <div>
-                        <div style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.5, marginBottom: 4 }}>Note</div>
-                        <div style={{ fontSize: 12, color: "var(--text2)", padding: "8px 10px", background: "var(--bg4)", borderRadius: 8, border: "1px solid var(--border2)" }}>{st.note}</div>
-                      </div>
-                    )}
-
-                    {/* Editor — admin/accountant only */}
-                    {canEdit && (
-                      <>
-                        <div style={{ height: 1, background: "var(--border)", margin: "2px 0" }} />
-                        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                          <div style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.5 }}>Update Attendance</div>
-                          <div style={{ display: "inline-flex", borderRadius: 8, overflow: "hidden", border: "1px solid var(--border2)", width: "fit-content" }}>
-                            {[["present", true, "Present"], ["absent", false, "Absent"]].map(([k, v, lbl]) => (
-                              <button key={k} type="button" onClick={() => setDayDraft(d => ({ ...d, present: v }))}
-                                style={{ padding: "8px 14px", background: dayDraft.present === v ? (v ? "var(--green)" : "var(--red)") : "var(--bg3)", color: dayDraft.present === v ? "#000" : "var(--text2)", border: "none", fontSize: 11, fontWeight: 800, cursor: "pointer", textTransform: "uppercase", letterSpacing: 1 }}>{lbl}</button>
-                            ))}
-                          </div>
-                          {dayDraft.present && (
-                            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                              <label style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Worked at</label>
-                              <BranchSelect
-                                value={dayDraft.branch_id || ""}
-                                onChange={(v) => setDayDraft(d => ({ ...d, branch_id: v }))}
-                                branches={branches}
-                                placeholder="—"
-                                minWidth={0}
-                              />
-                            </div>
-                          )}
-                          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                            <label style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Note (optional)</label>
-                            <input value={dayDraft.note} onChange={e => setDayDraft(d => ({ ...d, note: e.target.value }))}
-                              placeholder="Reason / context"
-                              style={{ padding: "8px 10px", borderRadius: 8, background: "var(--bg4)", border: "1px solid var(--border2)", color: "var(--text)", fontSize: 12, outline: "none" }} />
-                          </div>
-                          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 4 }}>
-                            <button type="button" onClick={() => saveDay(editingDay, dayDraft)}
-                              style={{ flex: 1, minWidth: 100, padding: "10px", borderRadius: 10, background: "var(--accent)", color: "#000", border: "none", fontWeight: 800, cursor: "pointer" }}>Save</button>
-                            {isHoliday ? (
-                              <button type="button" onClick={() => removeHoliday(editingDay)}
-                                title="Remove holiday marking"
-                                style={{ flex: 1, minWidth: 100, padding: "10px", borderRadius: 10, background: "var(--bg4)", color: "var(--text2)", border: "1px solid var(--border)", fontWeight: 700, cursor: "pointer" }}>
-                                Remove Holiday
-                              </button>
-                            ) : (
-                              <button type="button" onClick={() => markHoliday(editingDay)}
-                                title="Mark this day as a paid holiday for this staff"
-                                style={{ flex: 1, minWidth: 100, padding: "10px", borderRadius: 10, background: "rgba(96,165,250,0.18)", color: "#60a5fa", border: "1px solid rgba(96,165,250,0.5)", fontWeight: 800, cursor: "pointer" }}>
-                                Mark Holiday
-                              </button>
-                            )}
-                          </div>
-                          {hasOverride && (
-                            <button type="button" onClick={() => clearOverride(editingDay)}
-                              title="Revert to computed attendance"
-                              style={{ padding: "8px 10px", borderRadius: 8, background: "transparent", color: "var(--text3)", border: "1px dashed var(--border)", fontWeight: 600, fontSize: 11, cursor: "pointer" }}>Clear Manual Override</button>
-                          )}
-                        </div>
-                      </>
-                    )}
-                  </div>
-                );
-              })()}
-            </aside>
-            </div>
-          );
-        })()}
-      </Modal>
+      {/* Attendance Calendar Modal — shared component (per-staff, per-month) */}
+      <AttendanceCalendarModal target={attendanceModal} onClose={() => setAttendanceModal(null)} entries={entries} leaves={leaves} branches={branches} canEdit={canEdit} currentUser={currentUser} />
 
       {/* Transfer Modal */}
-      <Modal isOpen={!!transferModal} onClose={() => setTransferModal(null)} title={`Transfer Staff — ${transferModal?.name || ''}`}>
+      <Modal isOpen={!!transferModal} onClose={() => setTransferModal(null)} title={`Transfer Staff â€” ${transferModal?.name || ''}`}>
         {transferModal && (
           <form onSubmit={handleSaveTransfer} style={{ display: "flex", flexDirection: "column", gap: 20 }}>
             <div style={{ background: "var(--bg4)", padding: 12, borderRadius: 10, fontSize: 12, color: "var(--text2)" }}>
               Temporarily reassigning <strong>{transferModal.name}</strong> from{" "}
-              <strong>{branches.find(b => b.id === transferModal.branch_id)?.name || "—"}</strong>.
+              <strong>{branches.find(b => b.id === transferModal.branch_id)?.name || "â€”"}</strong>.
               This does not change their home branch.
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 6, justifyContent: "flex-end" }}>
@@ -997,7 +561,7 @@ export default function StaffPage() {
           <div style={{ marginBottom: 20 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
               <span style={{ padding: "4px 10px", borderRadius: 999, background: "rgba(251,146,60,0.15)", color: "var(--orange)", fontSize: 10, fontWeight: 900, textTransform: "uppercase", letterSpacing: 1 }}>Action Needed</span>
-              <h4 style={{ fontSize: 14, fontWeight: 800, color: "var(--orange)", margin: 0 }}>Pending Setup — {pending.length} new staff added by accountant</h4>
+              <h4 style={{ fontSize: 14, fontWeight: 800, color: "var(--orange)", margin: 0 }}>Pending Setup â€” {pending.length} new staff added by accountant</h4>
             </div>
             <Card style={{ border: "1px solid rgba(251,146,60,0.35)" }}>
               <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 13 }}>
@@ -1013,10 +577,10 @@ export default function StaffPage() {
                     return (
                       <tr key={s.id} style={{ background: "rgba(251,146,60,0.03)" }}>
                         <TD style={{ fontWeight: 700 }}>{toTitleCase(s.name)}</TD>
-                        <TD>{b?.name || "—"}</TD>
-                        <TD>{s.role || "—"}</TD>
-                        <TD style={{ color: "var(--text3)" }}>{s.mobile || "—"}</TD>
-                        <TD style={{ color: "var(--text3)" }}>{s.join || "—"}</TD>
+                        <TD>{b?.name || "â€”"}</TD>
+                        <TD>{s.role || "â€”"}</TD>
+                        <TD style={{ color: "var(--text3)" }}>{s.mobile || "â€”"}</TD>
+                        <TD style={{ color: "var(--text3)" }}>{s.join || "â€”"}</TD>
                         <TD right style={{ color: "var(--orange)", fontWeight: 700 }}>{INR(s.salary || 0)}</TD>
                         <TD right style={{ color: "var(--orange)", fontWeight: 700 }}>{s.incentive_pct || 10}%</TD>
                         <TD sticky right>
@@ -1042,7 +606,7 @@ export default function StaffPage() {
                                   }
                                 },
                               })}
-                              title="Delete this pending staff entry — accountant will need to re-add"
+                              title="Delete this pending staff entry â€” accountant will need to re-add"
                               style={{ padding: "6px 14px", borderRadius: 8, background: "rgba(248,113,113,0.1)", color: "var(--red)", border: "1px solid rgba(248,113,113,0.4)", fontWeight: 800, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 }}>
                               <Icon name="close" size={12} /> Reject
                             </button>
@@ -1083,8 +647,8 @@ export default function StaffPage() {
                 return staffBillingInPeriod(s.id, entries, filterPrefix, filterMode, filterYear) / tgt;
               },
               salary: s => yearlyStaffSalary(s),
-              // Sort by the resolved effective rate (per-staff override → branch-type
-              // global → 10% default) so the Incentive column groups consistently.
+              // Sort by the resolved effective rate (per-staff override â†’ branch-type
+              // global â†’ 10% default) so the Incentive column groups consistently.
               incentive: s => {
                 if (s.incentive_pct !== undefined && s.incentive_pct !== null && s.incentive_pct !== "") return Number(s.incentive_pct) || 0;
                 const br = branches.find(x => x.id === s.branch_id);
@@ -1102,7 +666,7 @@ export default function StaffPage() {
               const tgt = (s.target || 50000) * monthsInView;
               const overall = staffOverallStatus(s, statusRefMon);
               const checkMon = filterMode === "month" ? filterPrefix : filterYear + "-" + String(NOW.getMonth() + 1).padStart(2, "0");
-              // Cap to yesterday for display — current-month "22 working days" is misleading
+              // Cap to yesterday for display â€” current-month "22 working days" is misleading
               // when today's entry hasn't been captured yet. Payroll/targets still use the full-month view.
               const monthSt = staffStatusForMonth(s, checkMon, { capToYesterday: true });
               const sal = yearlyStaffSalary(s);
@@ -1120,11 +684,11 @@ export default function StaffPage() {
                           {toTitleCase(s.name)}
                         </div>
                         <div style={{ fontSize: 11, color: "var(--text3)", display: "flex", alignItems: "center", gap: 5 }}>
-                          <Icon name="log" size={10} /> {b?.name || "No Branch"} • {s.mobile || "No Mobile"}
+                          <Icon name="log" size={10} /> {b?.name || "No Branch"} â€¢ {s.mobile || "No Mobile"}
                         </div>
                         {activeTransfer && (
                           <div style={{ marginTop: 4, display: "inline-flex", alignItems: "center", gap: 6, padding: "2px 8px", borderRadius: 999, background: "rgba(96,165,250,0.12)", border: "1px solid rgba(96,165,250,0.3)", fontSize: 10, fontWeight: 700, color: "var(--blue, #60a5fa)" }}>
-                            <span>↪ Temp @ {activeTransfer.to_branch_name}</span>
+                            <span>â†ª Temp @ {activeTransfer.to_branch_name}</span>
                             {activeTransfer.end_date && <span style={{ opacity: 0.8 }}>until {activeTransfer.end_date}</span>}
                           </div>
                         )}
@@ -1138,7 +702,7 @@ export default function StaffPage() {
                       </div>
                       {(monthSt.status === 'partial' || monthSt.status === 'active') && (
                         <span style={{ fontSize: 10, color: monthSt.status === 'partial' ? "var(--orange)" : "var(--text3)", fontWeight: 700 }}>
-                          {monthSt.status === 'partial' ? "Partial · " : ""}{monthSt.daysWorked} working day{monthSt.daysWorked === 1 ? "" : "s"}{monthSt.toDate ? " · to date" : ""}
+                          {monthSt.status === 'partial' ? "Partial Â· " : ""}{monthSt.daysWorked} working day{monthSt.daysWorked === 1 ? "" : "s"}{monthSt.toDate ? " Â· to date" : ""}
                         </span>
                       )}
                     </div>
@@ -1167,10 +731,10 @@ export default function StaffPage() {
                     const color = source === "explicit-zero" ? "var(--red)"
                       : source === "explicit" ? "var(--accent)"
                       : "var(--orange)";
-                    const note = source === "explicit-zero" ? "Set to 0 — no incentive earned"
+                    const note = source === "explicit-zero" ? "Set to 0 â€” no incentive earned"
                       : source === "explicit" ? "Set on staff profile"
                       : source === "fallback" ? `Falls back to ${b?.type === "unisex" ? "unisex" : "mens"} global rate`
-                      : "Default — no branch type resolved";
+                      : "Default â€” no branch type resolved";
                     return (
                       <TD right>
                         <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }} title={note}>
@@ -1200,7 +764,7 @@ export default function StaffPage() {
                   )}
                   {canEdit && (
                     <TD sticky>
-                      {/* Uniform 32×32 icon buttons — one flat row so every staff
+                      {/* Uniform 32Ã—32 icon buttons â€” one flat row so every staff
                           line reads the same regardless of transfer state. */}
                       <div style={{ display: "flex", alignItems: "center", gap: 5, justifyContent: "flex-end", flexWrap: "nowrap" }}>
                         <IconBtn name="edit" onClick={() => handleEdit(s)} variant="secondary" title="Edit Staff" />
@@ -1208,16 +772,16 @@ export default function StaffPage() {
                           <button type="button"
                             onClick={() => setAttendanceModal({ staff: s, month: filterMode === "month" ? filterPrefix : `${filterYear}-${String(NOW.getMonth() + 1).padStart(2, "0")}` })}
                             title="Attendance calendar"
-                            style={{ width: 32, height: 32, borderRadius: 10, background: "rgba(var(--accent-rgb),0.1)", border: "1px solid rgba(var(--accent-rgb),0.35)", color: "var(--accent)", cursor: "pointer", fontSize: 14, lineHeight: 1, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>📅</button>
+                            style={{ width: 32, height: 32, borderRadius: 10, background: "rgba(var(--accent-rgb),0.1)", border: "1px solid rgba(var(--accent-rgb),0.35)", color: "var(--accent)", cursor: "pointer", fontSize: 14, lineHeight: 1, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>ðŸ“…</button>
                         )}
                         {!isAccountant && <IconBtn name="log" onClick={() => setHistoryModal(s)} variant="secondary" title="History Log" />}
                         {overall === 'active' && (
                           <button onClick={() => openTransfer(s)} title={activeTransfer ? `On transfer @ ${activeTransfer.to_branch_name}` : "Transfer to another branch"}
-                            style={{ width: 32, height: 32, borderRadius: 10, background: "rgba(96,165,250,0.12)", border: `1px solid rgba(96,165,250,${activeTransfer ? 0.6 : 0.3})`, color: "var(--blue, #60a5fa)", fontSize: 15, fontWeight: 800, cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>↪</button>
+                            style={{ width: 32, height: 32, borderRadius: 10, background: "rgba(96,165,250,0.12)", border: `1px solid rgba(96,165,250,${activeTransfer ? 0.6 : 0.3})`, color: "var(--blue, #60a5fa)", fontSize: 15, fontWeight: 800, cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>â†ª</button>
                         )}
                         {overall === 'active' && activeTransfer && (
                           <button onClick={() => handleEndTransfer(activeTransfer)} title="Return to home branch"
-                            style={{ width: 32, height: 32, borderRadius: 10, background: "var(--green-bg)", border: "1px solid rgba(74,222,128,0.3)", color: "var(--green)", fontSize: 15, fontWeight: 800, cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>↩</button>
+                            style={{ width: 32, height: 32, borderRadius: 10, background: "var(--green-bg)", border: "1px solid rgba(74,222,128,0.3)", color: "var(--green)", fontSize: 15, fontWeight: 800, cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>â†©</button>
                         )}
                         <IconBtn name={overall === 'active' ? 'close' : 'check'} onClick={() => handleToggleStatus(s, !(overall === 'active'))} variant={overall === 'active' ? 'danger' : 'success'} title={overall === 'active' ? "Mark as Exited" : "Activate"} />
                         {!isAccountant && <IconBtn name="del" onClick={() => handleDelete(s.id)} variant="danger" title="Delete" />}
@@ -1245,7 +809,7 @@ export default function StaffPage() {
       </Card>
 
       {/* Employee History Log Modal */}
-      <Modal isOpen={!!historyModal} onClose={() => setHistoryModal(null)} title={`Employee Log — ${historyModal?.name || ''}`} width={620}>
+      <Modal isOpen={!!historyModal} onClose={() => setHistoryModal(null)} title={`Employee Log â€” ${historyModal?.name || ''}`} width={620}>
         {historyModal && (() => {
           const sHist = salaryHistory.filter(h => h.staff_id === historyModal.id);
           const sLog = statusLog.filter(l => l.staff_id === historyModal.id);
@@ -1257,8 +821,8 @@ export default function StaffPage() {
               date: h.effective_from,
               type: 'salary',
               action: 'Salary Changed',
-              details: `${INR(h.old_salary || 0)} → ${INR(h.salary)}${h.old_salary != null && h.salary > h.old_salary ? ` (+${INR(h.salary - h.old_salary)} increment)` : ''}`,
-              by: h.changed_by || '—',
+              details: `${INR(h.old_salary || 0)} â†’ ${INR(h.salary)}${h.old_salary != null && h.salary > h.old_salary ? ` (+${INR(h.salary - h.old_salary)} increment)` : ''}`,
+              by: h.changed_by || 'â€”',
               color: 'accent',
             })),
             ...sLog.map(l => ({
@@ -1266,15 +830,15 @@ export default function StaffPage() {
               type: 'status',
               action: l.action === 'activated' ? 'Activated' : l.action === 'deactivated' ? 'Deactivated' : l.action,
               details: l.action === 'deactivated' ? `Exit date set: ${l.date}` : 'Rejoined / Reactivated',
-              by: l.by || '—',
+              by: l.by || 'â€”',
               color: l.action === 'activated' ? 'green' : 'red',
             })),
             ...sTransfers.map(t => ({
               date: t.start_date,
               type: 'transfer',
               action: t.status === 'active' ? 'Transferred' : 'Transfer Ended',
-              details: `${t.from_branch_name || '—'} → ${t.to_branch_name || '—'}${t.end_date ? ` (until ${t.end_date})` : ''}${t.reason ? ` • ${t.reason}` : ''}`,
-              by: t.created_by || '—',
+              details: `${t.from_branch_name || 'â€”'} â†’ ${t.to_branch_name || 'â€”'}${t.end_date ? ` (until ${t.end_date})` : ''}${t.reason ? ` â€¢ ${t.reason}` : ''}`,
+              by: t.created_by || 'â€”',
               color: t.status === 'active' ? 'blue' : 'accent',
             })),
           ].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
@@ -1284,12 +848,12 @@ export default function StaffPage() {
               {/* Employee Info Card */}
               <div style={{ background: "var(--bg4)", padding: 16, borderRadius: 10 }}>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, fontSize: 12 }}>
-                  <div><span style={{ color: "var(--text3)" }}>Branch:</span> <strong>{b?.name || '—'}</strong></div>
-                  <div><span style={{ color: "var(--text3)" }}>Role:</span> <strong>{historyModal.role || '—'}</strong></div>
-                  <div><span style={{ color: "var(--text3)" }}>Joined:</span> <strong>{historyModal.join || '—'}</strong></div>
+                  <div><span style={{ color: "var(--text3)" }}>Branch:</span> <strong>{b?.name || 'â€”'}</strong></div>
+                  <div><span style={{ color: "var(--text3)" }}>Role:</span> <strong>{historyModal.role || 'â€”'}</strong></div>
+                  <div><span style={{ color: "var(--text3)" }}>Joined:</span> <strong>{historyModal.join || 'â€”'}</strong></div>
                   <div><span style={{ color: "var(--text3)" }}>Status:</span> <strong style={{ color: historyModal.exit_date ? "var(--red)" : "var(--green)" }}>{historyModal.exit_date ? `Exited ${historyModal.exit_date}` : 'Active'}</strong></div>
                   <div><span style={{ color: "var(--text3)" }}>Current Salary:</span> <strong style={{ color: "var(--accent)" }}>{INR(historyModal.salary)}</strong></div>
-                  <div><span style={{ color: "var(--text3)" }}>Mobile:</span> <strong>{historyModal.mobile || '—'}</strong></div>
+                  <div><span style={{ color: "var(--text3)" }}>Mobile:</span> <strong>{historyModal.mobile || 'â€”'}</strong></div>
                 </div>
               </div>
 
@@ -1325,7 +889,7 @@ export default function StaffPage() {
       </Modal>
 
       {/* Monthly Breakdown Modal (yearly view) */}
-      <Modal isOpen={!!monthlyLogModal} onClose={() => setMonthlyLogModal(null)} title={`Monthly Breakdown — ${monthlyLogModal?.name || ''}`} width={520}>
+      <Modal isOpen={!!monthlyLogModal} onClose={() => setMonthlyLogModal(null)} title={`Monthly Breakdown â€” ${monthlyLogModal?.name || ''}`} width={520}>
         {monthlyLogModal && (() => {
           const MONTH_NAMES = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
           const limit = filterYear === NOW.getFullYear() ? NOW.getMonth() + 1 : 12;
@@ -1383,7 +947,7 @@ export default function StaffPage() {
   );
 }
 
-// ── Sub-components ───────────────────────────────────────
+// â”€â”€ Sub-components â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function FormField({ label, children }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 6, justifyContent: "flex-end" }}>
