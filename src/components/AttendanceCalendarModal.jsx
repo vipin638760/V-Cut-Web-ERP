@@ -17,6 +17,7 @@ export default function AttendanceCalendarModal({ target, onClose, entries = [],
   const [attendanceOverrides, setAttendanceOverrides] = useState([]);
   const [editingDay, setEditingDay] = useState(null);
   const [dayDraft, setDayDraft] = useState({ present: true, branch_id: "", note: "" });
+  const [selectedBranch, setSelectedBranch] = useState(null);
 
   // Overlay rows from staff_attendance for the open staff/month. Overlay wins
   // over entries-derived presence when both exist for a date.
@@ -35,7 +36,7 @@ export default function AttendanceCalendarModal({ target, onClose, entries = [],
     return () => unsub();
   }, [target]);
 
-  const close = () => { onClose?.(); setAttendanceOverrides([]); setEditingDay(null); };
+  const close = () => { onClose?.(); setAttendanceOverrides([]); setEditingDay(null); setSelectedBranch(null); };
 
   return (
     <>
@@ -147,6 +148,7 @@ export default function AttendanceCalendarModal({ target, onClose, entries = [],
           const cutoff = isCurrentMonthView ? new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate() - 1).toISOString().slice(0, 10) : null;
           let presentCount = 0, leaveCount = 0, absentCount = 0, zeroSaleCount = 0, totalBilling = 0;
           const branchTally = new Map();
+          const branchDays = new Map();
           const zeroSaleDays = [];
           days.forEach(dateStr => {
             if (cutoff && dateStr > cutoff) return;
@@ -158,6 +160,9 @@ export default function AttendanceCalendarModal({ target, onClose, entries = [],
               if (st.branch_id) {
                 const cur = branchTally.get(st.branch_id) || { days: 0, billing: 0 };
                 branchTally.set(st.branch_id, { days: cur.days + 1, billing: cur.billing + billing });
+                const list = branchDays.get(st.branch_id) || [];
+                list.push({ date: dateStr, billing });
+                branchDays.set(st.branch_id, list);
               }
               if (billing === 0) { zeroSaleCount++; zeroSaleDays.push(dateStr); }
             } else if (st.kind === "leave") leaveCount++;
@@ -189,12 +194,15 @@ export default function AttendanceCalendarModal({ target, onClose, entries = [],
                     {[...branchTally.entries()].sort((a, b) => b[1].billing - a[1].billing).map(([bid, info]) => {
                       const bName = (branches.find(b => b.id === bid)?.name || "Branch").replace("V-CUT ", "");
                       const isHome = bid === s.branch_id;
+                      const isSel = selectedBranch === bid;
                       return (
-                        <span key={bid} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 10px", borderRadius: 999, background: "var(--bg3)", border: `1px solid ${branchColour.get(bid)}`, color: "var(--text)", fontSize: 11, fontWeight: 700 }}>
-                          <span style={{ width: 8, height: 8, borderRadius: "50%", background: branchColour.get(bid) }} />
+                        <button key={bid} type="button" onClick={() => { setEditingDay(null); setSelectedBranch(isSel ? null : bid); }}
+                          title="View this branch's day-by-day breakdown"
+                          style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 10px", borderRadius: 999, background: isSel ? branchColour.get(bid) : "var(--bg3)", border: `1px solid ${branchColour.get(bid)}`, color: isSel ? "#000" : "var(--text)", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>
+                          <span style={{ width: 8, height: 8, borderRadius: "50%", background: isSel ? "#000" : branchColour.get(bid) }} />
                           {bName} · {info.days}d · {INR(info.billing)}
-                          {isHome && <span style={{ fontSize: 9, color: "var(--text3)", fontWeight: 600, textTransform: "uppercase", letterSpacing: 1 }}>home</span>}
-                        </span>
+                          {isHome && <span style={{ fontSize: 9, color: isSel ? "#000" : "var(--text3)", fontWeight: 600, textTransform: "uppercase", letterSpacing: 1 }}>home</span>}
+                        </button>
                       );
                     })}
                   </div>
@@ -254,11 +262,68 @@ export default function AttendanceCalendarModal({ target, onClose, entries = [],
 
               <aside style={{ position: "sticky", top: 0, alignSelf: "start", display: "flex", flexDirection: "column", gap: 12 }}>
                 {(() => {
+                  if (!editingDay && selectedBranch && branchTally.has(selectedBranch)) {
+                    const info = branchTally.get(selectedBranch);
+                    const dayList = (branchDays.get(selectedBranch) || []).slice().sort((a, b) => a.date.localeCompare(b.date));
+                    const col = branchColour.get(selectedBranch) || "var(--accent)";
+                    const bName = (branches.find(b => b.id === selectedBranch)?.name || "Branch").replace("V-CUT ", "");
+                    const isHome = selectedBranch === s.branch_id;
+                    const zeroDays = dayList.filter(d => d.billing === 0).length;
+                    const avg = info.days > 0 ? Math.round(info.billing / info.days) : 0;
+                    const rgb = "34,211,238";
+                    return (
+                      <div style={{ padding: "18px 20px", borderRadius: 16, background: "var(--bg3)", border: `1px solid ${col}`, boxShadow: `0 0 20px rgba(${rgb},0.12)`, display: "flex", flexDirection: "column", gap: 14, position: "relative", overflow: "hidden" }}>
+                        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                            <span style={{ width: 10, height: 10, borderRadius: "50%", background: col }} />
+                            <div>
+                              <div style={{ fontSize: 15, fontWeight: 800, color: "var(--text)", lineHeight: 1.1 }}>{bName}</div>
+                              <div style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.2, marginTop: 2 }}>{isHome ? "Home branch" : "Loaned in"}</div>
+                            </div>
+                          </div>
+                          <button type="button" onClick={() => setSelectedBranch(null)} style={{ background: "transparent", border: "none", color: "var(--text3)", cursor: "pointer", fontSize: 18, lineHeight: 1, padding: 4 }}>✕</button>
+                        </div>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                          <div style={{ padding: "10px 12px", borderRadius: 10, background: "var(--bg4)", border: "1px solid var(--border2)" }}>
+                            <div style={{ fontSize: 9, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1 }}>Days Worked</div>
+                            <div style={{ fontSize: 22, fontWeight: 800, color: "var(--text)", lineHeight: 1.2 }}>{info.days}</div>
+                          </div>
+                          <div style={{ padding: "10px 12px", borderRadius: 10, background: "var(--bg4)", border: "1px solid var(--border2)" }}>
+                            <div style={{ fontSize: 9, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1 }}>Total Billing</div>
+                            <div style={{ fontSize: 22, fontWeight: 800, color: "var(--gold)", lineHeight: 1.2 }}>{INR(info.billing)}</div>
+                          </div>
+                          <div style={{ padding: "10px 12px", borderRadius: 10, background: "var(--bg4)", border: "1px solid var(--border2)" }}>
+                            <div style={{ fontSize: 9, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1 }}>Avg / Day</div>
+                            <div style={{ fontSize: 16, fontWeight: 800, color: "var(--text)", lineHeight: 1.4 }}>{INR(avg)}</div>
+                          </div>
+                          <div style={{ padding: "10px 12px", borderRadius: 10, background: "var(--bg4)", border: "1px solid var(--border2)" }}>
+                            <div style={{ fontSize: 9, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1 }}>Zero-Sale</div>
+                            <div style={{ fontSize: 16, fontWeight: 800, color: zeroDays ? "#facc15" : "var(--text)", lineHeight: 1.4 }}>{zeroDays}</div>
+                          </div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.5, marginBottom: 6 }}>Day-by-day</div>
+                          <div style={{ display: "flex", flexDirection: "column", gap: 2, maxHeight: 260, overflowY: "auto" }}>
+                            {dayList.map(d => {
+                              const dow = new Date(d.date).toLocaleDateString("default", { weekday: "short" });
+                              return (
+                                <button key={d.date} type="button" onClick={() => { const st2 = dayStatus(d.date); setSelectedBranch(null); setEditingDay(d.date); setDayDraft({ present: true, branch_id: st2.branch_id || selectedBranch, note: st2.note || "" }); }}
+                                  style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "7px 10px", borderRadius: 8, background: "transparent", border: "1px solid var(--border)", color: "var(--text2)", cursor: "pointer", fontSize: 12, textAlign: "left" }}>
+                                  <span style={{ fontWeight: 700 }}>{dow} {Number(d.date.slice(8, 10))}</span>
+                                  <span style={{ fontWeight: 800, color: d.billing === 0 ? "#facc15" : "var(--gold)" }}>{d.billing === 0 ? "₹0 ⚠" : INR(d.billing)}</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  }
                   if (!editingDay) {
                     return (
                       <div style={{ padding: "22px 24px", borderRadius: 16, background: "var(--bg3)", border: "1px solid rgba(34,211,238,0.18)", boxShadow: "0 0 18px rgba(34,211,238,0.08), 0 0 1px rgba(34,211,238,0.25) inset", textAlign: "center" }}>
                         <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.5, marginBottom: 10 }}>Day Details</div>
-                        <div style={{ fontSize: 13, color: "var(--text2)", lineHeight: 1.6 }}>Click any day on the calendar to view billing breakdown{canEdit ? " and edit attendance" : ""}.</div>
+                        <div style={{ fontSize: 13, color: "var(--text2)", lineHeight: 1.6 }}>Click a branch chip above for its day-by-day breakdown, or click any day on the calendar to view billing{canEdit ? " and edit attendance" : ""}.</div>
                       </div>
                     );
                   }
