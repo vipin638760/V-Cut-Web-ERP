@@ -853,6 +853,16 @@ export default function PayrollTab() {
             </div>
 
             <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
+              {/* Preview the exact payslip (with the chosen mode + date) before
+                  committing the release. Opens the payslip window with a
+                  Print / Save-as-PDF button — nothing is saved yet. */}
+              {!releaseModal.bulk && (
+                <button type="button" onClick={() => generatePayslipPDF(releaseModal.employee, releaseModal.branch, releaseModal.earned, releaseModal.advApproved, releaseModal.advPending, releaseModal.net, releaseModal.baseSalary, filterPrefix, releaseModal.periodAdvances, { daysWorked: releaseModal.daysWorked, leavesTaken: releaseModal.leavesTaken, payMode: releaseMode, payDate: releaseDate })}
+                  title="Preview the payslip before releasing"
+                  style={{ padding: "12px 18px", borderRadius: 10, background: "var(--bg3)", color: "var(--accent)", border: "1px solid rgba(var(--accent-rgb),0.4)", fontWeight: 700, fontSize: 13, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 }}>
+                  👁 Preview
+                </button>
+              )}
               <button onClick={handleReleaseSalary}
                 style={{ flex: 1, padding: "12px 0", borderRadius: 10, background: "linear-gradient(135deg, var(--accent), var(--gold2))", color: "#000", border: "none", fontWeight: 700, fontSize: 13, cursor: "pointer", textTransform: "uppercase", letterSpacing: 0.5 }}>
                 {releaseModal?.bulk ? `Release ${releaseModal.rows?.length || 0} Salaries` : "Release & Generate Payslip"}
