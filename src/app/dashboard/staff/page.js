@@ -1110,7 +1110,7 @@ export default function StaffPage() {
               const activeTransfer = getActiveTransfer(s.id);
 
               return (
-                <tr key={s.id} style={{ opacity: overall === "inactive" ? 0.6 : 1, transition: "background 0.2s" }}>
+                <tr key={s.id} style={{ opacity: overall === "inactive" ? 0.55 : 1, transition: "background 0.2s", background: i % 2 ? "rgba(255,255,255,0.018)" : "transparent" }}>
                   <TD>
                     <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                       <div style={{ width: 40, height: 40, borderRadius: 12, background: "var(--bg4)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, fontWeight: 800, color: "var(--accent)", border: "1px solid var(--border)" }}>{(s.name || "?")[0].toUpperCase()}</div>
@@ -1200,7 +1200,9 @@ export default function StaffPage() {
                   )}
                   {canEdit && (
                     <TD sticky>
-                      <div style={{ display: "flex", alignItems: "center", gap: 6, justifyContent: "center" }}>
+                      {/* Uniform 32×32 icon buttons — one flat row so every staff
+                          line reads the same regardless of transfer state. */}
+                      <div style={{ display: "flex", alignItems: "center", gap: 5, justifyContent: "flex-end", flexWrap: "nowrap" }}>
                         <IconBtn name="edit" onClick={() => handleEdit(s)} variant="secondary" title="Edit Staff" />
                         {(monthSt.status === 'partial' || monthSt.status === 'active') && (
                           <button type="button"
@@ -1210,18 +1212,12 @@ export default function StaffPage() {
                         )}
                         {!isAccountant && <IconBtn name="log" onClick={() => setHistoryModal(s)} variant="secondary" title="History Log" />}
                         {overall === 'active' && (
-                          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                            <button onClick={() => openTransfer(s)} title="Transfer to another branch"
-                              style={{ padding: "6px 10px", borderRadius: 8, background: "rgba(96,165,250,0.12)", border: "1px solid rgba(96,165,250,0.3)", color: "var(--blue, #60a5fa)", fontSize: 11, fontWeight: 800, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4, width: "100%" }}>
-                              ↪ Transfer
-                            </button>
-                            {activeTransfer && (
-                              <button onClick={() => handleEndTransfer(activeTransfer)} title="Return to home branch"
-                                style={{ padding: "6px 10px", borderRadius: 8, background: "var(--green-bg)", border: "1px solid rgba(74,222,128,0.3)", color: "var(--green)", fontSize: 11, fontWeight: 800, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4, width: "100%" }}>
-                                ↩ Return
-                              </button>
-                            )}
-                          </div>
+                          <button onClick={() => openTransfer(s)} title={activeTransfer ? `On transfer @ ${activeTransfer.to_branch_name}` : "Transfer to another branch"}
+                            style={{ width: 32, height: 32, borderRadius: 10, background: "rgba(96,165,250,0.12)", border: `1px solid rgba(96,165,250,${activeTransfer ? 0.6 : 0.3})`, color: "var(--blue, #60a5fa)", fontSize: 15, fontWeight: 800, cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>↪</button>
+                        )}
+                        {overall === 'active' && activeTransfer && (
+                          <button onClick={() => handleEndTransfer(activeTransfer)} title="Return to home branch"
+                            style={{ width: 32, height: 32, borderRadius: 10, background: "var(--green-bg)", border: "1px solid rgba(74,222,128,0.3)", color: "var(--green)", fontSize: 15, fontWeight: 800, cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>↩</button>
                         )}
                         <IconBtn name={overall === 'active' ? 'close' : 'check'} onClick={() => handleToggleStatus(s, !(overall === 'active'))} variant={overall === 'active' ? 'danger' : 'success'} title={overall === 'active' ? "Mark as Exited" : "Activate"} />
                         {!isAccountant && <IconBtn name="del" onClick={() => handleDelete(s.id)} variant="danger" title="Delete" />}
