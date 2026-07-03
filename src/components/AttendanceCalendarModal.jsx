@@ -39,7 +39,7 @@ export default function AttendanceCalendarModal({ target, onClose, entries = [],
 
   return (
     <>
-      <ToastContainer />
+      {ToastContainer}
       <Modal isOpen={!!target} onClose={close} title={`Attendance · ${target?.staff?.name || ""}`} width={1080}>
         {target && (() => {
           const { staff: s, month } = target;
