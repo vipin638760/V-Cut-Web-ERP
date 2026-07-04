@@ -1258,6 +1258,11 @@ export default function DashboardPage() {
         <DailyBusinessChart entries={entries} branches={branches} filterYear={filterYear} filterMonth={filterMonth} />
       )}
 
+      {/* Same-date-across-last-3-months compare */}
+      {filterMode === "month" && (dashView === "all" || dashView === "shop") && (
+        <SameDateCompareChart entries={entries} branches={branches} filterYear={filterYear} filterMonth={filterMonth} />
+      )}
+
       {/* Monthly business bar chart — year mode only (12 bars instead of 365) */}
       {filterMode === "year" && (dashView === "all" || dashView === "shop") && (
         <MonthlyBusinessChart entries={entries} branches={branches} filterYear={filterYear} monthlyExpense={monthlyNetExpense} />
@@ -2408,6 +2413,133 @@ function DailyMaterialChart({ entries, allocations, branches = [], filterYear, f
           </div>
         </div>
       )}
+    </Card>
+  );
+}
+
+// Compare the SAME calendar date across the selected month + the previous two.
+// Answers "how did the 1st (or Nth) do this month vs last month vs the month
+// before?" — with each bar tagged by weekday, since day-of-week drives salon
+// footfall more than day-of-month. Day is user-pickable (‹ N ›).
+function SameDateCompareChart({ entries, branches = [], filterYear, filterMonth }) {
+  const NOW = new Date();
+  const maxDayThisMonth = new Date(filterYear, filterMonth, 0).getDate();
+  const isCurrentMonthSel = NOW.getFullYear() === filterYear && NOW.getMonth() + 1 === filterMonth;
+  const [day, setDay] = useState(Math.min(isCurrentMonthSel ? NOW.getDate() : 1, maxDayThisMonth));
+  const [hover, setHover] = useState(null);
+
+  // Network business (online + cash + material sale) for a given YYYY-MM-DD,
+  // plus a per-branch breakdown for the tooltip.
+  const businessOn = (dateStr) => {
+    let total = 0;
+    const byBranch = new Map();
+    entries.forEach(e => {
+      if (e.date !== dateStr) return;
+      const matSale = (e.staff_billing || []).reduce((s, sb) => s + (sb.material || 0), 0);
+      const sale = (e.online || 0) + (e.cash || 0) + matSale;
+      total += sale;
+      if (e.branch_id && sale) byBranch.set(e.branch_id, (byBranch.get(e.branch_id) || 0) + sale);
+    });
+    return { total, byBranch };
+  };
+
+  // Build 3 buckets: selected month and the two before it (oldest → newest).
+  const buckets = [];
+  for (let back = 2; back >= 0; back--) {
+    let m = filterMonth - back, y = filterYear;
+    while (m <= 0) { m += 12; y -= 1; }
+    const dim = new Date(y, m, 0).getDate();
+    if (day > dim) { buckets.push({ y, m, valid: false }); continue; }
+    const dateStr = `${y}-${String(m).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    const { total, byBranch } = businessOn(dateStr);
+    const dt = new Date(y, m - 1, day);
+    buckets.push({
+      y, m, valid: true, dateStr, total, byBranch,
+      weekday: dt.toLocaleDateString("en-US", { weekday: "short" }),
+      monLabel: dt.toLocaleDateString("en-US", { month: "short" }),
+      isFuture: dateStr > `${NOW.getFullYear()}-${String(NOW.getMonth() + 1).padStart(2, "0")}-${String(NOW.getDate()).padStart(2, "0")}`,
+    });
+  }
+
+  const max = Math.max(1, ...buckets.map(b => b.total || 0));
+  const valid = buckets.filter(b => b.valid);
+  const newest = valid[valid.length - 1];
+  const prev = valid.length > 1 ? valid[valid.length - 2] : null;
+  const delta = newest && prev && prev.total > 0 ? Math.round(((newest.total - prev.total) / prev.total) * 100) : null;
+  const H = 200;
+  const clampDay = (d) => Math.max(1, Math.min(31, d));
+
+  return (
+    <Card style={{ padding: 18, marginBottom: 24, overflow: "visible" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12, marginBottom: 18 }}>
+        <div>
+          <div style={{ fontSize: 11, fontWeight: 800, color: "var(--accent)", textTransform: "uppercase", letterSpacing: 2 }}>Same-Date Compare</div>
+          <div style={{ fontSize: 18, fontWeight: 800, color: "var(--gold)", fontFamily: "var(--font-headline, var(--font-outfit))", marginTop: 2 }}>Day {day} · last 3 months</div>
+        </div>
+        <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
+          {delta !== null && (
+            <div style={{ textAlign: "right" }}>
+              <div style={{ fontSize: 9, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, fontWeight: 700 }}>vs Prev Month</div>
+              <div style={{ fontSize: 15, fontWeight: 800, color: delta >= 0 ? "var(--green)" : "var(--red)" }}>{delta >= 0 ? "▲" : "▼"} {Math.abs(delta)}%</div>
+            </div>
+          )}
+          <div style={{ display: "inline-flex", alignItems: "center", gap: 8, background: "var(--bg3)", border: "1px solid var(--border)", borderRadius: 10, padding: "4px 6px" }}>
+            <button type="button" onClick={() => setDay(d => clampDay(d - 1))} disabled={day <= 1}
+              style={{ width: 30, height: 30, borderRadius: 8, border: "none", background: "var(--bg4)", color: "var(--text)", fontSize: 16, fontWeight: 800, cursor: day <= 1 ? "default" : "pointer", opacity: day <= 1 ? 0.4 : 1 }}>‹</button>
+            <div style={{ minWidth: 46, textAlign: "center" }}>
+              <div style={{ fontSize: 9, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, fontWeight: 700 }}>Date</div>
+              <div style={{ fontSize: 18, fontWeight: 800, color: "var(--accent)", lineHeight: 1 }}>{day}</div>
+            </div>
+            <button type="button" onClick={() => setDay(d => clampDay(d + 1))} disabled={day >= 31}
+              style={{ width: 30, height: 30, borderRadius: 8, border: "none", background: "var(--bg4)", color: "var(--text)", fontSize: 16, fontWeight: 800, cursor: day >= 31 ? "default" : "pointer", opacity: day >= 31 ? 0.4 : 1 }}>›</button>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ position: "relative", display: "flex", alignItems: "flex-end", justifyContent: "center", gap: 40, height: H + 64, paddingTop: 24 }}>
+        {buckets.map((b, i) => {
+          if (!b.valid) {
+            return (
+              <div key={i} style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-end", gap: 8, width: 120 }}>
+                <div style={{ height: H, display: "flex", alignItems: "center", color: "var(--text3)", fontStyle: "italic", fontSize: 11, textAlign: "center" }}>No day {day} in<br />{new Date(b.y, b.m - 1, 1).toLocaleDateString("en-US", { month: "short" })}</div>
+              </div>
+            );
+          }
+          const barH = Math.max(b.total > 0 ? 4 : 0, Math.round((b.total / max) * H));
+          const isNewest = i === buckets.length - 1;
+          const isWeekend = b.weekday === "Sat" || b.weekday === "Sun";
+          const grad = isNewest ? "linear-gradient(180deg,#7df094,#22a354)" : isWeekend ? "linear-gradient(180deg,#ffb877,#d97a2c)" : "linear-gradient(180deg,#5de8ff,#12a5bf)";
+          return (
+            <div key={i} onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)}
+              style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-end", gap: 10, width: 120, cursor: "pointer" }}>
+              <div style={{ fontSize: 15, fontWeight: 800, color: isNewest ? "var(--green)" : "var(--text)", fontFamily: "var(--font-headline, var(--font-outfit))" }}>
+                {b.total > 0 ? INR(b.total) : b.isFuture ? "—" : "₹0"}
+              </div>
+              <div style={{ width: 72, height: barH, minHeight: b.total > 0 ? 4 : 0, borderRadius: "8px 8px 0 0", background: grad, boxShadow: hover === i ? "0 0 18px rgba(93,232,255,0.35)" : "none", transition: "box-shadow .15s" }} />
+              <div style={{ textAlign: "center" }}>
+                <div style={{ fontSize: 13, fontWeight: 800, color: "var(--text)" }}>{b.monLabel} {day}</div>
+                <div style={{ fontSize: 10, fontWeight: 800, color: isWeekend ? "var(--orange, #f59e0b)" : "var(--text3)", textTransform: "uppercase", letterSpacing: 1 }}>{b.weekday}{isWeekend ? " · weekend" : ""}</div>
+              </div>
+            </div>
+          );
+        })}
+
+        {hover !== null && buckets[hover]?.valid && buckets[hover].byBranch.size > 0 && (
+          <div style={{ position: "absolute", top: 0, left: "50%", transform: "translateX(-50%)", background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 10, padding: "10px 12px", boxShadow: "0 8px 24px rgba(0,0,0,0.5)", zIndex: 20, minWidth: 180, pointerEvents: "none" }}>
+            <div style={{ fontSize: 11, fontWeight: 800, color: "var(--accent)", marginBottom: 6 }}>{buckets[hover].monLabel} {day} · {buckets[hover].weekday}</div>
+            {[...buckets[hover].byBranch.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([bid, v]) => (
+              <div key={bid} style={{ display: "flex", justifyContent: "space-between", gap: 14, fontSize: 11, padding: "2px 0" }}>
+                <span style={{ color: "var(--text2)" }}>{(branches.find(x => x.id === bid)?.name || "Branch").replace("V-CUT ", "")}</span>
+                <span style={{ color: "var(--gold)", fontWeight: 700 }}>{INR(v)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div style={{ fontSize: 10, color: "var(--text3)", marginTop: 6, textAlign: "center" }}>
+        Green = this month · Orange = weekend · Hover a bar for the branch split. Same day-of-month, three months back.
+      </div>
     </Card>
   );
 }
