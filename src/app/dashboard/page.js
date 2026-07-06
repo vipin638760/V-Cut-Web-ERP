@@ -2457,8 +2457,16 @@ function SameDateCompareChart({ entries, branches = [], filterYear, filterMonth 
   });
 
   const max = Math.max(1, ...data.flatMap(d => d.byDay.map(x => x.total)));
-  // Month totals for the header + delta.
-  const monTotals = data.map(d => d.byDay.reduce((s, x) => s + x.total, 0));
+  // Per-month total, working-day average, and best day (day# + amount).
+  const monStats = data.map(d => {
+    const total = d.byDay.reduce((s, x) => s + x.total, 0);
+    const working = d.byDay.filter(x => x.total > 0).length;
+    const avg = working ? Math.round(total / working) : 0;
+    let bestDay = 0, bestVal = 0;
+    d.byDay.forEach((x, i) => { if (x.total > bestVal) { bestVal = x.total; bestDay = i + 1; } });
+    return { total, avg, bestDay, bestVal };
+  });
+  const monTotals = monStats.map(s => s.total);
   const newest = monTotals[2], prev = monTotals[1];
   const delta = prev > 0 ? Math.round(((newest - prev) / prev) * 100) : null;
 
@@ -2482,18 +2490,31 @@ function SameDateCompareChart({ entries, branches = [], filterYear, filterMonth 
           <div style={{ fontSize: 11, fontWeight: 800, color: "var(--accent)", textTransform: "uppercase", letterSpacing: 2 }}>Same-Date Compare</div>
           <div style={{ fontSize: 18, fontWeight: 800, color: "var(--gold)", fontFamily: "var(--font-headline, var(--font-outfit))", marginTop: 2 }}>Every day · last 3 months</div>
         </div>
-        <div style={{ display: "flex", gap: 18, alignItems: "center", flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 10, alignItems: "stretch", flexWrap: "wrap" }}>
           {months.map((mo, i) => (
-            <div key={i} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-              <span style={{ width: 11, height: 11, borderRadius: 3, background: COLORS[i] }} />
-              <span style={{ fontSize: 11, fontWeight: 800, color: "var(--text2)" }}>{mo.label} {mo.y}</span>
-              <span style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)" }}>· {INR(monTotals[i])}</span>
+            <div key={i} style={{ display: "flex", flexDirection: "column", gap: 3, padding: "8px 12px", borderRadius: 10, background: "var(--bg3)", border: `1px solid ${COLORS[i]}55`, minWidth: 132 }}>
+              <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                <span style={{ width: 10, height: 10, borderRadius: 3, background: COLORS[i] }} />
+                <span style={{ fontSize: 11, fontWeight: 800, color: "var(--text)" }}>{mo.label} {mo.y}</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 10 }}>
+                <span style={{ color: "var(--text3)", fontWeight: 700 }}>Total</span>
+                <span style={{ color: "var(--text)", fontWeight: 800 }}>{INR(monTotals[i])}</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 10 }}>
+                <span style={{ color: "var(--text3)", fontWeight: 700 }}>Avg / day</span>
+                <span style={{ color: "var(--blue)", fontWeight: 800 }}>{INR(monStats[i].avg)}</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 10 }}>
+                <span style={{ color: "var(--text3)", fontWeight: 700 }}>Best</span>
+                <span style={{ color: "var(--green)", fontWeight: 800 }}>{monStats[i].bestVal > 0 ? `${mo.label} ${monStats[i].bestDay} · ${INR(monStats[i].bestVal)}` : "—"}</span>
+              </div>
             </div>
           ))}
           {delta !== null && (
-            <div style={{ textAlign: "right" }}>
+            <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", textAlign: "right", paddingLeft: 4 }}>
               <div style={{ fontSize: 9, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, fontWeight: 700 }}>Month vs Prev</div>
-              <div style={{ fontSize: 15, fontWeight: 800, color: delta >= 0 ? "var(--green)" : "var(--red)" }}>{delta >= 0 ? "▲" : "▼"} {Math.abs(delta)}%</div>
+              <div style={{ fontSize: 16, fontWeight: 800, color: delta >= 0 ? "var(--green)" : "var(--red)" }}>{delta >= 0 ? "▲" : "▼"} {Math.abs(delta)}%</div>
             </div>
           )}
         </div>
