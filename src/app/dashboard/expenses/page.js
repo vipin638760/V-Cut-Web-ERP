@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState, useMemo, useRef } from "react";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import { collection, onSnapshot, query, orderBy, addDoc, deleteDoc, doc, setDoc, writeBatch, updateDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
@@ -41,6 +41,7 @@ export default function ExpensesPage() {
   const [focusedCol, setFocusedCol] = useState(null); // category name or null
   const [highlightBranchId, setHighlightBranchId] = useState(null); // deep-link branch row
   const highlightRowRef = useRef(null);
+  const router = useRouter();
   const [bulkEdit, setBulkEdit] = useState(false);
   const [recalcFlash, setRecalcFlash] = useState(false); // visual ack on Recalculate
   // Drill-down modal for Variable cells: { branchId, category } | null
@@ -1011,6 +1012,23 @@ export default function ExpensesPage() {
         onEdit={() => setBulkEdit(!bulkEdit)}
       />
 
+      {/* Deep-link banner — arrived from a branch P&L cost row. Filters the grid
+          to that one shop and offers Back to the branch page. */}
+      {highlightBranchId && (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10, padding: "10px 14px", borderRadius: 10, background: "rgba(var(--accent-rgb),0.08)", border: "1px solid rgba(var(--accent-rgb),0.35)", marginBottom: 12 }}>
+          <div style={{ fontSize: 12, color: "var(--text2)", fontWeight: 600 }}>
+            Showing <strong style={{ color: "var(--accent)" }}>{(branches.find(b => b.id === highlightBranchId)?.name || "Branch").replace("V-CUT ", "")}</strong>
+            {focusedCol && <> · column <strong style={{ color: "var(--accent)" }}>{focusedCol}</strong></>} · {filterPrefix}
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={() => router.back()}
+              style={{ padding: "7px 14px", borderRadius: 8, background: "var(--bg3)", border: "1px solid rgba(var(--accent-rgb),0.4)", color: "var(--accent)", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>← Back</button>
+            <button onClick={() => { setHighlightBranchId(null); setFocusedCol(null); }}
+              style={{ padding: "7px 14px", borderRadius: 8, background: "var(--bg3)", border: "1px solid var(--border)", color: "var(--text2)", fontSize: 11, fontWeight: 700, cursor: "pointer", textTransform: "uppercase", letterSpacing: 0.5 }}>Show all branches</button>
+          </div>
+        </div>
+      )}
+
       {/* Grid Matrix */}
       <Card style={{ padding: 0, overflow: "auto", maxHeight: "calc(100vh - 320px)" }}>
         <table style={{ minWidth: "max-content", borderCollapse: "separate", borderSpacing: 0, fontSize: 13 }}>
@@ -1039,7 +1057,7 @@ export default function ExpensesPage() {
                 </tr>
               </thead>
               <tbody>
-                {branches.map(b => {
+                {(highlightBranchId ? branches.filter(x => x.id === highlightBranchId) : branches).map(b => {
                   const bGrid = localGrid[b.id] || {};
                   const stats = getBranchStats(b.id);
                   const fixedTotal = activeCols.reduce((s, t) => s + (Number(bGrid[t]?.val) || 0), 0);
@@ -1117,7 +1135,7 @@ export default function ExpensesPage() {
                 </tr>
               </thead>
               <tbody>
-                {branches.map(b => {
+                {(highlightBranchId ? branches.filter(x => x.id === highlightBranchId) : branches).map(b => {
                   let branchYearTotal = 0;
                   const isHi = b.id === highlightBranchId;
                   return (
@@ -1170,6 +1188,7 @@ export default function ExpensesPage() {
               </tbody>
             </>
           )}
+          {!highlightBranchId && (
           <tfoot style={{ position: "sticky", bottom: 0, zIndex: 10 }}>
              <tr style={{ background: "var(--bg4)" }}>
                 <TD style={{ color: "var(--text)", fontWeight: 700, letterSpacing: 0.5, position: "sticky", left: 0, background: "var(--bg4)", zIndex: 11, borderRight: "1px solid rgba(72,72,71,0.15)", width: 130, minWidth: 130, fontSize: 11, textTransform: "uppercase" }}>Network Total</TD>
@@ -1262,6 +1281,7 @@ export default function ExpensesPage() {
                 )}
              </tr>
           </tfoot>
+          )}
         </table>
       </Card>
 
