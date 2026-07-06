@@ -798,8 +798,15 @@ export default function MaterialsPage() {
   // its dates at the same time so the user lands on populated rows).
   const branchCardRefs = useRef(new Map());
   const [pendingBranchScroll, setPendingBranchScroll] = useState(null);
-  const [deepBranchFilter, setDeepBranchFilter] = useState(null); // deep-link: show only this branch
   const router = useRouter();
+  // Deep-link branch filter derived straight from the URL (NOT one-time state),
+  // so re-navigating to a different branch always re-filters. `deepCleared`
+  // lets "Show all branches" override it until the branch param changes.
+  const qBranchParam = searchParams?.get("branch") || null;
+  const [deepCleared, setDeepCleared] = useState(false);
+  const deepBranchFilter = (!deepCleared && qBranchParam) ? qBranchParam : null;
+  // A new branch in the URL re-enables the filter.
+  useEffect(() => { setDeepCleared(false); }, [qBranchParam]);
   useEffect(() => {
     if (!pendingBranchScroll || allocView !== "branches") return;
     const id = requestAnimationFrame(() => {
@@ -823,7 +830,7 @@ export default function MaterialsPage() {
     if (qTab === "transfers") setTab("transfers");
     if (qView === "branches" || qView === "table" || qView === "analytics") setAllocView(qView);
     if (qMonth && /^\d{4}-\d{2}$/.test(qMonth)) setMaterialMonth(qMonth);
-    if (qBranch) { setPendingBranchScroll(qBranch); setDeepBranchFilter(qBranch); }
+    if (qBranch) setPendingBranchScroll(qBranch);
     deepLinkAppliedRef.current = true;
   }, [searchParams]);
   const [analyticsExporting, setAnalyticsExporting] = useState(false);
@@ -2957,7 +2964,7 @@ export default function MaterialsPage() {
                   <div style={{ display: "flex", gap: 8 }}>
                     <button onClick={() => router.back()}
                       style={{ padding: "7px 14px", borderRadius: 8, background: "var(--bg3)", border: "1px solid rgba(34,211,238,0.4)", color: "var(--accent)", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>← Back</button>
-                    <button onClick={() => setDeepBranchFilter(null)}
+                    <button onClick={() => setDeepCleared(true)}
                       style={{ padding: "7px 14px", borderRadius: 8, background: "var(--bg3)", border: "1px solid var(--border)", color: "var(--text2)", fontSize: 11, fontWeight: 700, cursor: "pointer", textTransform: "uppercase", letterSpacing: 0.5 }}>Show all branches</button>
                   </div>
                 </div>
