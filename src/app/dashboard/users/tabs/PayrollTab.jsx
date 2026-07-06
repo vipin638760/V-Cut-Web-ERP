@@ -4,7 +4,7 @@ import { useSearchParams } from "next/navigation";
 import { collection, onSnapshot, doc, setDoc, addDoc, deleteDoc, query, orderBy } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useCurrentUser, getCurrentUser } from "@/lib/currentUser";
-import { INR, proRataSalary, makeFilterPrefix, staffStatusForMonth, staffLeavesInMonth } from "@/lib/calculations";
+import { INR, proRataSalary, makeFilterPrefix, staffStatusForMonth, staffLeavesInMonth, branchSalaryShare, salaryByBranchForMonth } from "@/lib/calculations";
 import { Card, Pill, TH, TD, PeriodWidget, Modal, Icon, useConfirm, useToast, useSort } from "@/components/ui";
 import VLoader from "@/components/VLoader";
 import AttendanceCalendarModal from "@/components/AttendanceCalendarModal";
@@ -123,13 +123,22 @@ export default function PayrollTab() {
   // Branch filter — empty Set = show every branch. Non-empty = show only those branches.
   const [branchFilter, setBranchFilter] = useState(() => new Set());
   const [branchFilterOpen, setBranchFilterOpen] = useState(false);
+  // "Worked-at" filter — set from the branch P&L Salary row (?by=work). Salary
+  // COST is attributed to where a staff physically worked (days split), so this
+  // shows exactly the staff whose worked-days make up that branch's salary line
+  // (loaned-in included, home staff who worked elsewhere excluded) — unlike the
+  // home-branch dropdown filter.
+  const [workedBranchId, setWorkedBranchId] = useState(null);
 
   // Deep-link from the Branch breakdown "Salary" row: ?branch=ID&month=YYYY-MM
   // preselects that branch + period so the figure is traceable to its staff.
+  // &by=work switches to worked-at attribution (matches the branch P&L figure).
   const searchParams = useSearchParams();
   useEffect(() => {
     const qBranch = searchParams.get("branch");
-    if (qBranch) setBranchFilter(new Set([qBranch]));
+    const byWork = searchParams.get("by") === "work";
+    if (qBranch && byWork) { setWorkedBranchId(qBranch); setBranchFilter(new Set()); }
+    else if (qBranch) { setBranchFilter(new Set([qBranch])); setWorkedBranchId(null); }
     const qMonth = searchParams.get("month");
     if (qMonth && /^\d{4}-\d{2}$/.test(qMonth)) {
       const [y, m] = qMonth.split("-").map(Number);
@@ -314,7 +323,14 @@ export default function PayrollTab() {
       {viewTab === "salary" && (() => {
         const empQ = employeeSearch.trim().toLowerCase();
         const eligibleByStatus = staff.filter(s => {
-          if (branchFilter.size > 0 && !branchFilter.has(s.branch_id)) return false;
+          if (workedBranchId) {
+            // Worked-at attribution (month mode): keep staff with a non-zero
+            // salary share at this branch. Year mode falls back to home branch.
+            const contributes = filterMode === 'month'
+              ? branchSalaryShare(s.id, filterPrefix, workedBranchId, entries, s.branch_id) > 0
+              : s.branch_id === workedBranchId;
+            if (!contributes) return false;
+          } else if (branchFilter.size > 0 && !branchFilter.has(s.branch_id)) return false;
           if (filterMode === 'month') return staffStatusForMonth(s, filterPrefix).status !== 'inactive';
           return s.status !== 'inactive';
         });
@@ -468,6 +484,27 @@ export default function PayrollTab() {
               </div>
             )}
           </div>
+
+          {/* Worked-at filter banner — arrived from a branch P&L Salary row.
+              Shows exactly the staff whose worked-days make up that branch's
+              salary cost, with the branch's split total for reconciliation. */}
+          {workedBranchId && (() => {
+            const brName = (branches.find(b => b.id === workedBranchId)?.name || "Branch").replace("V-CUT ", "");
+            const branchCost = filterMode === 'month'
+              ? (salaryByBranchForMonth(filterPrefix, entries, branches, salHistory, staff, {}, leaves).get(workedBranchId) || 0)
+              : null;
+            return (
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10, padding: "10px 14px", borderRadius: 10, background: "rgba(var(--accent-rgb),0.08)", border: "1px solid rgba(var(--accent-rgb),0.35)" }}>
+                <div style={{ fontSize: 12, color: "var(--text2)", fontWeight: 600 }}>
+                  Showing staff who <strong style={{ color: "var(--accent)" }}>worked at {brName}</strong> in {filterPrefix}
+                  {branchCost != null && <> · branch salary cost <strong style={{ color: "var(--orange)" }}>{INR(branchCost)}</strong></>}
+                  <span style={{ display: "block", fontSize: 10, color: "var(--text3)", marginTop: 2 }}>Earned column below is each staff&rsquo;s full monthly salary; the branch cost is their worked-days share.</span>
+                </div>
+                <button onClick={() => setWorkedBranchId(null)}
+                  style={{ padding: "7px 14px", borderRadius: 8, background: "var(--bg3)", border: "1px solid var(--border)", color: "var(--text2)", fontSize: 11, fontWeight: 700, cursor: "pointer", textTransform: "uppercase", letterSpacing: 0.5 }}>Clear</button>
+              </div>
+            );
+          })()}
 
           {/* KPI strip — totals across the currently visible roster */}
           <div style={{ display: "grid", gridTemplateColumns: `repeat(auto-fit, minmax(180px, 1fr))`, gap: 12 }}>

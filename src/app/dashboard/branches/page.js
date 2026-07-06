@@ -2490,7 +2490,7 @@ export default function BranchesPage() {
                   ["Room Rent", INR(totalRoomRent), "var(--orange)", `/dashboard/expenses${q}`],
                   ["Electricity", INR(totalElec), "var(--orange)", `/dashboard/expenses${q}`],
                   ["WiFi", INR(totalWifi), "var(--orange)", `/dashboard/expenses${q}`],
-                  ...(isAdmin ? [["Salary", INR(totalSalary), "var(--orange)", `/dashboard/payroll${q}`]] : []),
+                  ...(isAdmin ? [["Salary", INR(totalSalary), "var(--orange)", `/dashboard/payroll${q}${filterMode === "month" ? "&by=work" : ""}`]] : []),
                   [`GST Extraction (${gstPct}%)`, INR(totalGstEst), "var(--red)", `/dashboard/entry${q}`],
                 ].map(([l, v, c, to]) => (
                 <div key={l} onClick={() => router.push(to)} title={`Open source: ${to.split("?")[0]}`}
