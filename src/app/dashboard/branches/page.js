@@ -44,12 +44,15 @@ function BranchCollectionChart({ periodEntries, filterMode, filterYear, filterMo
     const daysInMonth = new Date(filterYear, filterMonth, 0).getDate();
     for (let d = 1; d <= daysInMonth; d++) {
       const key = `${filterYear}-${String(filterMonth).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
-      buckets.push({ label: String(d), key, value: 0, entryId: null });
+      buckets.push({ label: String(d), key, value: 0, cash: 0, online: 0, mat: 0, entryId: null });
     }
     periodEntries.forEach(e => {
       const idx = buckets.findIndex(x => x.key === e.date);
       if (idx < 0) return;
       const mat = (e.staff_billing || []).reduce((s, sb) => s + (sb.material || 0), 0);
+      buckets[idx].online += (e.online || 0);
+      buckets[idx].cash += (e.cash || 0);
+      buckets[idx].mat += mat;
       buckets[idx].value += (e.online || 0) + (e.cash || 0) + mat;
       if (e.id) buckets[idx].entryId = e.id;
     });
@@ -58,8 +61,9 @@ function BranchCollectionChart({ periodEntries, filterMode, filterYear, filterMo
       const prefix = `${filterYear}-${String(m).padStart(2, "0")}`;
       const label = new Date(filterYear, m - 1, 1).toLocaleString("default", { month: "short" });
       const mEntries = periodEntries.filter(e => e.date && e.date.startsWith(prefix));
-      const v = mEntries.reduce((s, e) => s + (e.online || 0) + (e.cash || 0) + (e.staff_billing || []).reduce((ss, sb) => ss + (sb.material || 0), 0), 0);
-      buckets.push({ label, key: prefix, value: v });
+      let on = 0, ca = 0, ma = 0;
+      mEntries.forEach(e => { on += (e.online || 0); ca += (e.cash || 0); ma += (e.staff_billing || []).reduce((ss, sb) => ss + (sb.material || 0), 0); });
+      buckets.push({ label, key: prefix, value: on + ca + ma, online: on, cash: ca, mat: ma });
     }
   }
 
@@ -86,6 +90,13 @@ function BranchCollectionChart({ periodEntries, filterMode, filterYear, filterMo
         <div>
           <div style={{ fontSize: 11, fontWeight: 800, color: "var(--blue, #60a5fa)", textTransform: "uppercase", letterSpacing: 1.5 }}>📈 Collection Trend</div>
           <div style={{ fontSize: 10, color: "var(--text3)", marginTop: 2 }}>{isMonth ? "Daily" : "Monthly"} income · Cash + Online + Material</div>
+          <div style={{ display: "flex", gap: 12, marginTop: 6, flexWrap: "wrap" }}>
+            {[["Online", "#60a5fa"], ["Cash", "#c084fc"], ["Material", "var(--accent)"]].map(([lbl, col]) => (
+              <span key={lbl} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 10, fontWeight: 700, color: "var(--text2)" }}>
+                <span style={{ width: 10, height: 10, borderRadius: 3, background: col }} />{lbl}
+              </span>
+            ))}
+          </div>
         </div>
         <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
           <div style={{ textAlign: "right" }}>
@@ -127,20 +138,29 @@ function BranchCollectionChart({ periodEntries, filterMode, filterYear, filterMo
             })}
             {buckets.map((b, i) => {
               const x = LEFT + i * (BAR_W + GAP);
-              const h = b.value > 0 ? (b.value / max) * H : 2;
-              const y = PAD_TOP + H - h;
+              const totalH = b.value > 0 ? (b.value / max) * H : 2;
+              const baseY = PAD_TOP + H;
               const isBest = i === bestIdx && b.value > 0;
               const clickable = isMonth && b.value > 0 && onDayClick;
+              const dim = hover && hover.i !== i ? 0.4 : 1;
+              // Stack Online (bottom) → Cash → Material (top). Segment heights
+              // scale off the same max so bar total == income.
+              const segs = b.value > 0
+                ? [["online", b.online, "#60a5fa"], ["cash", b.cash, "#c084fc"], ["mat", b.mat, "var(--accent)"]].filter(s => s[1] > 0)
+                : [];
+              let cursorY = baseY;
               return (
-                <g key={i}>
-                  <rect x={x} y={y} width={BAR_W} height={h} rx={4}
-                    fill={isBest ? "url(#bcol-green)" : "url(#bcol-blue)"}
-                    onMouseEnter={() => setHover({ i, b })}
-                    onMouseLeave={() => setHover(null)}
-                    onClick={clickable ? () => onDayClick(b.key, b.entryId) : undefined}
-                    opacity={hover && hover.i !== i ? 0.45 : 1}
-                    style={{ cursor: clickable ? "pointer" : (b.value > 0 ? "default" : "default"), transition: "opacity .15s" }}
-                  />
+                <g key={i} onMouseEnter={() => setHover({ i, b })} onMouseLeave={() => setHover(null)}
+                  onClick={clickable ? () => onDayClick(b.key, b.entryId) : undefined}
+                  style={{ cursor: clickable ? "pointer" : "default" }}>
+                  {b.value <= 0 && <rect x={x} y={baseY - 2} width={BAR_W} height={2} rx={1} fill="var(--border)" />}
+                  {segs.map(([k, v, col], si) => {
+                    const segH = Math.max(1, (v / max) * H);
+                    cursorY -= segH;
+                    const isTop = si === segs.length - 1;
+                    return <rect key={k} x={x} y={cursorY} width={BAR_W} height={segH} rx={isTop ? 4 : 0} fill={col} opacity={dim} style={{ transition: "opacity .15s" }} />;
+                  })}
+                  {isBest && <rect x={x - 1} y={baseY - totalH - 1} width={BAR_W + 2} height={totalH + 1} rx={5} fill="none" stroke="var(--green)" strokeWidth={1.5} opacity={dim} />}
                   <text x={x + BAR_W / 2} y={PAD_TOP + H + 14} fontSize={9} fill={isBest ? "var(--green)" : "var(--text3)"} textAnchor="middle" fontWeight={isBest ? 800 : 600}>{b.label}</text>
                 </g>
               );
@@ -184,6 +204,16 @@ function BranchCollectionChart({ periodEntries, filterMode, filterYear, filterMo
               <div style={{ fontSize: 9, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase" }}>{hover.b.key}</div>
               <div style={{ fontSize: 9, color: "var(--green)", fontWeight: 700, marginTop: 3, textTransform: "uppercase" }}>Income</div>
               <div style={{ fontSize: 13, fontWeight: 800, color: "var(--green)" }}>{INR(hover.b.value)}</div>
+              <div style={{ marginTop: 5, display: "flex", flexDirection: "column", gap: 2, minWidth: 120 }}>
+                {[["Online", hover.b.online, "#60a5fa"], ["Cash", hover.b.cash, "#c084fc"], ["Material", hover.b.mat, "var(--accent)"]].map(([lbl, v, col]) => (
+                  <div key={lbl} style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 5, color: "var(--text2)" }}>
+                      <span style={{ width: 8, height: 8, borderRadius: 2, background: col }} />{lbl}
+                    </span>
+                    <span style={{ fontWeight: 700, color: v > 0 ? "var(--text)" : "var(--text3)" }}>{INR(v || 0)}</span>
+                  </div>
+                ))}
+              </div>
               {!isMonth && (bucketExp[hover.i] || 0) > 0 && (() => {
                 const exp = bucketExp[hover.i] || 0;
                 const net = hover.b.value - exp;
