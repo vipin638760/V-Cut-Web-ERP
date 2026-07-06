@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useRef } from "react";
 import { useSearchParams } from "next/navigation";
 import { collection, onSnapshot, query, orderBy, addDoc, deleteDoc, doc, setDoc, writeBatch, updateDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
@@ -39,6 +39,8 @@ export default function ExpensesPage() {
   const [showForm, setShowForm] = useState(false);
   const [viewType, setViewType] = useState("fixed"); // 'fixed' | 'variable' | 'total'
   const [focusedCol, setFocusedCol] = useState(null); // category name or null
+  const [highlightBranchId, setHighlightBranchId] = useState(null); // deep-link branch row
+  const highlightRowRef = useRef(null);
   const [bulkEdit, setBulkEdit] = useState(false);
   const [recalcFlash, setRecalcFlash] = useState(false); // visual ack on Recalculate
   // Drill-down modal for Variable cells: { branchId, category } | null
@@ -65,8 +67,19 @@ export default function ExpensesPage() {
       const [y, m] = qMonth.split("-").map(Number);
       setFilterMode("month"); setFilterYear(y); setFilterMonth(m);
     }
-    if (searchParams.get("branch")) setViewType("total");
+    const qBranch = searchParams.get("branch");
+    if (qBranch) { setViewType("total"); setHighlightBranchId(qBranch); }
+    // ?row=<column> highlights the matching Fixed column (WiFi Bill, Shop Rent…).
+    const qRow = searchParams.get("row");
+    if (qRow) setFocusedCol(qRow);
   }, [searchParams]);
+
+  // Scroll the deep-linked branch row into view + pulse it once loaded.
+  useEffect(() => {
+    if (!highlightBranchId || !highlightRowRef.current) return;
+    const t = setTimeout(() => highlightRowRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }), 250);
+    return () => clearTimeout(t);
+  }, [highlightBranchId, viewType, branches.length]);
 
   // Fixed-tab columns: 6 core essentials + opt-in expense_types where
   // category === "fixed". Anything without an explicit "fixed" category
@@ -1037,11 +1050,12 @@ export default function ExpensesPage() {
                       ? variableRowTotal
                       : (fixedTotal + (isAdmin ? stats.salary : 0) + stats.variable);
 
+                  const isHi = b.id === highlightBranchId;
                   return (
-                    <tr key={b.id} style={{ transition: "background 0.15s" }}
-                      onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.015)"}
-                      onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-                      <TD style={{ fontWeight: 700, color: "var(--text)", fontSize: 12, position: "sticky", left: 0, background: "var(--bg3)", zIndex: 5, borderRight: "1px solid rgba(72,72,71,0.1)", width: 130, minWidth: 130 }}>{b.name.replace("V-CUT ", "")}</TD>
+                    <tr key={b.id} ref={isHi ? highlightRowRef : null} style={{ transition: "background 0.15s", background: isHi ? "rgba(var(--accent-rgb),0.08)" : "transparent", boxShadow: isHi ? "inset 3px 0 0 var(--accent)" : "none" }}
+                      onMouseEnter={e => { if (!isHi) e.currentTarget.style.background = "rgba(255,255,255,0.015)"; }}
+                      onMouseLeave={e => { if (!isHi) e.currentTarget.style.background = "transparent"; }}>
+                      <TD style={{ fontWeight: 700, color: isHi ? "var(--accent)" : "var(--text)", fontSize: 12, position: "sticky", left: 0, background: isHi ? "rgba(var(--accent-rgb),0.08)" : "var(--bg3)", zIndex: 5, borderRight: "1px solid rgba(72,72,71,0.1)", width: 130, minWidth: 130 }}>{b.name.replace("V-CUT ", "")}</TD>
 
                       {viewType === "total" && (
                         <>
@@ -1105,11 +1119,12 @@ export default function ExpensesPage() {
               <tbody>
                 {branches.map(b => {
                   let branchYearTotal = 0;
+                  const isHi = b.id === highlightBranchId;
                   return (
-                    <tr key={b.id} style={{ transition: "background 0.15s" }}
-                      onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.015)"}
-                      onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-                      <TD style={{ fontWeight: 700, color: "var(--text)", fontSize: 12, position: "sticky", left: 0, background: "var(--bg3)", zIndex: 5, borderRight: "1px solid rgba(72,72,71,0.1)", width: 130, minWidth: 130 }}>{b.name.replace("V-CUT ", "")}</TD>
+                    <tr key={b.id} ref={isHi ? highlightRowRef : null} style={{ transition: "background 0.15s", background: isHi ? "rgba(var(--accent-rgb),0.08)" : "transparent", boxShadow: isHi ? "inset 3px 0 0 var(--accent)" : "none" }}
+                      onMouseEnter={e => { if (!isHi) e.currentTarget.style.background = "rgba(255,255,255,0.015)"; }}
+                      onMouseLeave={e => { if (!isHi) e.currentTarget.style.background = "transparent"; }}>
+                      <TD style={{ fontWeight: 700, color: isHi ? "var(--accent)" : "var(--text)", fontSize: 12, position: "sticky", left: 0, background: isHi ? "rgba(var(--accent-rgb),0.08)" : "var(--bg3)", zIndex: 5, borderRight: "1px solid rgba(72,72,71,0.1)", width: 130, minWidth: 130 }}>{b.name.replace("V-CUT ", "")}</TD>
                       {MONTHS.map((m, i) => {
                         const mPrefix = `${filterYear}-${String(i + 1).padStart(2, "0")}`;
                         const REAL_NOW = new Date().toISOString().slice(0, 7); 
