@@ -4,7 +4,7 @@ import { useSearchParams } from "next/navigation";
 import { collection, onSnapshot, doc, setDoc, addDoc, deleteDoc, query, orderBy } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useCurrentUser, getCurrentUser } from "@/lib/currentUser";
-import { INR, proRataSalary, makeFilterPrefix, staffStatusForMonth, staffLeavesInMonth, branchSalaryShare, salaryByBranchForMonth } from "@/lib/calculations";
+import { INR, proRataSalary, makeFilterPrefix, staffStatusForMonth, staffLeavesInMonth, branchSalaryShare, salaryByBranchForMonth, getStaffSalaryForMonth, presentDaysByBranch } from "@/lib/calculations";
 import { Card, Pill, TH, TD, PeriodWidget, Modal, Icon, useConfirm, useToast, useSort } from "@/components/ui";
 import VLoader from "@/components/VLoader";
 import AttendanceCalendarModal from "@/components/AttendanceCalendarModal";
@@ -109,6 +109,7 @@ export default function PayrollTab() {
   const sort = useSort("name");
   const [releaseModal, setReleaseModal] = useState(null); // { staffId, name, net, earned, ... }
   const [attendanceModal, setAttendanceModal] = useState(null); // { staff, month } for calendar
+  const [earnModal, setEarnModal] = useState(null); // staff object — Earned breakdown
   const [releaseMode, setReleaseMode] = useState("Bank Transfer");
   const [releaseDate, setReleaseDate] = useState(new Date().toISOString().split("T")[0]);
   const [advModal, setAdvModal] = useState(null); // { request, status }
@@ -629,7 +630,10 @@ export default function PayrollTab() {
                     <TD style={{ fontWeight: 700 }}>{s.name}</TD>
                     <TD style={{ color: "var(--text3)", fontSize: 11 }}>{b?.name?.replace("V-CUT ","") || "—"}</TD>
                     {!isAccountant && <TD right style={{ color: "var(--text3)" }}>{INR(s.salary)}</TD>}
-                    <TD right style={{ fontWeight: 600, fontFamily: "var(--font-headline, var(--font-outfit))" }}>{INR(earned)}</TD>
+                    <TD right style={{ fontWeight: 600, fontFamily: "var(--font-headline, var(--font-outfit))" }}>
+                      <button onClick={() => setEarnModal(s)} title="How is this earned salary calculated?"
+                        style={{ background: "transparent", border: "none", color: "var(--accent)", cursor: "pointer", fontWeight: 600, fontSize: 13, textDecoration: "underline", textDecorationStyle: "dotted", textUnderlineOffset: 3, fontFamily: "inherit" }}>{INR(earned)}</button>
+                    </TD>
                     <TD right style={{ color: advApproved > 0 ? "var(--red)" : "var(--text3)", fontWeight: 700 }}>{advApproved > 0 ? `-${INR(advApproved)}` : "—"}</TD>
                     <TD right style={{ color: advPending > 0 ? "var(--orange)" : "var(--text3)", fontWeight: 700 }}>{advPending > 0 ? INR(advPending) : "—"}</TD>
                     <TD right style={{ fontSize: 14, fontWeight: 800, color: net < 0 ? "var(--red)" : "var(--accent)", fontFamily: "var(--font-headline, var(--font-outfit))" }}>{INR(net)}</TD>
@@ -917,6 +921,100 @@ export default function PayrollTab() {
       <AttendanceCalendarModal target={attendanceModal} onClose={() => setAttendanceModal(null)}
         entries={entries} leaves={leaves} branches={branches}
         canEdit={isAdmin || currentUser.role === "accountant"} currentUser={currentUser} />
+
+      {/* Earned-salary breakdown — how the pro-rata number is built. Mirrors
+          proRataSalary: per-day rate × (present days + capped paid leaves),
+          deduping days that are both present and on leave. */}
+      <Modal isOpen={!!earnModal} onClose={() => setEarnModal(null)} title={earnModal ? `Salary Breakdown · ${earnModal.name}` : ""} width={560}>
+        {earnModal && (() => {
+          const s = earnModal;
+          const Row = ({ label, value, sub, strong, color }) => (
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "9px 0", borderBottom: "1px solid var(--border)" }}>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: strong ? 800 : 600, color: color || "var(--text)" }}>{label}</div>
+                {sub && <div style={{ fontSize: 10, color: "var(--text3)", marginTop: 1 }}>{sub}</div>}
+              </div>
+              <div style={{ fontSize: strong ? 16 : 13, fontWeight: strong ? 800 : 700, color: color || "var(--text)", fontFamily: "var(--font-headline, var(--font-outfit))" }}>{value}</div>
+            </div>
+          );
+
+          // Per-month breakdown of the pro-rata calc.
+          const monthBreak = (monStr) => {
+            const salary = getStaffSalaryForMonth(s.id, monStr, salHistory, staff);
+            const [yr, mo] = monStr.split("-").map(Number);
+            const daysInMonth = new Date(yr, mo, 0).getDate();
+            const branch = branches.find(b => b.id === s.branch_id);
+            const quota = branch && branch.type === "unisex" ? 3 : 2;
+            // present dates (deduped) + per-branch
+            const presentDates = new Set();
+            entries.forEach(e => {
+              if (!e.date || !e.date.startsWith(monStr)) return;
+              if ((e.staff_billing || []).some(x => x.staff_id === s.id && x.present !== false)) presentDates.add(e.date);
+            });
+            const leaveDates = (leaves || []).filter(l => l.staff_id === s.id && l.status === "approved" && (l.date || "").startsWith(monStr)).map(l => l.date).filter(Boolean).sort();
+            let paidLeaveUsed = 0;
+            const paidDates = new Set(presentDates);
+            for (const d of leaveDates) { if (paidLeaveUsed >= quota) break; if (paidDates.has(d)) continue; paidDates.add(d); paidLeaveUsed++; }
+            const payable = Math.min(daysInMonth, paidDates.size);
+            const perDay = salary / daysInMonth;
+            const earned = payable <= 0 ? 0 : Math.round(perDay * payable);
+            const byBranch = presentDaysByBranch(s.id, monStr, entries);
+            return { monStr, salary, daysInMonth, quota, present: presentDates.size, paidLeave: paidLeaveUsed, unpaidLeave: leaveDates.length - paidLeaveUsed, payable, perDay, earned, byBranch, leaveCount: leaveDates.length };
+          };
+
+          if (filterMode === "year") {
+            const limit = (filterYear === new Date().getFullYear()) ? new Date().getMonth() + 1 : 12;
+            const rows = [];
+            let total = 0;
+            for (let m = 1; m <= limit; m++) {
+              const bd = monthBreak(`${filterYear}-${String(m).padStart(2, "0")}`);
+              total += bd.earned;
+              rows.push(bd);
+            }
+            return (
+              <div>
+                <div style={{ fontSize: 11, color: "var(--text3)", marginBottom: 10 }}>Month-by-month earned salary for {filterYear}. Each = per-day rate × payable days (present + paid leave).</div>
+                {rows.map(bd => (
+                  <Row key={bd.monStr} label={new Date(bd.monStr + "-01").toLocaleDateString("en-US", { month: "long" })}
+                    sub={bd.earned > 0 ? `${bd.present}d present${bd.paidLeave ? ` + ${bd.paidLeave}d paid leave` : ""} × ${INR(Math.round(bd.perDay))}/day` : "No presence / leave"}
+                    value={INR(bd.earned)} />
+                ))}
+                <Row label="Total Earned" value={INR(total)} strong color="var(--green)" />
+              </div>
+            );
+          }
+
+          const bd = monthBreak(filterPrefix);
+          const branchList = [...bd.byBranch.entries()].sort((a, b) => b[1] - a[1]);
+          const worked = workedBranchId;
+          const shareDays = worked ? (bd.byBranch.get(worked) || 0) : 0;
+          const totalPresent = [...bd.byBranch.values()].reduce((a, c) => a + c, 0);
+          const branchCost = worked && totalPresent > 0 ? Math.round(bd.earned * (shareDays / totalPresent)) : (worked ? bd.earned : 0);
+          return (
+            <div>
+              <Row label="Base Monthly Salary" value={INR(bd.salary)} sub={`Contracted salary for ${filterPrefix}`} />
+              <Row label="Per-Day Rate" value={INR(Math.round(bd.perDay))} sub={`${INR(bd.salary)} ÷ ${bd.daysInMonth} days in month`} />
+              <Row label="Days Present" value={`${bd.present} d`} sub={branchList.length ? branchList.map(([bid, n]) => `${(branches.find(x => x.id === bid)?.name || "?").replace("V-CUT ", "")}: ${n}d`).join(" · ") : "Attendance from daily entries"} />
+              <Row label="Paid Leave" value={`${bd.paidLeave} d`} sub={`Quota ${bd.quota}/mo · ${bd.leaveCount} approved${bd.unpaidLeave > 0 ? ` · ${bd.unpaidLeave} unpaid (LOP)` : ""}`} />
+              <Row label="Payable Days" value={`${bd.payable} d`} sub="Present + paid leave (overlap counted once, capped at month)" strong />
+              <Row label="Earned Salary" value={INR(bd.earned)} sub={`${INR(Math.round(bd.perDay))}/day × ${bd.payable} days`} strong color="var(--green)" />
+              {worked && (
+                <div style={{ marginTop: 14, padding: "12px 14px", borderRadius: 10, background: "rgba(var(--accent-rgb),0.06)", border: "1px solid rgba(var(--accent-rgb),0.25)" }}>
+                  <div style={{ fontSize: 10, fontWeight: 800, color: "var(--accent)", textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 }}>Cost to {(branches.find(b => b.id === worked)?.name || "Branch").replace("V-CUT ", "")}</div>
+                  <div style={{ fontSize: 12, color: "var(--text2)" }}>
+                    {totalPresent > 0
+                      ? <>{shareDays} of {totalPresent} present days worked here → <strong style={{ color: "var(--orange)" }}>{INR(branchCost)}</strong> ({Math.round((shareDays / totalPresent) * 100)}% of earned)</>
+                      : <>No presence — salary falls back to home branch: <strong style={{ color: "var(--orange)" }}>{INR(branchCost)}</strong></>}
+                  </div>
+                </div>
+              )}
+              <div style={{ marginTop: 12, fontSize: 10, color: "var(--text3)", lineHeight: 1.5 }}>
+                A no-show, no-leave month earns ₹0. The employee payslip always pays the full earned amount; only the branch P&L splits the cost by worked days.
+              </div>
+            </div>
+          );
+        })()}
+      </Modal>
 
       {ConfirmDialog}
       {ToastContainer}
