@@ -1,6 +1,6 @@
 "use client";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import { collection, onSnapshot, query, orderBy, addDoc, doc, writeBatch, deleteDoc, updateDoc, increment } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
@@ -798,6 +798,8 @@ export default function MaterialsPage() {
   // its dates at the same time so the user lands on populated rows).
   const branchCardRefs = useRef(new Map());
   const [pendingBranchScroll, setPendingBranchScroll] = useState(null);
+  const [deepBranchFilter, setDeepBranchFilter] = useState(null); // deep-link: show only this branch
+  const router = useRouter();
   useEffect(() => {
     if (!pendingBranchScroll || allocView !== "branches") return;
     const id = requestAnimationFrame(() => {
@@ -821,7 +823,7 @@ export default function MaterialsPage() {
     if (qTab === "transfers") setTab("transfers");
     if (qView === "branches" || qView === "table" || qView === "analytics") setAllocView(qView);
     if (qMonth && /^\d{4}-\d{2}$/.test(qMonth)) setMaterialMonth(qMonth);
-    if (qBranch) setPendingBranchScroll(qBranch);
+    if (qBranch) { setPendingBranchScroll(qBranch); setDeepBranchFilter(qBranch); }
     deepLinkAppliedRef.current = true;
   }, [searchParams]);
   const [analyticsExporting, setAnalyticsExporting] = useState(false);
@@ -2937,6 +2939,7 @@ export default function MaterialsPage() {
               // Keep only branches that had transfers this month so 13 empty cards don't clutter the page.
               const allocLatestDate = (a) => a.date || (a.transferred_at || "").slice(0, 10) || "";
               const branchesWithData = branches
+                .filter(b => !deepBranchFilter || b.id === deepBranchFilter)
                 .map(b => ({ b, allocs: allocations.filter(a => a.branch_id === b.id && allocInSelectedPeriod(a)) }))
                 .filter(row => row.allocs.length > 0)
                 .sort((x, y) => {
@@ -2945,14 +2948,32 @@ export default function MaterialsPage() {
                   return yLatest.localeCompare(xLatest);
                 });
               const monthGrand = branchesWithData.reduce((s, row) => s + row.allocs.reduce((ss, a) => ss + (Number(a.total) || 0), 0), 0);
+              // Deep-link banner — arrived from a branch P&L Material Cost row.
+              const deepBanner = deepBranchFilter && (
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10, padding: "10px 14px", borderRadius: 10, background: "rgba(34,211,238,0.08)", border: "1px solid rgba(34,211,238,0.35)", marginBottom: 12 }}>
+                  <div style={{ fontSize: 12, color: "var(--text2)", fontWeight: 600 }}>
+                    Showing material transfers to <strong style={{ color: "var(--accent)" }}>{(branches.find(b => b.id === deepBranchFilter)?.name || "Branch").replace("V-CUT ", "")}</strong> · {monthLabel}
+                  </div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button onClick={() => router.back()}
+                      style={{ padding: "7px 14px", borderRadius: 8, background: "var(--bg3)", border: "1px solid rgba(34,211,238,0.4)", color: "var(--accent)", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>← Back</button>
+                    <button onClick={() => setDeepBranchFilter(null)}
+                      style={{ padding: "7px 14px", borderRadius: 8, background: "var(--bg3)", border: "1px solid var(--border)", color: "var(--text2)", fontSize: 11, fontWeight: 700, cursor: "pointer", textTransform: "uppercase", letterSpacing: 0.5 }}>Show all branches</button>
+                  </div>
+                </div>
+              );
               if (branchesWithData.length === 0) {
                 return (
-                  <Card style={{ padding: 40, textAlign: "center", color: "var(--text3)", fontSize: 13, fontStyle: "italic" }}>
-                    No material transfers recorded in <strong style={{ color: "var(--text2)", fontStyle: "normal" }}>{monthLabel}</strong>. Pick a different month or switch to Table view for the full history.
-                  </Card>
+                  <>
+                    {deepBanner}
+                    <Card style={{ padding: 40, textAlign: "center", color: "var(--text3)", fontSize: 13, fontStyle: "italic" }}>
+                      No material transfers recorded in <strong style={{ color: "var(--text2)", fontStyle: "normal" }}>{monthLabel}</strong>. Pick a different month or switch to Table view for the full history.
+                    </Card>
+                  </>
                 );
               }
               return (<>
+                {deepBanner}
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 10, padding: "10px 14px", background: "linear-gradient(90deg, rgba(34,211,238,0.06), transparent)", border: "1px solid rgba(34,211,238,0.2)", borderRadius: 10, flexWrap: "wrap" }}>
                   <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1 }}>
                     {monthLabel} · {branchesWithData.length} branch{branchesWithData.length === 1 ? "" : "es"} with activity

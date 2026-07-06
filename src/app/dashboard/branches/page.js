@@ -2481,7 +2481,7 @@ export default function BranchesPage() {
                   entry/materials filter by ?branch&month; expenses/payroll just land. */}
               {(() => {
                 const q = `?branch=${b.id}` + (filterMode === "month" ? `&month=${filterPrefix}` : "");
-                const matTo = `/dashboard/materials${q}`;
+                const matTo = `/dashboard/materials${q}&tab=transfers&view=branches`;
                 return [
                   ["Staff Incentives", INR(totalIncentiveExp), "var(--red)", `/dashboard/incentive-calculator${q}`],
                   ["Material Cost", INR(totalMatExp), "var(--red)", matTo],
