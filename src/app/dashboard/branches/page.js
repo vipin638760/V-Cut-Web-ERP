@@ -2486,11 +2486,11 @@ export default function BranchesPage() {
                   ["Staff Incentives", INR(totalIncentiveExp), "var(--red)", `/dashboard/incentive-calculator${q}`],
                   ["Material Cost", INR(totalMatExp), "var(--red)", matTo],
                   ["Other / Petrol", INR(totalOtherExp), "var(--red)", `/dashboard/entry${q}`],
-                  ["Shop Rent", INR(totalShopRent), "var(--orange)", "/dashboard/expenses"],
-                  ["Room Rent", INR(totalRoomRent), "var(--orange)", "/dashboard/expenses"],
-                  ["Electricity", INR(totalElec), "var(--orange)", "/dashboard/expenses"],
-                  ["WiFi", INR(totalWifi), "var(--orange)", "/dashboard/expenses"],
-                  ...(isAdmin ? [["Salary", INR(totalSalary), "var(--orange)", "/dashboard/payroll"]] : []),
+                  ["Shop Rent", INR(totalShopRent), "var(--orange)", `/dashboard/expenses${q}`],
+                  ["Room Rent", INR(totalRoomRent), "var(--orange)", `/dashboard/expenses${q}`],
+                  ["Electricity", INR(totalElec), "var(--orange)", `/dashboard/expenses${q}`],
+                  ["WiFi", INR(totalWifi), "var(--orange)", `/dashboard/expenses${q}`],
+                  ...(isAdmin ? [["Salary", INR(totalSalary), "var(--orange)", `/dashboard/payroll${q}`]] : []),
                   [`GST Extraction (${gstPct}%)`, INR(totalGstEst), "var(--red)", `/dashboard/entry${q}`],
                 ].map(([l, v, c, to]) => (
                 <div key={l} onClick={() => router.push(to)} title={`Open source: ${to.split("?")[0]}`}
