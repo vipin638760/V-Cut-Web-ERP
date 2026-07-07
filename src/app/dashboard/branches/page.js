@@ -4787,30 +4787,50 @@ function SummaryView({ summaryTab, setSummaryTab, branchData, branches, entries,
 
 // ─── Monthly Business Matrix — branch (rows) × month (columns) ───────────────
 // Each cell = that branch's business (online + cash + material) for the month.
-// The running month is flagged "till date"; a Total column + Total row close it
-// out. Always shows the full filterYear regardless of the selected month.
+// A "Till Day N" mode re-sums every month over the same 1..N day window (N =
+// the running month's latest day with data) so all months are comparable, and
+// marks each prior month +/- vs the current month. Total column + Network row.
 function MonthlyBusinessMatrix({ branches = [], entries = [], filterYear }) {
+  const [mode, setMode] = useState("full"); // "full" | "till"
   const curYear = NOW.getFullYear();
   const curMonth = NOW.getMonth() + 1;
   const maxMonth = filterYear === curYear ? curMonth : 12;
   const monthCols = Array.from({ length: maxMonth }, (_, i) => i + 1);
-  const tdMonth = filterYear === curYear ? curMonth : null; // the "till date" column
+  const tdMonth = filterYear === curYear ? curMonth : maxMonth; // reference month
 
-  // Single pass over the year's entries → `${branchId}|${month}` business sum.
-  const cell = new Map();
+  // "Till today" cutoff day — the running month's latest day with data (so the
+  // window matches the dashboard's month-to-date). Falls back to today's date.
+  const tillN = (() => {
+    const prefix = `${curYear}-${String(curMonth).padStart(2, "0")}`;
+    let last = 0;
+    if (filterYear === curYear) {
+      entries.forEach(e => { if (e.date && e.date.startsWith(prefix)) { const d = Number(e.date.slice(8, 10)); if (d > last) last = d; } });
+    }
+    return last || NOW.getDate();
+  })();
+
+  // Single pass → both full-month and till-N business per `${branchId}|${month}`.
+  const cellFull = new Map(), cellTill = new Map();
   entries.forEach(e => {
     if (!e.date || !e.date.startsWith(String(filterYear))) return;
     const m = Number(e.date.slice(5, 7));
     if (m < 1 || m > maxMonth) return;
+    const day = Number(e.date.slice(8, 10));
     const mat = (e.staff_billing || []).reduce((s, sb) => s + (sb.material || 0), 0);
     const v = (e.online || 0) + (e.cash || 0) + mat;
     const k = `${e.branch_id}|${m}`;
-    cell.set(k, (cell.get(k) || 0) + v);
+    cellFull.set(k, (cellFull.get(k) || 0) + v);
+    if (day <= tillN) cellTill.set(k, (cellTill.get(k) || 0) + v);
   });
+  const cell = mode === "till" ? cellTill : cellFull;
+  const refIdx = monthCols.indexOf(tdMonth);
 
   const matrix = branches.map(b => {
     const perMonth = monthCols.map(m => cell.get(`${b.id}|${m}`) || 0);
-    return { b, perMonth, total: perMonth.reduce((s, v) => s + v, 0) };
+    const refVal = refIdx >= 0 ? perMonth[refIdx] : 0;
+    // In till-mode: how the current (reference) month compares to each month.
+    const deltas = monthCols.map((m, ci) => (mode === "till" && m !== tdMonth) ? (refVal - perMonth[ci]) : null);
+    return { b, perMonth, deltas, total: perMonth.reduce((s, v) => s + v, 0) };
   }).sort((a, b) => b.total - a.total);
 
   const colTotals = monthCols.map((_, ci) => matrix.reduce((s, r) => s + r.perMonth[ci], 0));
@@ -4818,17 +4838,33 @@ function MonthlyBusinessMatrix({ branches = [], entries = [], filterYear }) {
 
   // Compact ₹ for the dense cells; full INR lives in title tooltips + the Total column.
   const fmtK = (v) => v >= 100000 ? `₹${(v / 100000).toFixed(2)}L` : v >= 1000 ? `₹${Math.round(v / 1000)}k` : v > 0 ? `₹${v}` : "—";
+  const fmtDK = (n) => { const a = Math.abs(Math.round(n)); const s = a >= 100000 ? `₹${(a / 100000).toFixed(1)}L` : a >= 1000 ? `₹${Math.round(a / 1000)}k` : `₹${a}`; return (n > 0 ? "▲ +" : n < 0 ? "▼ −" : "· ") + s; };
   const monLabel = (m) => new Date(filterYear, m - 1, 1).toLocaleString("en-US", { month: "short" });
 
   const thBase = { padding: "10px 12px", fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: 0.8, color: "var(--text3)", whiteSpace: "nowrap", borderBottom: "1px solid var(--border)" };
   const stickyLeft = { position: "sticky", left: 0, zIndex: 2, background: "var(--bg2)" };
+  const totalLabel = mode === "till" ? "Total · till N" : "Total";
 
   return (
     <Card style={{ padding: 0, overflow: "hidden" }}>
-      <div style={{ padding: "16px 18px 8px" }}>
-        <div style={{ fontSize: 13, fontWeight: 900, color: "var(--text)", fontFamily: "var(--font-headline, var(--font-outfit))" }}>Monthly Business · {filterYear}</div>
-        <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 2 }}>
-          Business = Online + Cash + Material per branch. {tdMonth ? `${monLabel(tdMonth)} is till date.` : "Full year."}
+      <div style={{ padding: "16px 18px 8px", display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 900, color: "var(--text)", fontFamily: "var(--font-headline, var(--font-outfit))" }}>Monthly Business · {filterYear}</div>
+          <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 2 }}>
+            Business = Online + Cash + Material per branch.{" "}
+            {mode === "till"
+              ? `Every month summed over days 1–${tillN} · +/- shows ${monLabel(tdMonth)} vs that month (same window).`
+              : (filterYear === curYear ? `${monLabel(tdMonth)} is till date.` : "Full year.")}
+          </div>
+        </div>
+        {/* Full-month vs same-window toggle */}
+        <div style={{ display: "inline-flex", gap: 2, background: "var(--bg4)", padding: 3, borderRadius: 8, border: "1px solid var(--border)" }}>
+          {[["full", "Full Month"], ["till", `Till Day ${tillN}`]].map(([k, label]) => (
+            <button key={k} onClick={() => setMode(k)}
+              style={{ padding: "5px 12px", borderRadius: 6, fontSize: 10.5, fontWeight: 800, letterSpacing: 0.4, textTransform: "uppercase", background: mode === k ? "var(--accent)" : "transparent", color: mode === k ? "#001418" : "var(--text3)", border: "none", cursor: "pointer" }}>
+              {label}
+            </button>
+          ))}
         </div>
       </div>
       <div style={{ overflowX: "auto" }}>
@@ -4838,10 +4874,10 @@ function MonthlyBusinessMatrix({ branches = [], entries = [], filterYear }) {
               <th style={{ ...thBase, ...stickyLeft, textAlign: "left", minWidth: 150 }}>Branch</th>
               {monthCols.map(m => (
                 <th key={m} style={{ ...thBase, textAlign: "right", color: m === tdMonth ? "var(--accent)" : "var(--text3)" }}>
-                  {monLabel(m)}{m === tdMonth ? " · TD" : ""}
+                  {monLabel(m)}{m === tdMonth ? (mode === "till" ? " · TD*" : " · TD") : ""}
                 </th>
               ))}
-              <th style={{ ...thBase, textAlign: "right", color: "var(--green)", background: "var(--bg3)" }}>Total</th>
+              <th style={{ ...thBase, textAlign: "right", color: "var(--green)", background: "var(--bg3)" }}>{totalLabel}</th>
             </tr>
           </thead>
           <tbody>
@@ -4852,11 +4888,18 @@ function MonthlyBusinessMatrix({ branches = [], entries = [], filterYear }) {
                 <td style={{ ...stickyLeft, padding: "9px 12px", fontSize: 12.5, fontWeight: 700, color: "var(--text)", whiteSpace: "nowrap", borderBottom: "1px solid var(--border)" }}>
                   {(r.b.name || "").replace("V-CUT ", "")}
                 </td>
-                {r.perMonth.map((v, ci) => (
-                  <td key={ci} title={v > 0 ? INR(v) : ""} style={{ padding: "9px 12px", textAlign: "right", fontSize: 12, fontWeight: 700, color: v > 0 ? (monthCols[ci] === tdMonth ? "var(--accent)" : "var(--text2)") : "var(--text3)", whiteSpace: "nowrap", borderBottom: "1px solid var(--border)", background: monthCols[ci] === tdMonth ? "rgba(34,211,238,0.05)" : "transparent", fontFamily: "var(--font-headline, var(--font-outfit))" }}>
-                    {fmtK(v)}
-                  </td>
-                ))}
+                {r.perMonth.map((v, ci) => {
+                  const isRef = monthCols[ci] === tdMonth;
+                  const delta = r.deltas[ci];
+                  return (
+                    <td key={ci} title={v > 0 ? INR(v) : ""} style={{ padding: "9px 12px", textAlign: "right", fontSize: 12, fontWeight: 700, color: v > 0 ? (isRef ? "var(--accent)" : "var(--text2)") : "var(--text3)", whiteSpace: "nowrap", borderBottom: "1px solid var(--border)", background: isRef ? "rgba(34,211,238,0.05)" : "transparent", fontFamily: "var(--font-headline, var(--font-outfit))" }}>
+                      <div>{fmtK(v)}</div>
+                      {delta != null && (
+                        <div style={{ fontSize: 9, fontWeight: 800, marginTop: 1, color: delta > 0 ? "var(--green)" : delta < 0 ? "var(--red)" : "var(--text3)" }}>{fmtDK(delta)}</div>
+                      )}
+                    </td>
+                  );
+                })}
                 <td style={{ padding: "9px 12px", textAlign: "right", fontSize: 12.5, fontWeight: 900, color: "var(--green)", whiteSpace: "nowrap", borderBottom: "1px solid var(--border)", background: "var(--bg3)", fontFamily: "var(--font-headline, var(--font-outfit))" }}>
                     {INR(r.total)}
                 </td>
@@ -4870,15 +4913,29 @@ function MonthlyBusinessMatrix({ branches = [], entries = [], filterYear }) {
             <tfoot>
               <tr>
                 <td style={{ ...stickyLeft, padding: "11px 12px", fontSize: 11, fontWeight: 900, color: "var(--gold)", textTransform: "uppercase", letterSpacing: 0.8, borderTop: "2px solid var(--border2)", background: "var(--bg3)" }}>Network</td>
-                {colTotals.map((v, ci) => (
-                  <td key={ci} title={v > 0 ? INR(v) : ""} style={{ padding: "11px 12px", textAlign: "right", fontSize: 12, fontWeight: 800, color: monthCols[ci] === tdMonth ? "var(--accent)" : "var(--text)", whiteSpace: "nowrap", borderTop: "2px solid var(--border2)", background: "var(--bg3)", fontFamily: "var(--font-headline, var(--font-outfit))" }}>{fmtK(v)}</td>
-                ))}
+                {colTotals.map((v, ci) => {
+                  const isRef = monthCols[ci] === tdMonth;
+                  const delta = (mode === "till" && !isRef) ? (colTotals[refIdx] - v) : null;
+                  return (
+                    <td key={ci} title={v > 0 ? INR(v) : ""} style={{ padding: "11px 12px", textAlign: "right", fontSize: 12, fontWeight: 800, color: isRef ? "var(--accent)" : "var(--text)", whiteSpace: "nowrap", borderTop: "2px solid var(--border2)", background: "var(--bg3)", fontFamily: "var(--font-headline, var(--font-outfit))" }}>
+                      <div>{fmtK(v)}</div>
+                      {delta != null && (
+                        <div style={{ fontSize: 9, fontWeight: 800, marginTop: 1, color: delta > 0 ? "var(--green)" : delta < 0 ? "var(--red)" : "var(--text3)" }}>{fmtDK(delta)}</div>
+                      )}
+                    </td>
+                  );
+                })}
                 <td style={{ padding: "11px 12px", textAlign: "right", fontSize: 13, fontWeight: 900, color: "var(--green)", whiteSpace: "nowrap", borderTop: "2px solid var(--border2)", background: "rgba(74,222,128,0.08)", fontFamily: "var(--font-headline, var(--font-outfit))" }}>{INR(grandTotal)}</td>
               </tr>
             </tfoot>
           )}
         </table>
       </div>
+      {mode === "till" && (
+        <div style={{ padding: "8px 18px 14px", fontSize: 10, color: "var(--text3)" }}>
+          * {monLabel(tdMonth)} is the reference month (days 1–{tillN}). ▲ green = {monLabel(tdMonth)} ahead of that month over the same window · ▼ red = behind.
+        </div>
+      )}
     </Card>
   );
 }
