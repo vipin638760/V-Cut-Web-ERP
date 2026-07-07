@@ -39,6 +39,39 @@ export default function StaffPerformancePage() {
   const [typeFilter, setTypeFilter] = useState("all"); // all | mens | unisex
   const [targetFilter, setTargetFilter] = useState("all"); // all | met | notmet
   const [selectedId, setSelectedId] = useState(null);
+  const [savedFilters, setSavedFilters] = useState(false); // a saved preset exists
+  const [savedFlash, setSavedFlash] = useState(false);     // transient "Saved ✓" feedback
+
+  // Persisted filter preset — Show / Type / Target / Sort are remembered per
+  // browser so the page opens the way you left it. Period + search stay live.
+  const FILTERS_KEY = "vcut_staffperf_filters";
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const raw = localStorage.getItem(FILTERS_KEY);
+      if (!raw) return;
+      const f = JSON.parse(raw);
+      if (f.statusFilter) setStatusFilter(f.statusFilter);
+      if (f.typeFilter) setTypeFilter(f.typeFilter);
+      if (f.targetFilter) setTargetFilter(f.targetFilter);
+      if (f.sortCol) setSortCol(f.sortCol);
+      setSavedFilters(true);
+    } catch { /* ignore malformed */ }
+  }, []);
+
+  const saveFilters = () => {
+    try {
+      localStorage.setItem(FILTERS_KEY, JSON.stringify({ statusFilter, typeFilter, targetFilter, sortCol }));
+      setSavedFilters(true);
+      setSavedFlash(true);
+      setTimeout(() => setSavedFlash(false), 1800);
+    } catch { /* storage unavailable */ }
+  };
+  const clearSavedFilters = () => {
+    try { localStorage.removeItem(FILTERS_KEY); } catch { /* ignore */ }
+    setSavedFilters(false);
+    setStatusFilter("all"); setTypeFilter("all"); setTargetFilter("all"); setSortCol("billing");
+  };
 
   const currentUser = useCurrentUser() || {};
   const isAdmin = currentUser?.role === "admin";
@@ -267,6 +300,21 @@ export default function StaffPerformancePage() {
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <span style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Sort</span>
             <ToggleGroup options={[["billing", "Billing"], ["incentive", "Incentive"], ["pct", "Target %"], ["name", "Name"], ["branch", "Branch"]]} value={sortCol} onChange={setSortCol} />
+          </div>
+          {/* Save / clear the current filter preset for future visits */}
+          <div style={{ display: "flex", alignItems: "center", gap: 8, paddingLeft: 8, borderLeft: "1px solid var(--border)" }}>
+            <button onClick={saveFilters} title="Remember these filters for next time"
+              style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 12px", borderRadius: 9, cursor: "pointer",
+                background: savedFlash ? "rgba(74,222,128,0.15)" : "var(--bg3)", border: `1px solid ${savedFlash ? "var(--green)" : "var(--border2)"}`,
+                color: savedFlash ? "var(--green)" : "var(--accent)", fontSize: 11, fontWeight: 800, letterSpacing: 0.3, textTransform: "uppercase", transition: "all .15s" }}>
+              <Icon name="save" size={13} /> {savedFlash ? "Saved ✓" : savedFilters ? "Update saved" : "Save filters"}
+            </button>
+            {savedFilters && (
+              <button onClick={clearSavedFilters} title="Forget saved filters and reset"
+                style={{ background: "transparent", border: "none", color: "var(--text3)", fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5, cursor: "pointer", textDecoration: "underline", textUnderlineOffset: 3 }}>
+                Clear
+              </button>
+            )}
           </div>
         </div>
       </div>
