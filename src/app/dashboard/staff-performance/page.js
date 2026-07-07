@@ -136,6 +136,7 @@ export default function StaffPerformancePage() {
       (r.s.role || "").toLowerCase().includes(q));
     return [...list].sort((a, b) => {
       if (sortCol === "name") return (a.s.name || "").localeCompare(b.s.name || "");
+      if (sortCol === "branch") return branchName(a.branchId).localeCompare(branchName(b.branchId)) || b.billing - a.billing;
       if (sortCol === "incentive") return b.incentive - a.incentive;
       if (sortCol === "pct") return b.pct - a.pct;
       return b.billing - a.billing;
@@ -221,7 +222,7 @@ export default function StaffPerformancePage() {
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <span style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Sort</span>
-            <ToggleGroup options={[["billing", "Billing"], ["incentive", "Incentive"], ["pct", "Target %"], ["name", "Name"]]} value={sortCol} onChange={setSortCol} />
+            <ToggleGroup options={[["billing", "Billing"], ["incentive", "Incentive"], ["pct", "Target %"], ["name", "Name"], ["branch", "Branch"]]} value={sortCol} onChange={setSortCol} />
           </div>
         </div>
       </div>
