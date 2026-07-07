@@ -158,11 +158,12 @@ export default function StaffPerformancePage() {
     // Real, uncapped % — can exceed 100 (the meter bar caps its width at 100).
     const pct = tgt > 0 ? Math.round(agg.billing / tgt * 100) : 0;
     const shortfall = Math.max(0, tgt - agg.billing);
+    const excess = tgt > 0 ? Math.max(0, agg.billing - tgt) : 0; // billed over 3× salary
 
     const st = staffStatusForMonth(s, statusMonth);
     const branchId = effectiveBranchOnDate(s, todayStr, transfers) || s.branch_id;
     return {
-      s, tgt, pct, shortfall, salary, salaryFull, leaveDays,
+      s, tgt, pct, shortfall, excess, salary, salaryFull, leaveDays,
       billing: agg.billing, incentive: agg.incentive, material: agg.material,
       daysBilled: agg.days.size, branchesBilled: agg.branches.size,
       status: st.status, branchId,
@@ -231,6 +232,7 @@ export default function StaffPerformancePage() {
       totSalFull: byType.reduce((s, r) => s + r.salaryFull, 0),
       totTgt: byType.reduce((s, r) => s + r.tgt, 0),
       totShort: byType.reduce((s, r) => s + r.shortfall, 0),
+      totExcess: byType.reduce((s, r) => s + r.excess, 0),
       act, inact: byType.length - act, total: byType.length,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -286,7 +288,9 @@ export default function StaffPerformancePage() {
         {isAdmin && <KpiTile label="Total Salary" value={INR(kpi.totSal)} color="var(--blue, #60a5fa)" sub="payroll cost · after proration" />}
         {isAdmin && <KpiTile label="Full Salary" value={INR(kpi.totSalFull)} color="var(--blue, #60a5fa)" sub="final · no proration" />}
         {isAdmin && <KpiTile label="Total Target" value={INR(kpi.totTgt)} color="var(--text)" sub="3× salary till date" />}
-        {isAdmin && <KpiTile label="Target Shortfall" value={INR(kpi.totShort)} color={kpi.totShort > 0 ? "var(--red)" : "var(--green)"} sub={kpi.totShort > 0 ? "below 3× salary" : "target met ✓"} />}
+        {isAdmin && (targetFilter === "met"
+          ? <KpiTile label="Target Excess" value={INR(kpi.totExcess)} color="var(--green)" sub="billed over 3× salary" />
+          : <KpiTile label="Target Shortfall" value={INR(kpi.totShort)} color={kpi.totShort > 0 ? "var(--red)" : "var(--green)"} sub={kpi.totShort > 0 ? "below 3× salary" : "target met ✓"} />)}
       </div>
 
       {/* Controls */}
@@ -448,7 +452,7 @@ function StaffSection({ title, color, rows, isAdmin, branchName, onOpen, onSalar
                             <span style={{ color: "var(--text3)" }}>{INR(r.tgt)}</span>
                             {r.shortfall > 0
                               ? <span style={{ color: "var(--red)", fontWeight: 800 }}> · short {INR(r.shortfall)}</span>
-                              : <span style={{ color: "var(--green)", fontWeight: 800 }}> · met ✓</span>}
+                              : <span style={{ color: "var(--green)", fontWeight: 800 }}> · +{INR(r.excess)} over ✓</span>}
                           </div>
                         )}
                       </div>
