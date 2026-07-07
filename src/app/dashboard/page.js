@@ -3,7 +3,7 @@ import { useEffect, useState, useRef, useMemo, Fragment } from "react";
 import { collection, onSnapshot, query, orderBy, doc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
-import { INR, staffBillingInPeriod, makeFilterPrefix, periodLabel, proRataSalary, salaryByBranchForMonth, branchSalaryShare, staffLeavesInMonth, staffStatusForMonth, staffIncentivesInPeriod, parseLocalDate, getMonthlyFixed, MASK, computeIncentiveExpense, toTitleCase } from "@/lib/calculations";
+import { INR, MONTHS, staffBillingInPeriod, makeFilterPrefix, periodLabel, proRataSalary, salaryByBranchForMonth, branchSalaryShare, staffLeavesInMonth, staffStatusForMonth, staffIncentivesInPeriod, parseLocalDate, getMonthlyFixed, MASK, computeIncentiveExpense, toTitleCase, shiftMonth, lastDayWithData, cumulativeCollection, fmtDelta } from "@/lib/calculations";
 import { PeriodWidget, ToggleGroup, Card, Pill, TH, TD, Icon, Modal, TabNav, ProgressBar, BranchEmployeeSearch, useToast } from "@/components/ui";
 import { useRouter } from "next/navigation";
 // ExcelJS is ~200KB — load only when Export is actually used.
@@ -15,54 +15,7 @@ const loadExcelJS = () => {
 
 const NOW = new Date();
 
-const _MTD_MONS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
-// Shift a (year, month) tuple `back` months into the past. `month` is 1-based.
-const shiftMonth = (year, month, back) => {
-  let m = month - back, y = year;
-  while (m < 1) { m += 12; y -= 1; }
-  return { y, m };
-};
-
-// Latest day-of-month (1-based) that has any entry in the given month —
-// optionally scoped to one branch. For the running month this is the "till now"
-// cutoff; earlier months are summed over the same 1..cutoff window so the
-// month-to-date comparison lines up on the same date range.
-const lastDayWithData = (entries, year, month, branchId) => {
-  const prefix = `${year}-${String(month).padStart(2, "0")}`;
-  let last = 0;
-  for (const e of entries) {
-    if (!e.date || !e.date.startsWith(prefix)) continue;
-    if (branchId && e.branch_id !== branchId) continue;
-    const d = Number(e.date.slice(8, 10));
-    if (d > last) last = d;
-  }
-  return last;
-};
-
-// Sum collection (online + cash + material sale) over days 1..cutoffDay of a
-// month, optionally scoped to one branch. Same "collection" definition the
-// Daily Business chart uses so the numbers reconcile.
-const cumulativeCollection = (entries, year, month, cutoffDay, branchId) => {
-  const prefix = `${year}-${String(month).padStart(2, "0")}`;
-  let sum = 0;
-  for (const e of entries) {
-    if (!e.date || !e.date.startsWith(prefix)) continue;
-    if (branchId && e.branch_id !== branchId) continue;
-    const d = Number(e.date.slice(8, 10));
-    if (d < 1 || d > cutoffDay) continue;
-    const matSale = (e.staff_billing || []).reduce((s, sb) => s + (sb.material || 0), 0);
-    sum += (e.online || 0) + (e.cash || 0) + matSale;
-  }
-  return sum;
-};
-
-// Signed INR for a delta — "+₹2" / "−₹17" / "₹0". Uses a real minus glyph.
-const fmtDelta = (n) => {
-  const r = Math.round(n || 0);
-  if (r === 0) return "₹0";
-  return (r > 0 ? "+₹" : "−₹") + Math.abs(r).toLocaleString("en-IN");
-};
+const _MTD_MONS = MONTHS;
 
 const PremiumStatCard = ({ label, value, sub, icon, color = "var(--accent)", trend, onClick, linkLabel }) => (
   <div

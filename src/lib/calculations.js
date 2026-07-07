@@ -8,6 +8,61 @@ export const INR = (v) => { const n = Math.round(v || 0); return (n < 0 ? '-₹'
 export const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 export const MASK = '•••••';
 
+// ── Month-to-date comparison helpers ─────────────────────────────────────────
+// Shared by the dashboard (network + per-branch cards) and the branch detail
+// page so the "till day N vs prior months" figures reconcile everywhere.
+
+// Shift a 1-based (year, month) tuple `back` months into the past.
+export const shiftMonth = (year, month, back) => {
+  let m = month - back, y = year;
+  while (m < 1) { m += 12; y -= 1; }
+  return { y, m };
+};
+
+// Latest day-of-month (1-based) that has any entry in the given month —
+// optionally scoped to one branch. For the running month this is the "till now"
+// cutoff; earlier months are summed over the same 1..cutoff window so the
+// comparison lines up on the same date range.
+export const lastDayWithData = (entries, year, month, branchId) => {
+  const prefix = `${year}-${String(month).padStart(2, "0")}`;
+  let last = 0;
+  for (const e of entries) {
+    if (!e.date || !e.date.startsWith(prefix)) continue;
+    if (branchId && e.branch_id !== branchId) continue;
+    const d = Number(e.date.slice(8, 10));
+    if (d > last) last = d;
+  }
+  return last;
+};
+
+// Sum collection (online + cash + material sale) over days 1..cutoffDay of a
+// month, optionally scoped to one branch. Same "collection" definition the
+// Collection Trend / Daily Business charts use so the numbers reconcile.
+export const cumulativeCollection = (entries, year, month, cutoffDay, branchId) => {
+  const prefix = `${year}-${String(month).padStart(2, "0")}`;
+  let sum = 0;
+  for (const e of entries) {
+    if (!e.date || !e.date.startsWith(prefix)) continue;
+    if (branchId && e.branch_id !== branchId) continue;
+    const d = Number(e.date.slice(8, 10));
+    if (d < 1 || d > cutoffDay) continue;
+    const matSale = (e.staff_billing || []).reduce((s, sb) => s + (sb.material || 0), 0);
+    sum += (e.online || 0) + (e.cash || 0) + matSale;
+  }
+  return sum;
+};
+
+// Full-month collection (all days) for a month, optionally branch-scoped.
+export const monthCollection = (entries, year, month, branchId) =>
+  cumulativeCollection(entries, year, month, 31, branchId);
+
+// Signed INR for a delta — "+₹2" / "−₹17" / "₹0". Uses a real minus glyph.
+export const fmtDelta = (n) => {
+  const r = Math.round(n || 0);
+  if (r === 0) return "₹0";
+  return (r > 0 ? "+₹" : "−₹") + Math.abs(r).toLocaleString("en-IN");
+};
+
 // Display a name in Title Case, splitting on spaces / underscores / hyphens.
 // Handles legacy DB rows like "SHEETAL", "NADeem", "SAJID_HSR" → "Sheetal",
 // "Nadeem", "Sajid Hsr" so leaderboards and lists read consistently.
