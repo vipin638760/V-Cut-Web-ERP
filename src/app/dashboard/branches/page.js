@@ -283,6 +283,159 @@ function BranchCollectionChart({ periodEntries, allEntries = [], branchId, filte
   );
 }
 
+// Branch-scoped twin of the dashboard's Same-Date Compare card. Overlays the
+// three *completed* months before the selection (Apr · May · Jun for a July
+// selection) day-by-day for THIS branch only, so you can eyeball how the same
+// calendar day trended across recent months. The selected month is excluded —
+// it has its own Collection Trend + month-to-date strip above. Month mode only.
+function BranchSameDateCompareChart({ allEntries = [], branchId, filterYear, filterMonth }) {
+  const [hover, setHover] = useState(null); // { day, mi }
+
+  const ref = shiftMonth(filterYear, filterMonth, 1);
+  const months = [];
+  for (let back = 2; back >= 0; back--) {
+    const { y, m } = shiftMonth(ref.y, ref.m, back);
+    months.push({ y, m, label: new Date(y, m - 1, 1).toLocaleDateString("en-US", { month: "short" }) });
+  }
+  const COLORS = ["#c084fc", "#5de8ff", "#4ade80"]; // oldest, middle, newest
+  const GRADS = ["linear-gradient(180deg,#d7a6ff,#8b5cf6)", "linear-gradient(180deg,#5de8ff,#12a5bf)", "linear-gradient(180deg,#7df094,#22a354)"];
+
+  const daysInSel = new Date(ref.y, ref.m, 0).getDate();
+
+  // Per-month, per-day collection (online + cash + material) for this branch.
+  const data = months.map(({ y, m }) => {
+    const dim = new Date(y, m, 0).getDate();
+    const byDay = Array.from({ length: dim }, () => 0);
+    allEntries.forEach(e => {
+      if (!e.date || e.branch_id !== branchId) return;
+      const [ey, em, ed] = e.date.split("-").map(Number);
+      if (ey !== y || em !== m) return;
+      const idx = ed - 1;
+      if (idx < 0 || idx >= dim) return;
+      const matSale = (e.staff_billing || []).reduce((s, sb) => s + (sb.material || 0), 0);
+      byDay[idx] += (e.online || 0) + (e.cash || 0) + matSale;
+    });
+    return { y, m, dim, byDay };
+  });
+
+  const max = Math.max(1, ...data.flatMap(d => d.byDay));
+  const monStats = data.map(d => {
+    const total = d.byDay.reduce((s, v) => s + v, 0);
+    const working = d.byDay.filter(v => v > 0).length;
+    const avg = working ? Math.round(total / working) : 0;
+    let bestDay = 0, bestVal = 0;
+    d.byDay.forEach((v, i) => { if (v > bestVal) { bestVal = v; bestDay = i + 1; } });
+    return { total, avg, bestDay, bestVal };
+  });
+  const monTotals = monStats.map(s => s.total);
+  const newest = monTotals[2], prev = monTotals[1];
+  const delta = prev > 0 ? Math.round(((newest - prev) / prev) * 100) : null;
+
+  const H = 180;
+  const GROUP_GAP = 10;
+  const BAR_W = 7;
+  const BAR_GAP = 2;
+  const groupW = 3 * BAR_W + 2 * BAR_GAP;
+  const LEFT = 8;
+  const W = LEFT + daysInSel * (groupW + GROUP_GAP);
+
+  const weekdayOf = (d) => new Date(ref.y, ref.m - 1, d).toLocaleDateString("en-US", { weekday: "narrow" });
+  const isWeekend = (d) => { const w = new Date(ref.y, ref.m - 1, d).getDay(); return w === 0 || w === 6; };
+
+  return (
+    <Card style={{ padding: 16, marginBottom: 12, overflow: "visible" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 10, marginBottom: 12 }}>
+        <div>
+          <div style={{ fontSize: 11, fontWeight: 800, color: "var(--accent)", textTransform: "uppercase", letterSpacing: 1.5 }}>📊 Same-Date Compare</div>
+          <div style={{ fontSize: 15, fontWeight: 800, color: "var(--gold)", fontFamily: "var(--font-headline, var(--font-outfit))", marginTop: 2 }}>Every day · {months.map(m => m.label).join(" · ")} {months[2].y}</div>
+          <div style={{ fontSize: 10, color: "var(--text3)", fontWeight: 600, marginTop: 2 }}>Prior 3 completed months for this branch — {new Date(filterYear, filterMonth - 1, 1).toLocaleDateString("en-US", { month: "long" })} shown above</div>
+        </div>
+        <div style={{ display: "flex", gap: 8, alignItems: "stretch", flexWrap: "wrap" }}>
+          {months.map((mo, i) => (
+            <div key={i} style={{ display: "flex", flexDirection: "column", gap: 2, padding: "6px 10px", borderRadius: 10, background: "var(--bg3)", border: `1px solid ${COLORS[i]}55`, minWidth: 120 }}>
+              <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                <span style={{ width: 9, height: 9, borderRadius: 3, background: COLORS[i] }} />
+                <span style={{ fontSize: 10.5, fontWeight: 800, color: "var(--text)" }}>{mo.label} {mo.y}</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 9.5 }}>
+                <span style={{ color: "var(--text3)", fontWeight: 700 }}>Total</span>
+                <span style={{ color: "var(--text)", fontWeight: 800 }}>{INR(monTotals[i])}</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 9.5 }}>
+                <span style={{ color: "var(--text3)", fontWeight: 700 }}>Avg / day</span>
+                <span style={{ color: "var(--blue)", fontWeight: 800 }}>{INR(monStats[i].avg)}</span>
+              </div>
+            </div>
+          ))}
+          {delta !== null && (
+            <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", textAlign: "right", paddingLeft: 4 }}>
+              <div style={{ fontSize: 9, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, fontWeight: 700 }}>Month vs Prev</div>
+              <div style={{ fontSize: 15, fontWeight: 800, color: delta >= 0 ? "var(--green)" : "var(--red)" }}>{delta >= 0 ? "▲" : "▼"} {Math.abs(delta)}%</div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {max <= 1 ? (
+        <div style={{ height: H, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text3)", fontStyle: "italic", fontSize: 12 }}>No business for this branch in the prior 3 months.</div>
+      ) : (
+        <div style={{ position: "relative" }}>
+          <div style={{ overflowX: "auto", paddingBottom: 4 }}>
+            <div style={{ position: "relative", width: W, height: H + 34, display: "flex", alignItems: "flex-end", gap: GROUP_GAP, paddingLeft: LEFT }}>
+              {Array.from({ length: daysInSel }, (_, di) => {
+                const day = di + 1;
+                const wknd = isWeekend(day);
+                return (
+                  <div key={day} style={{ display: "flex", flexDirection: "column", alignItems: "center", width: groupW }}>
+                    <div style={{ display: "flex", alignItems: "flex-end", gap: BAR_GAP, height: H }}>
+                      {data.map((d, mi) => {
+                        const val = d.byDay[day - 1] || 0;
+                        const missing = day > d.dim;
+                        const barH = Math.max(val > 0 ? 3 : 0, Math.round((val / max) * H));
+                        const on = hover && hover.day === day && hover.mi === mi;
+                        return (
+                          <div key={mi} onMouseEnter={() => !missing && setHover({ day, mi })} onMouseLeave={() => setHover(null)}
+                            title={missing ? "" : `${months[mi].label} ${day} · ${INR(val)}`}
+                            style={{ width: BAR_W, height: barH, minHeight: missing ? 0 : val > 0 ? 3 : 2, borderRadius: "3px 3px 0 0", background: missing ? "transparent" : val > 0 ? GRADS[mi] : "var(--bg4)", opacity: on ? 1 : hover ? 0.55 : 1, transition: "opacity .12s", cursor: missing ? "default" : "pointer" }} />
+                        );
+                      })}
+                    </div>
+                    <div style={{ marginTop: 6, textAlign: "center", lineHeight: 1.1 }}>
+                      <div style={{ fontSize: 9.5, fontWeight: 800, color: wknd ? "var(--orange, #f59e0b)" : "var(--text2)" }}>{day}</div>
+                      <div style={{ fontSize: 8, fontWeight: 700, color: wknd ? "var(--orange, #f59e0b)" : "var(--text3)" }}>{weekdayOf(day)}</div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {hover && (() => {
+            const day = hover.day;
+            return (
+              <div style={{ position: "absolute", top: 0, left: "50%", transform: "translateX(-50%)", background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 10, padding: "10px 12px", boxShadow: "0 8px 24px rgba(0,0,0,0.5)", zIndex: 20, minWidth: 180, pointerEvents: "none" }}>
+                <div style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", marginBottom: 4 }}>Day {day} · same-date</div>
+                {data.map((d, mi) => (
+                  <div key={mi} style={{ display: "flex", justifyContent: "space-between", gap: 14, fontSize: 11.5, padding: "2px 0" }}>
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 6, color: "var(--text2)", fontWeight: 700 }}>
+                      <span style={{ width: 8, height: 8, borderRadius: 2, background: COLORS[mi] }} />{months[mi].label}
+                    </span>
+                    <span style={{ color: (d.byDay[day - 1] || 0) > 0 ? "var(--gold)" : "var(--text3)", fontWeight: 800 }}>{INR(d.byDay[day - 1] || 0)}</span>
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
+        </div>
+      )}
+
+      <div style={{ fontSize: 10, color: "var(--text3)", marginTop: 8, textAlign: "center" }}>
+        Three bars per day = the three months. Weekdays under each day (weekends orange). Hover for the same-date split.
+      </div>
+    </Card>
+  );
+}
+
 // Monthly EXPENSE bar chart for a single branch (year view). Twin of the
 // Collection Trend chart but red bars = operating cost, with a per-category
 // breakdown on hover (Salary / Incentives / Material / Rent / Elec / WiFi /
@@ -2576,6 +2729,9 @@ export default function BranchesPage() {
           return (<>
             <BranchCollectionChart periodEntries={periodEntries} allEntries={entries} branchId={b.id} filterMode={filterMode} filterYear={filterYear} filterMonth={filterMonth} endMonth={endMonth} onDayClick={openDay}
               monthlyExpense={Object.fromEntries(breakdownStats.filter(s => s.monthPrefix).map(s => [s.monthPrefix, (s.income || 0) - (s.pl || 0)]))} />
+            {filterMode === "month" && (
+              <BranchSameDateCompareChart allEntries={entries} branchId={b.id} filterYear={filterYear} filterMonth={filterMonth} />
+            )}
             {filterMode === "year" && isAdmin && (
               <BranchExpenseChart breakdownStats={breakdownStats} filterYear={filterYear}
                 salaryBreakup={Object.fromEntries(breakdownStats.filter(s => s.monthPrefix).map(s => [
