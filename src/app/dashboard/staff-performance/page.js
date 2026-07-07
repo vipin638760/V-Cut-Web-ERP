@@ -219,7 +219,10 @@ export default function StaffPerformancePage() {
   // currently on screen (e.g. searching a branch scopes every total to it).
   const kpi = useMemo(() => {
     const q = search.trim().toLowerCase();
-    const byType = rows.filter(r => (typeFilter === "all" || typeOf(r) === typeFilter) && matchesSearch(r, q));
+    const byType = rows.filter(r =>
+      (typeFilter === "all" || typeOf(r) === typeFilter)
+      && (targetFilter === "all" || (targetFilter === "met" ? isMet(r) : isNotMet(r)))
+      && matchesSearch(r, q));
     const act = byType.filter(r => r.status !== "inactive").length;
     return {
       totBill: byType.reduce((s, r) => s + r.billing, 0),
@@ -231,19 +234,20 @@ export default function StaffPerformancePage() {
       act, inact: byType.length - act, total: byType.length,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, typeFilter, branchesById, search]);
+  }, [rows, typeFilter, targetFilter, branchesById, search]);
 
   const typeCounts = useMemo(() => {
     const q = search.trim().toLowerCase();
     const byStatus = rows.filter(r =>
       (statusFilter === "all" || (statusFilter === "active" ? r.status !== "inactive" : r.status === "inactive"))
+      && (targetFilter === "all" || (targetFilter === "met" ? isMet(r) : isNotMet(r)))
       && matchesSearch(r, q));
     return {
       mens: byStatus.filter(r => typeOf(r) === "mens").length,
       unisex: byStatus.filter(r => typeOf(r) === "unisex").length,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, statusFilter, branchesById, search]);
+  }, [rows, statusFilter, targetFilter, branchesById, search]);
 
   const selected = selectedId ? staff.find(s => s.id === selectedId) : null;
   const salarySelected = salaryStaffId ? staff.find(s => s.id === salaryStaffId) : null;
