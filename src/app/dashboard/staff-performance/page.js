@@ -107,19 +107,22 @@ export default function StaffPerformancePage() {
     const tgt = baseTgt * factor;
     const pct = tgt > 0 ? Math.min(Math.round(agg.billing / tgt * 100), 100) : 0;
 
-    let salary = 0, leaveDays = 0;
+    let salary = 0, salaryFull = 0, leaveDays = 0;
     const startM = isYearly ? 1 : filterMonth;
     const endM = isYearly ? factor : filterMonth;
     for (let m = startM; m <= endM; m++) {
       const mp = `${filterYear}-${String(m).padStart(2, "0")}`;
       salary += proRataSalary(s, mp, branches, salHistory, staff, globalSettings, leaves, entries);
+      // Final / full salary — the contractual base for every month the staff is
+      // active, with no leave or partial-day proration applied.
+      if (staffStatusForMonth(s, mp).status !== "inactive") salaryFull += Number(s.salary) || 0;
       leaveDays += staffLeavesInMonth(s.id, mp, leaves);
     }
 
     const st = staffStatusForMonth(s, statusMonth);
     const branchId = effectiveBranchOnDate(s, todayStr, transfers) || s.branch_id;
     return {
-      s, tgt, pct, salary, leaveDays,
+      s, tgt, pct, salary, salaryFull, leaveDays,
       billing: agg.billing, incentive: agg.incentive, material: agg.material,
       daysBilled: agg.days.size, branchesBilled: agg.branches.size,
       status: st.status, branchId,
@@ -159,6 +162,7 @@ export default function StaffPerformancePage() {
       totBill: byType.reduce((s, r) => s + r.billing, 0),
       totInc: byType.reduce((s, r) => s + r.incentive, 0),
       totSal: byType.reduce((s, r) => s + r.salary, 0),
+      totSalFull: byType.reduce((s, r) => s + r.salaryFull, 0),
       act, inact: byType.length - act, total: byType.length,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -199,7 +203,8 @@ export default function StaffPerformancePage() {
         <KpiTile label="Inactive" value={kpi.inact} color="var(--red)" sub={`in ${new Date(statusMonth + "-01").toLocaleDateString("en-US", { month: "short", year: "numeric" })}`} />
         <KpiTile label="Total Billing" value={INR(kpi.totBill)} color="var(--accent)" />
         <KpiTile label="Total Incentive" value={INR(kpi.totInc)} color="var(--gold)" />
-        {isAdmin && <KpiTile label="Total Salary" value={INR(kpi.totSal)} color="var(--blue, #60a5fa)" sub="payroll cost" />}
+        {isAdmin && <KpiTile label="Total Salary" value={INR(kpi.totSal)} color="var(--blue, #60a5fa)" sub="payroll cost · after proration" />}
+        {isAdmin && <KpiTile label="Full Salary" value={INR(kpi.totSalFull)} color="var(--blue, #60a5fa)" sub="final · no proration" />}
       </div>
 
       {/* Controls */}
