@@ -146,18 +146,31 @@ export default function StaffPerformancePage() {
   const active = filtered.filter(r => r.status !== "inactive");
   const inactive = filtered.filter(r => r.status === "inactive");
 
-  // Network KPIs (unfiltered by search, so the totals stay stable).
-  const kpi = useMemo(() => {
-    const totBill = rows.reduce((s, r) => s + r.billing, 0);
-    const totInc = rows.reduce((s, r) => s + r.incentive, 0);
-    const act = rows.filter(r => r.status !== "inactive").length;
-    return { totBill, totInc, act, inact: rows.length - act, total: rows.length };
-  }, [rows]);
+  const typeOf = (r) => branchesById.get(r.branchId)?.type;
 
-  const typeCounts = useMemo(() => ({
-    mens: rows.filter(r => branchesById.get(r.branchId)?.type === "mens").length,
-    unisex: rows.filter(r => branchesById.get(r.branchId)?.type === "unisex").length,
-  }), [rows, branchesById]);
+  // Faceted counts — each control's numbers reflect the *other* filter, so the
+  // Active/Inactive tallies + KPI band follow the Mens/Unisex selection and
+  // vice-versa. Search is intentionally excluded so the totals stay stable.
+  const kpi = useMemo(() => {
+    const byType = typeFilter === "all" ? rows : rows.filter(r => typeOf(r) === typeFilter);
+    const act = byType.filter(r => r.status !== "inactive").length;
+    return {
+      totBill: byType.reduce((s, r) => s + r.billing, 0),
+      totInc: byType.reduce((s, r) => s + r.incentive, 0),
+      act, inact: byType.length - act, total: byType.length,
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows, typeFilter, branchesById]);
+
+  const typeCounts = useMemo(() => {
+    const byStatus = statusFilter === "all" ? rows
+      : rows.filter(r => statusFilter === "active" ? r.status !== "inactive" : r.status === "inactive");
+    return {
+      mens: byStatus.filter(r => typeOf(r) === "mens").length,
+      unisex: byStatus.filter(r => typeOf(r) === "unisex").length,
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows, statusFilter, branchesById]);
 
   const selected = selectedId ? staff.find(s => s.id === selectedId) : null;
 
@@ -169,7 +182,10 @@ export default function StaffPerformancePage() {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: 14 }}>
         <div>
           <h2 style={{ fontSize: 28, fontWeight: 950, color: "var(--text)", letterSpacing: -1, margin: 0 }}>Staff Performance</h2>
-          <p style={{ fontSize: 12, color: "var(--text3)", fontWeight: 600, marginTop: 4 }}>Per-stylist billing, incentives & payroll · {plabel}</p>
+          <p style={{ fontSize: 12, color: "var(--text3)", fontWeight: 600, marginTop: 4 }}>
+            Per-stylist billing, incentives & payroll · {plabel}
+            {typeFilter !== "all" && <span style={{ color: typeFilter === "unisex" ? "#a855f7" : "var(--blue)", fontWeight: 800, textTransform: "capitalize" }}> · {typeFilter} only</span>}
+          </p>
         </div>
         <PeriodWidget filterMode={filterMode} setFilterMode={setFilterMode} filterYear={filterYear} setFilterYear={setFilterYear} filterMonth={filterMonth} setFilterMonth={setFilterMonth} />
       </div>
