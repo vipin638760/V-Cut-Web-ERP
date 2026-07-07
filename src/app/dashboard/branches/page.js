@@ -982,6 +982,7 @@ export default function BranchesPage() {
   const [attendanceCalendar, setAttendanceCalendar] = useState(null); // branch id
   const [attendanceMonth, setAttendanceMonth] = useState(null); // "YYYY-MM"
   const [attendanceSelectedDay, setAttendanceSelectedDay] = useState(null); // "YYYY-MM-DD"
+  const [attChip, setAttChip] = useState(null); // null | 'present' | 'loan' | 'leave' | 'active' | 'business'
 
   // Period
   const [filterMode, setFilterMode] = useState("month");
@@ -1710,11 +1711,13 @@ export default function BranchesPage() {
       const d = new Date(yr, mo - 2, 1);
       setAttendanceMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
       setAttendanceSelectedDay(null);
+      setAttChip(null);
     };
     const nextMonth = () => {
       const d = new Date(yr, mo, 1);
       setAttendanceMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
       setAttendanceSelectedDay(null);
+      setAttChip(null);
     };
 
     // Month totals for header summary + the right-panel "till now" card.
@@ -1738,12 +1741,38 @@ export default function BranchesPage() {
       .flatMap(d => perDay(d).approvedLeaves.map(l => ({ date: d, name: l.name, type: l.type })))
       .sort((a, b) => b.date.localeCompare(a.date));
 
+    // Per-chip month aggregations — drive the clickable header chips. Present /
+    // loaned are rolled up per staff (days worked + billing); active + business
+    // are per-day. All respect the capture cutoff.
+    const presentAgg = new Map();  // id → { name, role, days, billing }
+    const loanAgg = new Map();     // id → { name, days, billing, homeName }
+    const dayList = [];            // { date, business, present, loan }
+    days.forEach(d => {
+      if (cutoff && d > cutoff) return;
+      const { present, loan } = perDay(d);
+      present.forEach(p => {
+        const a = presentAgg.get(p.id) || { name: p.name, role: p.role, days: 0, billing: 0 };
+        a.days += 1; a.billing += p.billing || 0; presentAgg.set(p.id, a);
+      });
+      loan.forEach(p => {
+        const homeName = (branches.find(x => x.id === staffById.get(p.id)?.branch_id)?.name || "").replace("V-CUT ", "");
+        const a = loanAgg.get(p.id) || { name: p.name, days: 0, billing: 0, homeName };
+        a.days += 1; a.billing += p.billing || 0; loanAgg.set(p.id, a);
+      });
+      const biz = dayBusiness(d);
+      if (present.length + loan.length > 0 || biz > 0) dayList.push({ date: d, business: biz, present: present.length, loan: loan.length });
+    });
+    const presentList = [...presentAgg.values()].sort((a, b) => b.days - a.days || b.billing - a.billing);
+    const loanList = [...loanAgg.values()].sort((a, b) => b.days - a.days || b.billing - a.billing);
+    const activeDaysList = [...dayList].sort((a, b) => a.date.localeCompare(b.date));
+    const businessList = [...dayList].filter(x => x.business > 0).sort((a, b) => b.business - a.business);
+
     const LEAVE_HEX = "#c084fc"; // violet-400 — distinct from accent/blue
     const LEAVE_BG = "rgba(192,132,252,0.10)";
     const LEAVE_BORDER = "rgba(192,132,252,0.35)";
 
     return (
-      <div onClick={() => { setAttendanceCalendar(null); setAttendanceSelectedDay(null); }}
+      <div onClick={() => { setAttendanceCalendar(null); setAttendanceSelectedDay(null); setAttChip(null); }}
         style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.78)", backdropFilter: "blur(10px)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: 20, overflowY: "auto" }}>
         <div onClick={e => e.stopPropagation()}
           style={{ background: "linear-gradient(180deg, var(--bg2) 0%, var(--bg1) 100%)", border: "1px solid var(--border)", borderRadius: 22, width: "100%", maxWidth: 1120, maxHeight: "92vh", overflow: "hidden", display: "flex", flexDirection: "column", boxShadow: "0 30px 60px -15px rgba(0,0,0,0.75), 0 0 0 1px rgba(34,211,238,0.05)" }}>
@@ -1773,43 +1802,48 @@ export default function BranchesPage() {
                   style={{ width: 34, height: 34, borderRadius: 10, background: "var(--bg3)", border: "1px solid var(--border2)", color: "var(--text2)", cursor: "pointer", fontSize: 16, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", transition: "all .15s" }}
                   onMouseEnter={e => { e.currentTarget.style.background = "var(--bg4)"; e.currentTarget.style.color = "var(--accent)"; }}
                   onMouseLeave={e => { e.currentTarget.style.background = "var(--bg3)"; e.currentTarget.style.color = "var(--text2)"; }}>›</button>
-                <button onClick={() => { setAttendanceCalendar(null); setAttendanceSelectedDay(null); }} title="Close"
+                <button onClick={() => { setAttendanceCalendar(null); setAttendanceSelectedDay(null); setAttChip(null); }} title="Close"
                   style={{ marginLeft: 8, width: 34, height: 34, borderRadius: 10, background: "transparent", border: "1px solid var(--border)", color: "var(--text3)", cursor: "pointer", fontSize: 14, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", transition: "all .15s" }}
                   onMouseEnter={e => { e.currentTarget.style.background = "rgba(239,68,68,0.10)"; e.currentTarget.style.color = "var(--red)"; e.currentTarget.style.borderColor = "rgba(239,68,68,0.35)"; }}
                   onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--text3)"; e.currentTarget.style.borderColor = "var(--border)"; }}>✕</button>
               </div>
             </div>
 
-            {/* Summary stat strip */}
-            <div style={{ display: "flex", gap: 8, marginTop: 16, flexWrap: "wrap" }}>
-              <div style={{ padding: "6px 12px", borderRadius: 8, background: "rgba(74,222,128,0.08)", border: "1px solid rgba(74,222,128,0.25)", display: "inline-flex", alignItems: "center", gap: 6 }}>
-                <span style={{ width: 6, height: 6, borderRadius: 3, background: "var(--green)" }} />
-                <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1 }}>Present</span>
-                <span style={{ fontSize: 13, fontWeight: 800, color: "var(--green)" }}>{monthTotals.present}</span>
-              </div>
-              {monthTotals.loan > 0 && (
-                <div style={{ padding: "6px 12px", borderRadius: 8, background: "rgba(251,146,60,0.08)", border: "1px solid rgba(251,146,60,0.25)", display: "inline-flex", alignItems: "center", gap: 6 }}>
-                  <span style={{ width: 6, height: 6, borderRadius: 3, background: "var(--orange)" }} />
-                  <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1 }}>Loaned</span>
-                  <span style={{ fontSize: 13, fontWeight: 800, color: "var(--orange)" }}>{monthTotals.loan}</span>
+            {/* Summary stat strip — each chip is a toggle that drives the right
+                panel's month breakdown. Click again (or the active chip) to clear. */}
+            {(() => {
+              const onChip = (key) => { setAttChip(c => c === key ? null : key); setAttendanceSelectedDay(null); };
+              const chip = (key, dot, label, value, hex, activeBg, activeBorder, disabled = false) => {
+                const active = attChip === key;
+                return (
+                  <button key={key} onClick={disabled ? undefined : () => onChip(key)}
+                    title={disabled ? "Nothing to show" : active ? "Click to clear" : `Show ${label.toLowerCase()} breakdown`}
+                    style={{
+                      padding: "6px 12px", borderRadius: 8, display: "inline-flex", alignItems: "center", gap: 6,
+                      background: active ? activeBg : "var(--bg3)",
+                      border: `1px solid ${active ? activeBorder : "var(--border2)"}`,
+                      boxShadow: active ? `0 0 0 1px ${activeBorder}, 0 4px 14px -6px ${activeBorder}` : "none",
+                      cursor: disabled ? "default" : "pointer", opacity: disabled ? 0.5 : 1,
+                      transition: "all .15s", fontFamily: "inherit",
+                    }}>
+                    {dot}
+                    <span style={{ fontSize: 10, fontWeight: 700, color: active ? hex : "var(--text3)", textTransform: "uppercase", letterSpacing: 1 }}>{label}</span>
+                    <span style={{ fontSize: 13, fontWeight: 800, color: hex }}>{value}</span>
+                    {active && <span style={{ fontSize: 11, color: hex, fontWeight: 900, marginLeft: 1 }}>✕</span>}
+                  </button>
+                );
+              };
+              const dot = (c) => <span style={{ width: 6, height: 6, borderRadius: 3, background: c }} />;
+              return (
+                <div style={{ display: "flex", gap: 8, marginTop: 16, flexWrap: "wrap" }}>
+                  {chip("present", dot("var(--green)"), "Present", monthTotals.present, "var(--green)", "rgba(74,222,128,0.14)", "rgba(74,222,128,0.5)", monthTotals.present === 0)}
+                  {chip("loan", dot("var(--orange)"), "Loaned", monthTotals.loan, "var(--orange)", "rgba(251,146,60,0.14)", "rgba(251,146,60,0.5)", monthTotals.loan === 0)}
+                  {chip("leave", <Icon name="moon" size={11} />, "On Leave", monthTotals.leave, LEAVE_HEX, LEAVE_BG, LEAVE_BORDER, monthTotals.leave === 0)}
+                  {chip("active", null, "Active Days", monthTotals.activeDays, "var(--text)", "rgba(255,255,255,0.08)", "var(--border2)", monthTotals.activeDays === 0)}
+                  {chip("business", null, `Business${cutoff ? " · till now" : ""}`, INR(monthTotals.business), "var(--accent)", "rgba(34,211,238,0.14)", "rgba(34,211,238,0.5)", monthTotals.business === 0)}
                 </div>
-              )}
-              {monthTotals.leave > 0 && (
-                <div style={{ padding: "6px 12px", borderRadius: 8, background: LEAVE_BG, border: `1px solid ${LEAVE_BORDER}`, display: "inline-flex", alignItems: "center", gap: 6 }}>
-                  <Icon name="moon" size={11} />
-                  <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1 }}>On Leave</span>
-                  <span style={{ fontSize: 13, fontWeight: 800, color: LEAVE_HEX }}>{monthTotals.leave}</span>
-                </div>
-              )}
-              <div style={{ padding: "6px 12px", borderRadius: 8, background: "var(--bg3)", border: "1px solid var(--border2)", display: "inline-flex", alignItems: "center", gap: 6 }}>
-                <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1 }}>Active Days</span>
-                <span style={{ fontSize: 13, fontWeight: 800, color: "var(--text)" }}>{monthTotals.activeDays}</span>
-              </div>
-              <div style={{ padding: "6px 12px", borderRadius: 8, background: "rgba(34,211,238,0.08)", border: "1px solid rgba(34,211,238,0.28)", display: "inline-flex", alignItems: "center", gap: 6 }}>
-                <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1 }}>Business{cutoff ? " · till now" : ""}</span>
-                <span style={{ fontSize: 13, fontWeight: 800, color: "var(--accent)" }}>{INR(monthTotals.business)}</span>
-              </div>
-            </div>
+              );
+            })()}
           </div>
 
           {/* Body: calendar grid + right roster */}
@@ -1850,7 +1884,7 @@ export default function BranchesPage() {
                           : "var(--border)";
                   return (
                     <button key={dateStr}
-                      onClick={() => setAttendanceSelectedDay(dateStr)}
+                      onClick={() => { setAttendanceSelectedDay(dateStr); setAttChip(null); }}
                       style={{
                         aspectRatio: "1 / 1",
                         padding: 8,
@@ -1919,9 +1953,117 @@ export default function BranchesPage() {
               </div>
             </div>
 
-            {/* Right — selected day roster */}
+            {/* Right — chip breakdown > selected-day roster > month summary */}
             <div style={{ borderLeft: "1px solid var(--border)", paddingLeft: 22 }}>
-              {activeRoster ? (
+              {attChip ? (
+                (() => {
+                  const head = (title, color, total) => (
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, gap: 10 }}>
+                      <div>
+                        <div style={{ fontSize: 11, fontWeight: 800, color, textTransform: "uppercase", letterSpacing: 1.5 }}>{title}</div>
+                        {total != null && <div style={{ fontSize: 17, fontWeight: 900, color: "var(--text)", fontFamily: "var(--font-headline, var(--font-outfit))" }}>{total}</div>}
+                      </div>
+                      <button onClick={() => setAttChip(null)} title="Clear"
+                        style={{ padding: "5px 10px", borderRadius: 8, background: "var(--bg3)", border: "1px solid var(--border2)", color: "var(--text3)", fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: 0.5, cursor: "pointer" }}>✕ Clear</button>
+                    </div>
+                  );
+                  const empty = (msg) => <div style={{ padding: 24, textAlign: "center", color: "var(--text3)", fontSize: 12, fontStyle: "italic", background: "var(--bg3)", border: "1px dashed var(--border2)", borderRadius: 12 }}>{msg}</div>;
+                  const dayLabel = (d) => `${Number(d.slice(8, 10))} ${new Date(yr, mo - 1, 1).toLocaleString("en-US", { month: "short" })}`;
+                  const avatar = (letter, col, bg, bd) => <div style={{ width: 32, height: 32, borderRadius: 9, background: bg, color: col, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 13, border: `1px solid ${bd}`, flexShrink: 0 }}>{letter}</div>;
+                  const rowWrap = { display: "flex", flexDirection: "column", gap: 6, maxHeight: 440, overflowY: "auto" };
+
+                  if (attChip === "present") {
+                    return (
+                      <div>
+                        {head("Present · home-branch", "var(--green)", `${presentList.length} staff · ${monthTotals.present} shifts`)}
+                        {presentList.length === 0 ? empty("No present staff this month.") : (
+                          <div style={rowWrap}>
+                            {presentList.map(p => (
+                              <div key={p.name} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 12px", background: "linear-gradient(180deg, rgba(74,222,128,0.07), rgba(74,222,128,0.02))", border: "1px solid rgba(74,222,128,0.22)", borderLeft: "3px solid var(--green)", borderRadius: 10 }}>
+                                {avatar(p.name[0], "var(--green)", "rgba(74,222,128,0.14)", "rgba(74,222,128,0.25)")}
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                  <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</div>
+                                  <div style={{ fontSize: 10, color: "var(--text3)" }}>{p.days} day{p.days === 1 ? "" : "s"}{p.role ? ` · ${p.role}` : ""}</div>
+                                </div>
+                                {p.billing > 0 && <span style={{ fontSize: 12, fontWeight: 800, color: "var(--green)", fontFamily: "var(--font-headline, var(--font-outfit))" }}>{INR(p.billing)}</span>}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  }
+                  if (attChip === "loan") {
+                    return (
+                      <div>
+                        {head("Loaned in", "var(--orange)", `${loanList.length} staff · ${monthTotals.loan} shifts`)}
+                        {loanList.length === 0 ? empty("No loaned-in staff this month.") : (
+                          <div style={rowWrap}>
+                            {loanList.map(p => (
+                              <div key={p.name} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 12px", background: "linear-gradient(180deg, rgba(251,146,60,0.07), rgba(251,146,60,0.02))", border: "1px solid rgba(251,146,60,0.25)", borderLeft: "3px solid var(--orange)", borderRadius: 10 }}>
+                                {avatar(p.name[0], "var(--orange)", "rgba(251,146,60,0.14)", "rgba(251,146,60,0.25)")}
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                  <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</div>
+                                  <div style={{ fontSize: 10, color: "var(--orange)", fontWeight: 700 }}>{p.days} day{p.days === 1 ? "" : "s"}{p.homeName ? ` · Home: ${p.homeName}` : ""}</div>
+                                </div>
+                                {p.billing > 0 && <span style={{ fontSize: 12, fontWeight: 800, color: "var(--orange)", fontFamily: "var(--font-headline, var(--font-outfit))" }}>{INR(p.billing)}</span>}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  }
+                  if (attChip === "leave") {
+                    return (
+                      <div>
+                        {head("On leave", LEAVE_HEX, `${monthLeaves.length} leave${monthLeaves.length === 1 ? "" : "s"}`)}
+                        {monthLeaves.length === 0 ? empty("No leaves this month.") : (
+                          <div style={rowWrap}>
+                            {monthLeaves.map((l, i) => (
+                              <div key={`${l.date}-${l.name}-${i}`} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "10px 12px", background: LEAVE_BG, border: `1px solid ${LEAVE_BORDER}`, borderLeft: `3px solid ${LEAVE_HEX}`, borderRadius: 10 }}>
+                                <span style={{ display: "inline-flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+                                  {avatar(<Icon name="moon" size={14} />, LEAVE_HEX, "rgba(192,132,252,0.14)", LEAVE_BORDER)}
+                                  <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{l.name}</span>
+                                </span>
+                                <span style={{ display: "inline-flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+                                  <span style={{ fontSize: 9, fontWeight: 700, color: LEAVE_HEX, textTransform: "uppercase" }}>{l.type}</span>
+                                  <span style={{ fontSize: 11, fontWeight: 800, color: "var(--text3)" }}>{dayLabel(l.date)}</span>
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  }
+                  // active + business — both are per-day lists
+                  const rows = attChip === "business" ? businessList : activeDaysList;
+                  return (
+                    <div>
+                      {attChip === "business"
+                        ? head(`Business${cutoff ? " · till now" : ""}`, "var(--accent)", INR(monthTotals.business))
+                        : head("Active days", "var(--text)", `${monthTotals.activeDays} day${monthTotals.activeDays === 1 ? "" : "s"}`)}
+                      {rows.length === 0 ? empty("No days to show.") : (
+                        <div style={rowWrap}>
+                          {rows.map(d => (
+                            <button key={d.date} onClick={() => { setAttendanceSelectedDay(d.date); setAttChip(null); }}
+                              style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "10px 12px", background: "var(--bg3)", border: "1px solid var(--border)", borderLeft: "3px solid var(--accent)", borderRadius: 10, cursor: "pointer", textAlign: "left", width: "100%" }}
+                              onMouseEnter={e => e.currentTarget.style.background = "var(--bg4)"}
+                              onMouseLeave={e => e.currentTarget.style.background = "var(--bg3)"}>
+                              <div>
+                                <div style={{ fontSize: 13, fontWeight: 800, color: "var(--text)" }}>{new Date(d.date + "T00:00").toLocaleString("en-US", { weekday: "short", day: "numeric", month: "short" })}</div>
+                                <div style={{ fontSize: 10, color: "var(--text3)" }}>{d.present} present{d.loan > 0 ? ` · +${d.loan} loaned` : ""}</div>
+                              </div>
+                              <span style={{ fontSize: 13, fontWeight: 800, color: "var(--accent)", fontFamily: "var(--font-headline, var(--font-outfit))" }}>{INR(d.business)}</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()
+              ) : activeRoster ? (
                 <div>
                   <div style={{ fontSize: 11, fontWeight: 800, color: "var(--accent)", textTransform: "uppercase", letterSpacing: 1.8 }}>Roster for</div>
                   <div style={{ fontSize: 17, fontWeight: 800, color: "var(--text)", marginBottom: 14, fontFamily: "var(--font-headline, var(--font-outfit))" }}>
