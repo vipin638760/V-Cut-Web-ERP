@@ -36,6 +36,7 @@ export default function StaffPerformancePage() {
   const [search, setSearch] = useState("");
   const [sortCol, setSortCol] = useState("billing"); // billing | incentive | pct | name
   const [statusFilter, setStatusFilter] = useState("all"); // all | active | inactive
+  const [typeFilter, setTypeFilter] = useState("all"); // all | mens | unisex
   const [selectedId, setSelectedId] = useState(null);
 
   const currentUser = useCurrentUser() || {};
@@ -128,6 +129,7 @@ export default function StaffPerformancePage() {
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     let list = rows;
+    if (typeFilter !== "all") list = list.filter(r => branchesById.get(r.branchId)?.type === typeFilter);
     if (q) list = list.filter(r =>
       (r.s.name || "").toLowerCase().includes(q) ||
       branchName(r.branchId).toLowerCase().includes(q) ||
@@ -139,7 +141,7 @@ export default function StaffPerformancePage() {
       return b.billing - a.billing;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, search, sortCol]);
+  }, [rows, search, sortCol, typeFilter, branchesById]);
 
   const active = filtered.filter(r => r.status !== "inactive");
   const inactive = filtered.filter(r => r.status === "inactive");
@@ -151,6 +153,11 @@ export default function StaffPerformancePage() {
     const act = rows.filter(r => r.status !== "inactive").length;
     return { totBill, totInc, act, inact: rows.length - act, total: rows.length };
   }, [rows]);
+
+  const typeCounts = useMemo(() => ({
+    mens: rows.filter(r => branchesById.get(r.branchId)?.type === "mens").length,
+    unisex: rows.filter(r => branchesById.get(r.branchId)?.type === "unisex").length,
+  }), [rows, branchesById]);
 
   const selected = selectedId ? staff.find(s => s.id === selectedId) : null;
 
@@ -188,6 +195,11 @@ export default function StaffPerformancePage() {
             <span style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Show</span>
             <ToggleGroup options={[["all", `All (${kpi.total})`], ["active", `Active (${kpi.act})`], ["inactive", `Inactive (${kpi.inact})`]]} value={statusFilter} onChange={setStatusFilter}
               colors={{ all: "var(--blue)", active: "var(--green)", inactive: "var(--red)" }} />
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Type</span>
+            <ToggleGroup options={[["all", `All`], ["mens", `Mens (${typeCounts.mens})`], ["unisex", `Unisex (${typeCounts.unisex})`]]} value={typeFilter} onChange={setTypeFilter}
+              colors={{ all: "var(--blue)", mens: "var(--blue)", unisex: "#a855f7" }} />
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <span style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Sort</span>
