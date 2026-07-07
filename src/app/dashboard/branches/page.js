@@ -436,6 +436,17 @@ function BranchSameDateCompareChart({ allEntries = [], branchId, filterYear, fil
   );
 }
 
+// Small labelled stat tile used in the attendance calendar's month summary panel.
+function MiniTally({ label, value, color, sub }) {
+  return (
+    <div style={{ padding: "10px 12px", borderRadius: 10, background: "var(--bg3)", border: "1px solid var(--border)" }}>
+      <div style={{ fontSize: 9, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 0.8 }}>{label}</div>
+      <div style={{ fontSize: 16, fontWeight: 900, color, fontFamily: "var(--font-headline, var(--font-outfit))", marginTop: 2 }}>{value}</div>
+      {sub && <div style={{ fontSize: 9, color: "var(--text3)", fontWeight: 600, marginTop: 1 }}>{sub}</div>}
+    </div>
+  );
+}
+
 // Monthly EXPENSE bar chart for a single branch (year view). Twin of the
 // Collection Trend chart but red bars = operating cost, with a per-category
 // breakdown on hover (Salary / Incentives / Material / Rent / Elec / WiFi /
@@ -1676,6 +1687,18 @@ export default function BranchesPage() {
       };
     };
 
+    // True day collection = the entry's online + cash + material sale — the
+    // same "business" definition the Collection Trend chart uses, so the
+    // calendar's per-day figure reconciles with the rest of the branch view.
+    const dayBusiness = (dateStr) => {
+      const entry = branchEntries.find(e => e.date === dateStr);
+      if (!entry) return 0;
+      const mat = (entry.staff_billing || []).reduce((s, sb) => s + (sb.material || 0), 0);
+      return (entry.online || 0) + (entry.cash || 0) + mat;
+    };
+    // Compact ₹ for the tight day cells (₹38k / ₹1.8L).
+    const fmtShort = (v) => v >= 100000 ? `₹${(v / 100000).toFixed(1)}L` : v >= 1000 ? `₹${Math.round(v / 1000)}k` : v > 0 ? `₹${v}` : "";
+
     const blanks = Array(firstDow).fill(null);
     const days = Array.from({ length: daysInMonth }, (_, i) => `${attendanceMonth}-${String(i + 1).padStart(2, "0")}`);
 
@@ -1694,16 +1717,26 @@ export default function BranchesPage() {
       setAttendanceSelectedDay(null);
     };
 
-    // Month totals for header summary
+    // Month totals for header summary + the right-panel "till now" card.
     const monthTotals = days.reduce((acc, d) => {
       if (cutoff && d > cutoff) return acc;
       const { present, loan, approvedLeaves } = perDay(d);
       acc.present += present.length;
       acc.loan += loan.length;
       acc.leave += approvedLeaves.length;
-      if (present.length + loan.length > 0) acc.activeDays += 1;
+      const biz = dayBusiness(d);
+      acc.business += biz;
+      if (present.length + loan.length > 0 || biz > 0) acc.activeDays += 1;
+      if (biz > acc.bestVal) { acc.bestVal = biz; acc.bestDay = d; }
       return acc;
-    }, { present: 0, loan: 0, leave: 0, activeDays: 0 });
+    }, { present: 0, loan: 0, leave: 0, activeDays: 0, business: 0, bestDay: null, bestVal: 0 });
+
+    // Every approved-leave occurrence this month (till cutoff), newest first —
+    // fed to the right panel so leave dates are visible at a glance.
+    const monthLeaves = days
+      .filter(d => !(cutoff && d > cutoff))
+      .flatMap(d => perDay(d).approvedLeaves.map(l => ({ date: d, name: l.name, type: l.type })))
+      .sort((a, b) => b.date.localeCompare(a.date));
 
     const LEAVE_HEX = "#c084fc"; // violet-400 — distinct from accent/blue
     const LEAVE_BG = "rgba(192,132,252,0.10)";
@@ -1772,6 +1805,10 @@ export default function BranchesPage() {
                 <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1 }}>Active Days</span>
                 <span style={{ fontSize: 13, fontWeight: 800, color: "var(--text)" }}>{monthTotals.activeDays}</span>
               </div>
+              <div style={{ padding: "6px 12px", borderRadius: 8, background: "rgba(34,211,238,0.08)", border: "1px solid rgba(34,211,238,0.28)", display: "inline-flex", alignItems: "center", gap: 6 }}>
+                <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1 }}>Business{cutoff ? " · till now" : ""}</span>
+                <span style={{ fontSize: 13, fontWeight: 800, color: "var(--accent)" }}>{INR(monthTotals.business)}</span>
+              </div>
             </div>
           </div>
 
@@ -1788,6 +1825,7 @@ export default function BranchesPage() {
                   const isFuture = cutoff && dateStr > cutoff;
                   const { present, loan, approvedLeaves } = perDay(dateStr);
                   const total = present.length + loan.length;
+                  const biz = dayBusiness(dateStr);
                   const hasLeave = approvedLeaves.length > 0;
                   const isToday = dateStr === todayStr;
                   const isActive = dateStr === activeDay;
@@ -1842,10 +1880,16 @@ export default function BranchesPage() {
                           </span>
                         )}
                       </div>
-                      <div style={{ display: "inline-flex", gap: 4, fontSize: 10, fontWeight: 800 }}>
-                        {present.length > 0 && <span style={{ padding: "2px 7px", borderRadius: 5, background: isActive ? "rgba(0,20,24,0.15)" : "rgba(74,222,128,0.18)", color: isActive ? "#001418" : "var(--green)" }}>{present.length}</span>}
-                        {loan.length > 0 && <span style={{ padding: "2px 7px", borderRadius: 5, background: isActive ? "rgba(0,20,24,0.15)" : "rgba(251,146,60,0.18)", color: isActive ? "#001418" : "var(--orange)" }}>+{loan.length}</span>}
-                        {!total && !hasLeave && !isFuture && <span style={{ color: "var(--text3)", opacity: 0.5 }}>—</span>}
+                      <div style={{ display: "flex", flexDirection: "column", gap: 3, width: "100%" }}>
+                        <div style={{ display: "inline-flex", gap: 4, fontSize: 10, fontWeight: 800 }}>
+                          {present.length > 0 && <span style={{ padding: "2px 7px", borderRadius: 5, background: isActive ? "rgba(0,20,24,0.15)" : "rgba(74,222,128,0.18)", color: isActive ? "#001418" : "var(--green)" }}>{present.length}</span>}
+                          {loan.length > 0 && <span style={{ padding: "2px 7px", borderRadius: 5, background: isActive ? "rgba(0,20,24,0.15)" : "rgba(251,146,60,0.18)", color: isActive ? "#001418" : "var(--orange)" }}>+{loan.length}</span>}
+                          {!total && !hasLeave && !isFuture && <span style={{ color: "var(--text3)", opacity: 0.5 }}>—</span>}
+                        </div>
+                        {/* Per-day business (collection). Only shown when there was money in. */}
+                        {biz > 0 && (
+                          <span style={{ fontSize: 10, fontWeight: 800, color: isActive ? "#001418" : "var(--accent)", fontFamily: "var(--font-headline, var(--font-outfit))" }}>{fmtShort(biz)}</span>
+                        )}
                       </div>
                     </button>
                   );
@@ -1929,32 +1973,79 @@ export default function BranchesPage() {
                     </div>
                   )}
 
-                  {/* Total Business — sum of billing across present + loan staff for the selected day. */}
+                  {/* Total Business — the day's collection (online + cash + material),
+                      plus staff-billed context and the running month-to-date total. */}
                   {(() => {
-                    const totalBusiness =
+                    const dayColl = dayBusiness(activeDay);
+                    const staffBill =
                       activeRoster.present.reduce((s, p) => s + (p.billing || 0), 0) +
                       activeRoster.loan.reduce((s, p) => s + (p.billing || 0), 0);
                     const headCount = activeRoster.present.length + activeRoster.loan.length;
-                    if (headCount === 0 && totalBusiness === 0) return null;
+                    if (headCount === 0 && dayColl === 0 && staffBill === 0) return null;
                     return (
-                      <div style={{ marginTop: 14, padding: "12px 14px", borderRadius: 12, background: "linear-gradient(135deg, rgba(74,222,128,0.08), rgba(74,222,128,0.02))", border: "1px solid rgba(74,222,128,0.3)", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
-                        <div>
-                          <div style={{ fontSize: 10, fontWeight: 800, color: "var(--green)", textTransform: "uppercase", letterSpacing: 1.2 }}>Total Business</div>
-                          <div style={{ fontSize: 10, color: "var(--text3)", marginTop: 2 }}>
-                            {headCount} staff billed
+                      <div style={{ marginTop: 14, padding: "12px 14px", borderRadius: 12, background: "linear-gradient(135deg, rgba(74,222,128,0.08), rgba(74,222,128,0.02))", border: "1px solid rgba(74,222,128,0.3)", display: "flex", flexDirection: "column", gap: 8 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+                          <div>
+                            <div style={{ fontSize: 10, fontWeight: 800, color: "var(--green)", textTransform: "uppercase", letterSpacing: 1.2 }}>Day Business</div>
+                            <div style={{ fontSize: 10, color: "var(--text3)", marginTop: 2 }}>{headCount} staff billed · {INR(staffBill)} attributed</div>
                           </div>
+                          <div style={{ fontSize: 18, fontWeight: 800, color: "var(--green)", fontFamily: "var(--font-headline, var(--font-outfit))" }}>{INR(dayColl)}</div>
                         </div>
-                        <div style={{ fontSize: 18, fontWeight: 800, color: "var(--green)", fontFamily: "var(--font-headline, var(--font-outfit))" }}>
-                          {INR(totalBusiness)}
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, paddingTop: 8, borderTop: "1px dashed rgba(255,255,255,0.10)" }}>
+                          <span style={{ fontSize: 10, fontWeight: 800, color: "var(--accent)", textTransform: "uppercase", letterSpacing: 1.2 }}>Month{cutoff ? " · till now" : ""}</span>
+                          <span style={{ fontSize: 14, fontWeight: 800, color: "var(--accent)", fontFamily: "var(--font-headline, var(--font-outfit))" }}>{INR(monthTotals.business)}</span>
                         </div>
                       </div>
                     );
                   })()}
                 </div>
               ) : (
-                <div style={{ padding: 30, textAlign: "center", color: "var(--text3)", fontSize: 12, background: "var(--bg3)", border: "1px dashed var(--border2)", borderRadius: 12 }}>
-                  <div style={{ fontSize: 28, marginBottom: 8, opacity: 0.4 }}>👆</div>
-                  Click any day on the calendar to see its full roster here.
+                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                  <div style={{ fontSize: 11, fontWeight: 800, color: "var(--accent)", textTransform: "uppercase", letterSpacing: 1.8 }}>
+                    {new Date(yr, mo - 1, 1).toLocaleString("en-US", { month: "long" })} · {cutoff ? "Till Now" : "Full Month"}
+                  </div>
+
+                  {/* Total business so far this month */}
+                  <div style={{ padding: "16px 16px", borderRadius: 14, background: "linear-gradient(135deg, rgba(34,211,238,0.10), rgba(34,211,238,0.02))", border: "1px solid rgba(34,211,238,0.3)" }}>
+                    <div style={{ fontSize: 10, fontWeight: 800, color: "var(--accent)", textTransform: "uppercase", letterSpacing: 1.2 }}>Total Business{cutoff ? " · till now" : ""}</div>
+                    <div style={{ fontSize: 26, fontWeight: 900, color: "var(--accent)", fontFamily: "var(--font-headline, var(--font-outfit))", marginTop: 2 }}>{INR(monthTotals.business)}</div>
+                    <div style={{ fontSize: 10, color: "var(--text3)", marginTop: 2 }}>
+                      {monthTotals.activeDays} active day{monthTotals.activeDays === 1 ? "" : "s"}
+                      {monthTotals.activeDays > 0 && ` · avg ${INR(Math.round(monthTotals.business / monthTotals.activeDays))}/day`}
+                    </div>
+                  </div>
+
+                  {/* Attendance tallies */}
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                    <MiniTally label="Present" value={monthTotals.present} color="var(--green)" />
+                    <MiniTally label="Loaned in" value={monthTotals.loan} color="var(--orange)" />
+                    <MiniTally label="On leave" value={monthTotals.leave} color={LEAVE_HEX} />
+                    <MiniTally label="Best day" value={monthTotals.bestDay ? fmtShort(monthTotals.bestVal) : "—"} color="var(--gold)" sub={monthTotals.bestDay ? `${Number(monthTotals.bestDay.slice(8, 10))} ${new Date(yr, mo - 1, 1).toLocaleString("en-US", { month: "short" })}` : ""} />
+                  </div>
+
+                  {/* Leave dates this month */}
+                  {monthLeaves.length > 0 && (
+                    <div>
+                      <div style={{ fontSize: 10, fontWeight: 800, color: LEAVE_HEX, textTransform: "uppercase", letterSpacing: 1.2, marginBottom: 6, display: "inline-flex", alignItems: "center", gap: 5 }}>
+                        <Icon name="moon" size={11} /> Leaves ({monthLeaves.length})
+                      </div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 5, maxHeight: 180, overflowY: "auto" }}>
+                        {monthLeaves.map((l, i) => (
+                          <div key={`${l.date}-${l.name}-${i}`} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "7px 10px", borderRadius: 8, background: LEAVE_BG, border: `1px solid ${LEAVE_BORDER}` }}>
+                            <span style={{ fontSize: 12, fontWeight: 700, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{l.name}</span>
+                            <span style={{ display: "inline-flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                              <span style={{ fontSize: 9, fontWeight: 700, color: LEAVE_HEX, textTransform: "uppercase" }}>{l.type}</span>
+                              <span style={{ fontSize: 11, fontWeight: 800, color: "var(--text3)" }}>{Number(l.date.slice(8, 10))} {new Date(yr, mo - 1, 1).toLocaleString("en-US", { month: "short" })}</span>
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <div style={{ padding: "14px 12px", textAlign: "center", color: "var(--text3)", fontSize: 11, background: "var(--bg3)", border: "1px dashed var(--border2)", borderRadius: 12 }}>
+                    👆 Click any day for its full roster & business.
+                  </div>
                 </div>
               )}
             </div>
