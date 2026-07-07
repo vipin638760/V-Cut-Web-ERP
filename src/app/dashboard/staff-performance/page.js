@@ -37,6 +37,7 @@ export default function StaffPerformancePage() {
   const [sortCol, setSortCol] = useState("billing"); // billing | incentive | pct | name
   const [statusFilter, setStatusFilter] = useState("all"); // all | active | inactive
   const [typeFilter, setTypeFilter] = useState("all"); // all | mens | unisex
+  const [targetFilter, setTargetFilter] = useState("all"); // all | met | notmet
   const [selectedId, setSelectedId] = useState(null);
 
   const currentUser = useCurrentUser() || {};
@@ -133,10 +134,23 @@ export default function StaffPerformancePage() {
     };
   }), [staff, periodAgg, branches, salHistory, globalSettings, leaves, entries, transfers, factor, filterMonth, filterYear, isYearly, statusMonth]);
 
+  const typeOf = (r) => branchesById.get(r.branchId)?.type;
+  const matchesSearch = (r, q) => !q
+    || (r.s.name || "").toLowerCase().includes(q)
+    || branchName(r.branchId).toLowerCase().includes(q)
+    || (r.s.role || "").toLowerCase().includes(q);
+
+  // A staff member has met target when they've billed at least 3× their salary
+  // (shortfall cleared). Staff with no target yet (no salary) are neither.
+  const isMet = (r) => r.tgt > 0 && r.shortfall === 0;
+  const isNotMet = (r) => r.tgt > 0 && r.shortfall > 0;
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     let list = rows;
     if (typeFilter !== "all") list = list.filter(r => branchesById.get(r.branchId)?.type === typeFilter);
+    if (targetFilter === "met") list = list.filter(isMet);
+    else if (targetFilter === "notmet") list = list.filter(isNotMet);
     if (q) list = list.filter(r =>
       (r.s.name || "").toLowerCase().includes(q) ||
       branchName(r.branchId).toLowerCase().includes(q) ||
@@ -149,16 +163,21 @@ export default function StaffPerformancePage() {
       return b.billing - a.billing;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, search, sortCol, typeFilter, branchesById]);
+  }, [rows, search, sortCol, typeFilter, targetFilter, branchesById]);
+
+  // Met / not-met counts over the current type + status + search context.
+  const targetCounts = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    const base = rows.filter(r =>
+      (typeFilter === "all" || branchesById.get(r.branchId)?.type === typeFilter)
+      && (statusFilter === "all" || (statusFilter === "active" ? r.status !== "inactive" : r.status === "inactive"))
+      && matchesSearch(r, q));
+    return { met: base.filter(isMet).length, notMet: base.filter(isNotMet).length };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows, typeFilter, statusFilter, search, branchesById]);
 
   const active = filtered.filter(r => r.status !== "inactive");
   const inactive = filtered.filter(r => r.status === "inactive");
-
-  const typeOf = (r) => branchesById.get(r.branchId)?.type;
-  const matchesSearch = (r, q) => !q
-    || (r.s.name || "").toLowerCase().includes(q)
-    || branchName(r.branchId).toLowerCase().includes(q)
-    || (r.s.role || "").toLowerCase().includes(q);
 
   // Faceted counts — each control's numbers reflect the *other* filter plus the
   // search box, so the KPI band + Active/Inactive tallies follow whatever's
@@ -239,6 +258,11 @@ export default function StaffPerformancePage() {
             <span style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Type</span>
             <ToggleGroup options={[["all", `All`], ["mens", `Mens (${typeCounts.mens})`], ["unisex", `Unisex (${typeCounts.unisex})`]]} value={typeFilter} onChange={setTypeFilter}
               colors={{ all: "var(--blue)", mens: "var(--blue)", unisex: "#a855f7" }} />
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Target</span>
+            <ToggleGroup options={[["all", `All`], ["met", `Met (${targetCounts.met})`], ["notmet", `Not Met (${targetCounts.notMet})`]]} value={targetFilter} onChange={setTargetFilter}
+              colors={{ all: "var(--blue)", met: "var(--green)", notmet: "var(--red)" }} />
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <span style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Sort</span>
