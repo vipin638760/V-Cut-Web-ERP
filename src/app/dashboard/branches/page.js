@@ -47,7 +47,7 @@ function BranchCollectionChart({ periodEntries, allEntries = [], branchId, filte
     mtdCutoff = lastDayWithData(allEntries, filterYear, filterMonth, branchId);
     if (mtdCutoff > 0) {
       mtdCurr = cumulativeCollection(allEntries, filterYear, filterMonth, mtdCutoff, branchId);
-      mtd = [1, 2].map(back => {
+      mtd = [1, 2, 3].map(back => {
         const { y, m } = shiftMonth(filterYear, filterMonth, back);
         return {
           label: MONTHS[m - 1], y, m,

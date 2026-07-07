@@ -260,15 +260,16 @@ export default function DashboardPage() {
     .reduce((s, l) => s + (parseInt(l.days) || 1), 0);
 
   // Month-to-date comparison — only meaningful in month mode. `momCutoff` is the
-  // latest day the running month has data for (network-wide); prior two months
-  // are summed over that same 1..cutoff window so each branch card can show how
-  // this month is tracking vs the same date range last month + the month before.
+  // latest day the running month has data for (network-wide); the prior three
+  // months are summed over that same 1..cutoff window so each branch card can
+  // show how this month is tracking vs the same date range of recent months.
   const momShow = filterMode === "month";
   const momCutoff = momShow ? lastDayWithData(entries, filterYear, filterMonth) : 0;
-  const momPrev1 = shiftMonth(filterYear, filterMonth, 1);
-  const momPrev2 = shiftMonth(filterYear, filterMonth, 2);
-  const momPrev1Label = _MTD_MONS[momPrev1.m - 1];
-  const momPrev2Label = _MTD_MONS[momPrev2.m - 1];
+  const momPriorMonths = [1, 2, 3].map(back => {
+    const { y, m } = shiftMonth(filterYear, filterMonth, back);
+    return { y, m, label: _MTD_MONS[m - 1] };
+  });
+  const momPriorLabels = momPriorMonths.map(p => p.label);
 
   // Build + filter + sort branch data
   let branchData = branches.map(b => {
@@ -376,17 +377,18 @@ export default function DashboardPage() {
     const net = income - expenses - totalGst;
 
     // Month-to-date collection for this branch vs the same date window of the
-    // prior two months. `momShow`/`momCutoff` come from the network-wide setup
+    // prior three months. `momShow`/`momCutoff` come from the network-wide setup
     // above so every card compares over the identical 1..cutoff range.
     const momCurr = (momShow && momCutoff > 0) ? cumulativeCollection(entries, filterYear, filterMonth, momCutoff, b.id) : 0;
-    const momP1   = (momShow && momCutoff > 0) ? cumulativeCollection(entries, momPrev1.y, momPrev1.m, momCutoff, b.id) : 0;
-    const momP2   = (momShow && momCutoff > 0) ? cumulativeCollection(entries, momPrev2.y, momPrev2.m, momCutoff, b.id) : 0;
+    const momPriors = (momShow && momCutoff > 0)
+      ? momPriorMonths.map(p => ({ label: p.label, value: cumulativeCollection(entries, p.y, p.m, momCutoff, b.id) }))
+      : [];
 
     return {
       b,
       i: income,
       iOnline, iCash, iMatS,
-      momCurr, momP1, momP2,
+      momCurr, momPriors,
       e: expenses,
       n: net,
       staffCount: staff.filter(s => s.branch_id === b.id).length,
@@ -1375,7 +1377,7 @@ export default function DashboardPage() {
               </Card>
             ) : (
               <DraggableCardGrid branchData={branchData} isAdmin={isAdmin} isYearly={isYearly} factor={factor} cardOrder={cardOrder} setCardOrder={setCardOrder} dragId={dragId}
-                momShow={momShow && momCutoff > 0} momCutoff={momCutoff} momPrev1Label={momPrev1Label} momPrev2Label={momPrev2Label}
+                momShow={momShow && momCutoff > 0} momCutoff={momCutoff}
                 onCardClick={(bid) => router.push(`/dashboard/branches?branchId=${bid}`)}
                 onCalendarClick={(bid) => router.push(`/dashboard/branches?branchId=${bid}&calendar=1`)} />
             )}
@@ -1500,7 +1502,7 @@ function KPICard({ label, value, color, sub }) {
 }
 
 // ─── Draggable Branch Card Grid ───────────────────────────────────────────────
-function DraggableCardGrid({ branchData, isAdmin, isYearly, factor, cardOrder, setCardOrder, dragId, momShow, momCutoff, momPrev1Label, momPrev2Label, onCardClick, onCalendarClick }) {
+function DraggableCardGrid({ branchData, isAdmin, isYearly, factor, cardOrder, setCardOrder, dragId, momShow, momCutoff, onCardClick, onCalendarClick }) {
   const [dragOver, setDragOver] = useState(null);
   const [dragging, setDragging] = useState(null);
   const wasDragged = useRef(false);
@@ -1563,7 +1565,7 @@ function DraggableCardGrid({ branchData, isAdmin, isYearly, factor, cardOrder, s
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-      {ordered.map(({ b, i, e, vInc, vMatE, vOther, fShopRent, fRoomRent, fWifi, fElec, actualSalary, actualLeaves, n, staffCount, momCurr, momP1, momP2 }) => {
+      {ordered.map(({ b, i, e, vInc, vMatE, vOther, fShopRent, fRoomRent, fWifi, fElec, actualSalary, actualLeaves, n, staffCount, momCurr, momPriors }) => {
         const hasData = i !== 0 || e !== 0;
         const isDragging = dragging === b.id;
         const isOver = dragOver === b.id;
@@ -1631,8 +1633,7 @@ function DraggableCardGrid({ branchData, isAdmin, isYearly, factor, cardOrder, s
 
             {/* Month-to-date vs same date-window of the prior two months. */}
             {momShow && (
-              <MoMCompareRow curr={momCurr} p1={momP1} p2={momP2} cutoff={momCutoff}
-                p1Label={momPrev1Label} p2Label={momPrev2Label} />
+              <MoMCompareRow curr={momCurr} priors={momPriors} cutoff={momCutoff} />
             )}
           </div>
         );
@@ -1645,11 +1646,9 @@ function DraggableCardGrid({ branchData, isAdmin, isYearly, factor, cardOrder, s
 // on the Daily Business chart. `curr` = this month's collection through day
 // `cutoff`; `p1`/`p2` = the same 1..cutoff window of the prior two months.
 // Delta is coloured green when the running month is ahead, red when behind.
-function MoMCompareRow({ curr, p1, p2, cutoff, p1Label, p2Label }) {
-  const d1 = curr - p1;
-  const d2 = curr - p2;
+function MoMCompareRow({ curr, priors = [], cutoff }) {
   const chip = (label, prev, delta) => (
-    <div style={{ display: "flex", alignItems: "center", gap: 4, minWidth: 0 }}>
+    <div key={label} style={{ display: "flex", alignItems: "center", gap: 4, minWidth: 0 }}>
       <span style={{ fontSize: 8.5, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.3 }}>vs {label}</span>
       <span style={{ fontSize: 10.5, fontWeight: 800, color: delta > 0 ? "var(--green)" : delta < 0 ? "var(--red)" : "var(--text3)", whiteSpace: "nowrap", fontFamily: "var(--font-headline, var(--font-outfit))" }}>
         {delta > 0 ? "▲" : delta < 0 ? "▼" : "·"} {fmtDelta(delta)}
@@ -1663,9 +1662,8 @@ function MoMCompareRow({ curr, p1, p2, cutoff, p1Label, p2Label }) {
         <span style={{ fontSize: 8.5, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.4 }}>Till day {cutoff}</span>
         <span style={{ fontSize: 11, fontWeight: 800, color: "var(--green)", fontFamily: "var(--font-headline, var(--font-outfit))" }}>{INR(curr)}</span>
       </div>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
-        {chip(p1Label, p1, d1)}
-        {chip(p2Label, p2, d2)}
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+        {priors.map(p => chip(p.label, p.value, curr - p.value))}
       </div>
     </div>
   );
@@ -2714,16 +2712,14 @@ function DailyBusinessChart({ entries, branches = [], filterYear, filterMonth })
   const monthShort = new Date(filterYear, filterMonth - 1, 1).toLocaleString("en-US", { month: "short" });
 
   // Month-to-date comparison — running collection through the latest day with
-  // data, measured against the same 1..cutoff window of the prior two months.
+  // data, measured against the same 1..cutoff window of the prior three months.
   let momCutoff = 0;
   byDay.forEach((v, i) => { if (v > 0) momCutoff = i + 1; });
-  const _p1 = shiftMonth(filterYear, filterMonth, 1);
-  const _p2 = shiftMonth(filterYear, filterMonth, 2);
   const mtdCurr = momCutoff > 0 ? cumulativeCollection(entries, filterYear, filterMonth, momCutoff) : 0;
-  const mtdP1 = momCutoff > 0 ? cumulativeCollection(entries, _p1.y, _p1.m, momCutoff) : 0;
-  const mtdP2 = momCutoff > 0 ? cumulativeCollection(entries, _p2.y, _p2.m, momCutoff) : 0;
-  const mtdP1Label = _MTD_MONS[_p1.m - 1];
-  const mtdP2Label = _MTD_MONS[_p2.m - 1];
+  const mtdPriors = [1, 2, 3].map(back => {
+    const { y, m } = shiftMonth(filterYear, filterMonth, back);
+    return { label: _MTD_MONS[m - 1], value: momCutoff > 0 ? cumulativeCollection(entries, y, m, momCutoff) : 0 };
+  });
 
   // Chart dims — a touch more air between bars + softer baseline.
   const H = 230;               // plot height
@@ -2777,15 +2773,16 @@ function DailyBusinessChart({ entries, branches = [], filterYear, filterMonth })
       </div>
 
       {/* Month-to-date comparison strip — "till day N" running collection vs the
-          same 1..N window of the previous two months. */}
+          same 1..N window of the previous three months. */}
       {momCutoff > 0 && (
         <div style={{ display: "flex", alignItems: "stretch", gap: 10, flexWrap: "wrap", marginBottom: 16, padding: "12px 14px", borderRadius: 12, background: "var(--bg3)", border: "1px solid var(--border)" }}>
           <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", paddingRight: 14, borderRight: "1px solid var(--border)" }}>
             <span style={{ fontSize: 9, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, fontWeight: 700 }}>{monthShort} · till day {momCutoff}</span>
             <span style={{ fontSize: 20, fontWeight: 900, color: "var(--green)", fontFamily: "var(--font-headline, var(--font-outfit))" }}>{INR(mtdCurr)}</span>
           </div>
-          <MoMDeltaPill label={mtdP1Label} prev={mtdP1} delta={mtdCurr - mtdP1} cutoff={momCutoff} />
-          <MoMDeltaPill label={mtdP2Label} prev={mtdP2} delta={mtdCurr - mtdP2} cutoff={momCutoff} />
+          {mtdPriors.map(p => (
+            <MoMDeltaPill key={p.label} label={p.label} prev={p.value} delta={mtdCurr - p.value} cutoff={momCutoff} />
+          ))}
         </div>
       )}
 
