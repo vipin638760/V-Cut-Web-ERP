@@ -2509,17 +2509,20 @@ function SameDateCompareChart({ entries, branches = [], filterYear, filterMonth 
   const [hover, setHover] = useState(null); // { day, mi }
   const todayStr = `${NOW.getFullYear()}-${String(NOW.getMonth() + 1).padStart(2, "0")}-${String(NOW.getDate()).padStart(2, "0")}`;
 
-  // The three months, oldest → newest. Newest = the selected month.
+  // The selected month (e.g. July) is intentionally EXCLUDED here — it has its
+  // own dedicated Daily Business chart + month-to-date strip above. This card
+  // instead compares the three *completed* months before it (Apr · May · Jun
+  // for a July selection), so `ref` = one month back drives the day axis.
+  const ref = shiftMonth(filterYear, filterMonth, 1);
   const months = [];
   for (let back = 2; back >= 0; back--) {
-    let m = filterMonth - back, y = filterYear;
-    while (m <= 0) { m += 12; y -= 1; }
+    const { y, m } = shiftMonth(ref.y, ref.m, back);
     months.push({ y, m, label: new Date(y, m - 1, 1).toLocaleDateString("en-US", { month: "short" }) });
   }
-  const COLORS = ["#c084fc", "#5de8ff", "#4ade80"]; // oldest, middle, newest(this month)
+  const COLORS = ["#c084fc", "#5de8ff", "#4ade80"]; // oldest, middle, newest
   const GRADS = ["linear-gradient(180deg,#d7a6ff,#8b5cf6)", "linear-gradient(180deg,#5de8ff,#12a5bf)", "linear-gradient(180deg,#7df094,#22a354)"];
 
-  const daysInSel = new Date(filterYear, filterMonth, 0).getDate();
+  const daysInSel = new Date(ref.y, ref.m, 0).getDate();
 
   // Per-month, per-day network business (online + cash + material) + branch split.
   const data = months.map(({ y, m }) => {
@@ -2561,8 +2564,8 @@ function SameDateCompareChart({ entries, branches = [], filterYear, filterMonth 
   const LEFT = 8;
   const W = LEFT + daysInSel * (groupW + GROUP_GAP);
 
-  const weekdayOf = (d) => new Date(filterYear, filterMonth - 1, d).toLocaleDateString("en-US", { weekday: "narrow" });
-  const isWeekend = (d) => { const w = new Date(filterYear, filterMonth - 1, d).getDay(); return w === 0 || w === 6; };
+  const weekdayOf = (d) => new Date(ref.y, ref.m - 1, d).toLocaleDateString("en-US", { weekday: "narrow" });
+  const isWeekend = (d) => { const w = new Date(ref.y, ref.m - 1, d).getDay(); return w === 0 || w === 6; };
 
   const hv = hover && data[hover.mi]?.byDay[hover.day - 1];
 
@@ -2571,7 +2574,8 @@ function SameDateCompareChart({ entries, branches = [], filterYear, filterMonth 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12, marginBottom: 14 }}>
         <div>
           <div style={{ fontSize: 11, fontWeight: 800, color: "var(--accent)", textTransform: "uppercase", letterSpacing: 2 }}>Same-Date Compare</div>
-          <div style={{ fontSize: 18, fontWeight: 800, color: "var(--gold)", fontFamily: "var(--font-headline, var(--font-outfit))", marginTop: 2 }}>Every day · last 3 months</div>
+          <div style={{ fontSize: 18, fontWeight: 800, color: "var(--gold)", fontFamily: "var(--font-headline, var(--font-outfit))", marginTop: 2 }}>Every day · {months.map(m => m.label).join(" · ")} {months[2].y}</div>
+          <div style={{ fontSize: 10, color: "var(--text3)", fontWeight: 600, marginTop: 2 }}>Prior 3 completed months — {new Date(filterYear, filterMonth - 1, 1).toLocaleDateString("en-US", { month: "long" })} has its own chart above</div>
         </div>
         <div style={{ display: "flex", gap: 10, alignItems: "stretch", flexWrap: "wrap" }}>
           {months.map((mo, i) => (
