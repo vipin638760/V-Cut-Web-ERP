@@ -415,6 +415,14 @@ export default function DashboardPage() {
   const tEProjected = branchData.reduce((s, d) => s + d.projectedExp, 0);
   const net = branchData.reduce((s, d) => s + d.n, 0);
 
+  // Active stylists for the period's reference month — the selected month in
+  // month mode, or the current month (or Dec of a past year) in year mode.
+  // `staff.length` alone counts everyone ever added, including exited staff.
+  const svcStatusMonth = isYearly
+    ? `${filterYear}-${String(filterYear === NOW.getFullYear() ? NOW.getMonth() + 1 : 12).padStart(2, "0")}`
+    : filterPrefix;
+  const activeStaffCount = staff.filter(s => staffStatusForMonth(s, svcStatusMonth).status !== "inactive").length;
+
   if (brFilter === "profit") branchData = branchData.filter(d => d.n >= 0);
   if (brFilter === "loss")   branchData = branchData.filter(d => d.n < 0);
   if (brTypeFilter === "mens")   branchData = branchData.filter(d => d.b.type === "mens");
@@ -1177,7 +1185,7 @@ export default function DashboardPage() {
         <PremiumStatCard label="Operating Cost" value={INR(tE)} sub="Salary + Overheads" icon="wallet" color="var(--red)"
           onClick={() => router.push("/dashboard/branches?view=summary")} linkLabel="See expense breakdown" />
         <PremiumStatCard label="Net P&L" value={INR(net)} sub="Bottom line earnings" icon="pie" color={net >= 0 ? "var(--green)" : "var(--red)"} />
-        <PremiumStatCard label="Service Force" value={staff.length} sub="Active stylists" icon="users" color="var(--accent)" />
+        <PremiumStatCard label="Service Force" value={activeStaffCount} sub={`Active stylists · ${staff.length} on roster`} icon="users" color="var(--accent)" />
         {/* Missing Entries — branch×day pairs with no entry from period start
             through yesterday. Today is excluded (accountant may still be entering). */}
         {(() => {
