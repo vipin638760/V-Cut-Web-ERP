@@ -251,6 +251,28 @@ export default function StaffPerformancePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows, statusFilter, targetFilter, branchesById, search]);
 
+  // Per-branch (shop) target rollup — a shop's target is 3× its total salary
+  // (equivalently, the sum of its staff's individual 3× targets). Billing vs
+  // that target gives the shop-level met / not-met status. Scoped by type +
+  // search only, so branch totals stay complete regardless of the staff toggles.
+  const branchTargets = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    const base = rows.filter(r => (typeFilter === "all" || typeOf(r) === typeFilter) && matchesSearch(r, q));
+    const map = new Map();
+    base.forEach(r => {
+      let a = map.get(r.branchId);
+      if (!a) { a = { bid: r.branchId, billing: 0, salary: 0, staff: 0 }; map.set(r.branchId, a); }
+      a.billing += r.billing; a.salary += r.salary; a.staff += 1;
+    });
+    return [...map.values()].map(a => {
+      const tgt = Math.round(a.salary * 3);
+      const pct = tgt > 0 ? Math.round(a.billing / tgt * 100) : 0;
+      return { ...a, tgt, pct, met: tgt > 0 && a.billing >= tgt, shortfall: Math.max(0, tgt - a.billing), excess: Math.max(0, a.billing - tgt) };
+    }).sort((x, y) => y.billing - x.billing);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows, typeFilter, search, branchesById]);
+  const branchesMet = branchTargets.filter(b => b.met).length;
+
   const selected = selectedId ? staff.find(s => s.id === selectedId) : null;
   const salarySelected = salaryStaffId ? staff.find(s => s.id === salaryStaffId) : null;
   // Every month in the current period — feeds the salary breakdown modal.
@@ -338,6 +360,9 @@ export default function StaffPerformancePage() {
         </div>
       </div>
 
+      {/* Branch (shop) targets — 3× salary rollup per branch */}
+      <BranchTargetsSection rows={branchTargets} branchesById={branchesById} branchName={branchName} isAdmin={isAdmin} branchesMet={branchesMet} />
+
       {/* Active section */}
       {statusFilter !== "inactive" && (
         <StaffSection title="Active" color="var(--green)" rows={active} isAdmin={isAdmin} branchName={branchName} onOpen={setSelectedId} onSalaryClick={setSalaryStaffId} />
@@ -390,6 +415,69 @@ function KpiTile({ label, value, color, sub }) {
       <div style={{ fontSize: 22, fontWeight: 900, color, marginTop: 4, fontFamily: "var(--font-headline, var(--font-outfit))" }}>{value}</div>
       {sub && <div style={{ fontSize: 10, color: "var(--text3)", fontWeight: 600, marginTop: 2 }}>{sub}</div>}
     </Card>
+  );
+}
+
+// Per-branch (shop) target rollup — target = 3× the shop's total salary. Shows
+// each branch's billing vs target with a met / not-met badge. Collapsible.
+function BranchTargetsSection({ rows, branchName, branchesById, isAdmin, branchesMet }) {
+  const [open, setOpen] = useState(true);
+  if (!rows.length) return null;
+  return (
+    <div>
+      <button onClick={() => setOpen(o => !o)}
+        style={{ display: "flex", alignItems: "center", gap: 11, marginBottom: 10, background: "none", border: "none", cursor: "pointer", padding: 0 }}>
+        <span style={{ color: "var(--accent)", fontSize: 12, fontWeight: 900 }}>{open ? "▾" : "▸"}</span>
+        <h3 style={{ fontSize: 15, fontWeight: 800, color: "var(--text)", margin: 0, textTransform: "uppercase", letterSpacing: 1 }}>Branch Targets</h3>
+        <span style={{ fontSize: 10, color: "var(--text3)", fontWeight: 600, textTransform: "none", letterSpacing: 0 }}>3× shop salary</span>
+        <span style={{ fontSize: 11, fontWeight: 800, color: branchesMet === rows.length ? "var(--green)" : "var(--gold)", background: "var(--bg3)", border: "1px solid var(--border2)", borderRadius: 20, padding: "2px 10px" }}>
+          {branchesMet}/{rows.length} shops met
+        </span>
+      </button>
+      {open && (
+        <Card style={{ padding: 0, overflow: "hidden", marginBottom: 8 }}>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, minWidth: 640 }}>
+              <thead>
+                <tr>
+                  <TH>Branch</TH><TH right>Staff</TH><TH right>Billing</TH>
+                  {isAdmin && <TH right>Target (3×)</TH>}
+                  <TH right>Achieved</TH><TH right>Status</TH>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map(b => (
+                  <tr key={b.bid}>
+                    <TD style={{ fontWeight: 700 }}>{branchName(b.bid)}
+                      <span style={{ fontSize: 9, fontWeight: 800, textTransform: "uppercase", letterSpacing: 0.5, marginLeft: 8,
+                        color: branchesById.get(b.bid)?.type === "unisex" ? "#a855f7" : "var(--blue)" }}>
+                        {branchesById.get(b.bid)?.type === "unisex" ? "Unisex" : "Mens"}
+                      </span>
+                    </TD>
+                    <TD right style={{ color: "var(--text3)" }}>{b.staff}</TD>
+                    <TD right style={{ color: "var(--accent)", fontWeight: 800 }}>{INR(b.billing)}</TD>
+                    {isAdmin && <TD right style={{ color: "var(--text2)", fontWeight: 600 }}>{INR(b.tgt)}</TD>}
+                    <TD right>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "flex-end" }}>
+                        <div style={{ width: 64, height: 5, background: "var(--border)", borderRadius: 6, overflow: "hidden" }}>
+                          <div style={{ width: `${Math.min(b.pct, 100)}%`, height: "100%", background: b.met ? "var(--green)" : "var(--blue, #60a5fa)" }} />
+                        </div>
+                        <span style={{ fontSize: 11, fontWeight: 800, color: b.met ? "var(--green)" : "var(--text2)" }}>{b.pct}%</span>
+                      </div>
+                    </TD>
+                    <TD right>
+                      {b.tgt <= 0 ? <span style={{ color: "var(--text3)", fontSize: 11 }}>—</span> : b.met
+                        ? <span style={{ color: "var(--green)", fontWeight: 800, fontSize: 11 }}>Met{isAdmin && b.excess > 0 ? ` · +${INR(b.excess)}` : " ✓"}</span>
+                        : <span style={{ color: "var(--red)", fontWeight: 800, fontSize: 11 }}>Not met{isAdmin ? ` · short ${INR(b.shortfall)}` : ""}</span>}
+                    </TD>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
+    </div>
   );
 }
 
