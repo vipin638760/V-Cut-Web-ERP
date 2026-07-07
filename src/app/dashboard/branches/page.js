@@ -4611,7 +4611,7 @@ function SummaryView({ summaryTab, setSummaryTab, branchData, branches, entries,
     <div>
       {/* Sub-tab toggle — Summary vs Daily Cash & Online */}
       <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-        {[["summary", "📊 Summary View"], ["dailycash", "📅 Daily Cash & Online"]].map(([k, label]) => (
+        {[["summary", "📊 Summary View"], ["monthly", "📆 Monthly Business"], ["dailycash", "📅 Daily Cash & Online"]].map(([k, label]) => (
           <button key={k} onClick={() => setSummaryTab(k)}
             style={{
               padding: "10px 18px", borderRadius: 10, border: summaryTab === k ? "1px solid var(--accent)" : "1px solid var(--border)",
@@ -4767,6 +4767,8 @@ function SummaryView({ summaryTab, setSummaryTab, branchData, branches, entries,
           </div>
         </div>
         </>
+      ) : summaryTab === "monthly" ? (
+        <MonthlyBusinessMatrix branches={branches} entries={entries} filterYear={filterYear} />
       ) : (
         <DailyCashOnline
           branches={branches}
@@ -4780,6 +4782,104 @@ function SummaryView({ summaryTab, setSummaryTab, branchData, branches, entries,
         />
       )}
     </div>
+  );
+}
+
+// ─── Monthly Business Matrix — branch (rows) × month (columns) ───────────────
+// Each cell = that branch's business (online + cash + material) for the month.
+// The running month is flagged "till date"; a Total column + Total row close it
+// out. Always shows the full filterYear regardless of the selected month.
+function MonthlyBusinessMatrix({ branches = [], entries = [], filterYear }) {
+  const curYear = NOW.getFullYear();
+  const curMonth = NOW.getMonth() + 1;
+  const maxMonth = filterYear === curYear ? curMonth : 12;
+  const monthCols = Array.from({ length: maxMonth }, (_, i) => i + 1);
+  const tdMonth = filterYear === curYear ? curMonth : null; // the "till date" column
+
+  // Single pass over the year's entries → `${branchId}|${month}` business sum.
+  const cell = new Map();
+  entries.forEach(e => {
+    if (!e.date || !e.date.startsWith(String(filterYear))) return;
+    const m = Number(e.date.slice(5, 7));
+    if (m < 1 || m > maxMonth) return;
+    const mat = (e.staff_billing || []).reduce((s, sb) => s + (sb.material || 0), 0);
+    const v = (e.online || 0) + (e.cash || 0) + mat;
+    const k = `${e.branch_id}|${m}`;
+    cell.set(k, (cell.get(k) || 0) + v);
+  });
+
+  const matrix = branches.map(b => {
+    const perMonth = monthCols.map(m => cell.get(`${b.id}|${m}`) || 0);
+    return { b, perMonth, total: perMonth.reduce((s, v) => s + v, 0) };
+  }).sort((a, b) => b.total - a.total);
+
+  const colTotals = monthCols.map((_, ci) => matrix.reduce((s, r) => s + r.perMonth[ci], 0));
+  const grandTotal = colTotals.reduce((s, v) => s + v, 0);
+
+  // Compact ₹ for the dense cells; full INR lives in title tooltips + the Total column.
+  const fmtK = (v) => v >= 100000 ? `₹${(v / 100000).toFixed(2)}L` : v >= 1000 ? `₹${Math.round(v / 1000)}k` : v > 0 ? `₹${v}` : "—";
+  const monLabel = (m) => new Date(filterYear, m - 1, 1).toLocaleString("en-US", { month: "short" });
+
+  const thBase = { padding: "10px 12px", fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: 0.8, color: "var(--text3)", whiteSpace: "nowrap", borderBottom: "1px solid var(--border)" };
+  const stickyLeft = { position: "sticky", left: 0, zIndex: 2, background: "var(--bg2)" };
+
+  return (
+    <Card style={{ padding: 0, overflow: "hidden" }}>
+      <div style={{ padding: "16px 18px 8px" }}>
+        <div style={{ fontSize: 13, fontWeight: 900, color: "var(--text)", fontFamily: "var(--font-headline, var(--font-outfit))" }}>Monthly Business · {filterYear}</div>
+        <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 2 }}>
+          Business = Online + Cash + Material per branch. {tdMonth ? `${monLabel(tdMonth)} is till date.` : "Full year."}
+        </div>
+      </div>
+      <div style={{ overflowX: "auto" }}>
+        <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, minWidth: 640 }}>
+          <thead>
+            <tr>
+              <th style={{ ...thBase, ...stickyLeft, textAlign: "left", minWidth: 150 }}>Branch</th>
+              {monthCols.map(m => (
+                <th key={m} style={{ ...thBase, textAlign: "right", color: m === tdMonth ? "var(--accent)" : "var(--text3)" }}>
+                  {monLabel(m)}{m === tdMonth ? " · TD" : ""}
+                </th>
+              ))}
+              <th style={{ ...thBase, textAlign: "right", color: "var(--green)", background: "var(--bg3)" }}>Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            {matrix.map(r => (
+              <tr key={r.b.id} style={{ transition: "background .15s" }}
+                onMouseEnter={e => e.currentTarget.style.background = "var(--bg4)"}
+                onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                <td style={{ ...stickyLeft, padding: "9px 12px", fontSize: 12.5, fontWeight: 700, color: "var(--text)", whiteSpace: "nowrap", borderBottom: "1px solid var(--border)" }}>
+                  {(r.b.name || "").replace("V-CUT ", "")}
+                </td>
+                {r.perMonth.map((v, ci) => (
+                  <td key={ci} title={v > 0 ? INR(v) : ""} style={{ padding: "9px 12px", textAlign: "right", fontSize: 12, fontWeight: 700, color: v > 0 ? (monthCols[ci] === tdMonth ? "var(--accent)" : "var(--text2)") : "var(--text3)", whiteSpace: "nowrap", borderBottom: "1px solid var(--border)", background: monthCols[ci] === tdMonth ? "rgba(34,211,238,0.05)" : "transparent", fontFamily: "var(--font-headline, var(--font-outfit))" }}>
+                    {fmtK(v)}
+                  </td>
+                ))}
+                <td style={{ padding: "9px 12px", textAlign: "right", fontSize: 12.5, fontWeight: 900, color: "var(--green)", whiteSpace: "nowrap", borderBottom: "1px solid var(--border)", background: "var(--bg3)", fontFamily: "var(--font-headline, var(--font-outfit))" }}>
+                    {INR(r.total)}
+                </td>
+              </tr>
+            ))}
+            {matrix.length === 0 && (
+              <tr><td colSpan={monthCols.length + 2} style={{ padding: 24, textAlign: "center", color: "var(--text3)", fontStyle: "italic", fontSize: 12 }}>No business recorded for {filterYear}.</td></tr>
+            )}
+          </tbody>
+          {matrix.length > 0 && (
+            <tfoot>
+              <tr>
+                <td style={{ ...stickyLeft, padding: "11px 12px", fontSize: 11, fontWeight: 900, color: "var(--gold)", textTransform: "uppercase", letterSpacing: 0.8, borderTop: "2px solid var(--border2)", background: "var(--bg3)" }}>Network</td>
+                {colTotals.map((v, ci) => (
+                  <td key={ci} title={v > 0 ? INR(v) : ""} style={{ padding: "11px 12px", textAlign: "right", fontSize: 12, fontWeight: 800, color: monthCols[ci] === tdMonth ? "var(--accent)" : "var(--text)", whiteSpace: "nowrap", borderTop: "2px solid var(--border2)", background: "var(--bg3)", fontFamily: "var(--font-headline, var(--font-outfit))" }}>{fmtK(v)}</td>
+                ))}
+                <td style={{ padding: "11px 12px", textAlign: "right", fontSize: 13, fontWeight: 900, color: "var(--green)", whiteSpace: "nowrap", borderTop: "2px solid var(--border2)", background: "rgba(74,222,128,0.08)", fontFamily: "var(--font-headline, var(--font-outfit))" }}>{INR(grandTotal)}</td>
+              </tr>
+            </tfoot>
+          )}
+        </table>
+      </div>
+    </Card>
   );
 }
 
