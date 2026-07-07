@@ -991,6 +991,7 @@ export default function BranchesPage() {
 
   // Controls
   const [brFilter, setBrFilter] = useState("all");
+  const [brTargetFilter, setBrTargetFilter] = useState("all"); // all | met | notmet
   // After the branch detail mounts with a staff focus, scroll the matching
   // row into view and let the highlight pulse for ~3s before clearing.
   useEffect(() => {
@@ -1350,6 +1351,13 @@ export default function BranchesPage() {
     });
     const netDiff = totalExcess - totalDeficit;
 
+    // Shop target — should bill at least 3× its salary cost. Achieved = income.
+    const shopTgt = Math.round(actualSalary * 3);
+    const targetMet = shopTgt > 0 && income >= shopTgt;
+    const targetPct = shopTgt > 0 ? Math.round(income / shopTgt * 100) : 0;
+    const targetShort = Math.max(0, shopTgt - income);
+    const targetExcess = Math.max(0, income - shopTgt);
+
     return {
       b,
       i: income,
@@ -1361,10 +1369,13 @@ export default function BranchesPage() {
       actualSalary, actualLeaves,
       totalGst, factor,
       totalDeficit, totalExcess, netDiff, reconciledDays,
+      shopTgt, targetMet, targetPct, targetShort, targetExcess,
     };
   });
   if (brFilter === "profit") branchData = branchData.filter(d => d.n >= 0);
   if (brFilter === "loss") branchData = branchData.filter(d => d.n < 0);
+  if (brTargetFilter === "met") branchData = branchData.filter(d => d.targetMet);
+  if (brTargetFilter === "notmet") branchData = branchData.filter(d => d.shopTgt > 0 && !d.targetMet);
   if (brTypeFilter === "mens") branchData = branchData.filter(d => d.b.type === "mens");
   if (brTypeFilter === "unisex") branchData = branchData.filter(d => d.b.type === "unisex");
   branchData.sort((a, b) => {
@@ -4223,6 +4234,8 @@ export default function BranchesPage() {
       {/* Controls */}
       <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap", background: "var(--bg3)", border: "1px solid var(--border)", borderRadius: 8, padding: "8px 12px", marginBottom: 16 }}>
         <ToggleGroup label="P&L" options={[["all","All"],["profit","Profit"],["loss","Loss"]]} value={brFilter} onChange={setBrFilter} />
+        {isAdmin && <ToggleGroup label="Target" options={[["all","All"],["met","Met"],["notmet","Not Met"]]} value={brTargetFilter} onChange={setBrTargetFilter}
+          colors={{ all: "var(--blue)", met: "var(--green)", notmet: "var(--red)" }} />}
         <ToggleGroup label="Type" options={[["all","All"],["mens","Mens"],["unisex","Unisex"]]} value={brTypeFilter} onChange={setBrTypeFilter} />
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span style={{ fontSize: 10, color: "var(--text3)", textTransform: "uppercase", letterSpacing: ".5px" }}>Sort</span>
@@ -4441,7 +4454,7 @@ function DraggableBranchGrid({ branchData, isAdmin, canSelect, selectedBranches,
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(280px,1fr))", gap: 16 }}>
-      {ordered.map(({ b, i, vInc, vMatE, vOther, fShopRent, fRoomRent, fWifi, fElec, actualSalary, actualLeaves, n, staffCount, totalDeficit, totalExcess, netDiff, reconciledDays }) => {
+      {ordered.map(({ b, i, vInc, vMatE, vOther, fShopRent, fRoomRent, fWifi, fElec, actualSalary, actualLeaves, n, staffCount, totalDeficit, totalExcess, netDiff, reconciledDays, shopTgt, targetMet, targetPct, targetShort, targetExcess }) => {
         const isDragging = dragging === b.id;
         const isOver = dragOver === b.id;
         const isSelected = selectedBranches?.has(b.id) || false;
@@ -4560,6 +4573,21 @@ function DraggableBranchGrid({ branchData, isAdmin, canSelect, selectedBranches,
               <ElegantRow label="Leaves" val={actualLeaves > 0 ? `${actualLeaves} days` : "None"} col={actualLeaves > 0 ? "var(--purple, #c084fc)" : "var(--text3)"} />
               <ElegantRow label="Staff" val={`${staffCount}`} col="var(--text2)" />
             </div>
+
+            {/* Shop target pill — 3× salary. Admin-only (derives from salary). */}
+            {isAdmin && shopTgt > 0 && (
+              <div style={{ padding: "0 14px 12px" }}>
+                <div style={{ padding: "7px 10px", borderRadius: 8,
+                  background: targetMet ? "rgba(74,222,128,0.08)" : "rgba(248,113,113,0.08)",
+                  border: `1px solid ${targetMet ? "rgba(74,222,128,0.3)" : "rgba(248,113,113,0.3)"}`,
+                  display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontSize: 9, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1 }}>🎯 Target 3× · {INR(shopTgt)}</span>
+                  <span style={{ fontSize: 10.5, fontWeight: 800, color: targetMet ? "var(--green)" : "var(--red)", letterSpacing: 0.3, whiteSpace: "nowrap" }}>
+                    {targetMet ? `Met · +${INR(targetExcess)}` : `Short ${INR(targetShort)}`} · {targetPct}%
+                  </span>
+                </div>
+              </div>
+            )}
 
             {/* Reconciliation pill — replaces the old Deficit / Excess / Net cells */}
             {reconciledDays > 0 && (
