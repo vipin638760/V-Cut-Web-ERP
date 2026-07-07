@@ -15,6 +15,55 @@ const loadExcelJS = () => {
 
 const NOW = new Date();
 
+const _MTD_MONS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+// Shift a (year, month) tuple `back` months into the past. `month` is 1-based.
+const shiftMonth = (year, month, back) => {
+  let m = month - back, y = year;
+  while (m < 1) { m += 12; y -= 1; }
+  return { y, m };
+};
+
+// Latest day-of-month (1-based) that has any entry in the given month —
+// optionally scoped to one branch. For the running month this is the "till now"
+// cutoff; earlier months are summed over the same 1..cutoff window so the
+// month-to-date comparison lines up on the same date range.
+const lastDayWithData = (entries, year, month, branchId) => {
+  const prefix = `${year}-${String(month).padStart(2, "0")}`;
+  let last = 0;
+  for (const e of entries) {
+    if (!e.date || !e.date.startsWith(prefix)) continue;
+    if (branchId && e.branch_id !== branchId) continue;
+    const d = Number(e.date.slice(8, 10));
+    if (d > last) last = d;
+  }
+  return last;
+};
+
+// Sum collection (online + cash + material sale) over days 1..cutoffDay of a
+// month, optionally scoped to one branch. Same "collection" definition the
+// Daily Business chart uses so the numbers reconcile.
+const cumulativeCollection = (entries, year, month, cutoffDay, branchId) => {
+  const prefix = `${year}-${String(month).padStart(2, "0")}`;
+  let sum = 0;
+  for (const e of entries) {
+    if (!e.date || !e.date.startsWith(prefix)) continue;
+    if (branchId && e.branch_id !== branchId) continue;
+    const d = Number(e.date.slice(8, 10));
+    if (d < 1 || d > cutoffDay) continue;
+    const matSale = (e.staff_billing || []).reduce((s, sb) => s + (sb.material || 0), 0);
+    sum += (e.online || 0) + (e.cash || 0) + matSale;
+  }
+  return sum;
+};
+
+// Signed INR for a delta — "+₹2" / "−₹17" / "₹0". Uses a real minus glyph.
+const fmtDelta = (n) => {
+  const r = Math.round(n || 0);
+  if (r === 0) return "₹0";
+  return (r > 0 ? "+₹" : "−₹") + Math.abs(r).toLocaleString("en-IN");
+};
+
 const PremiumStatCard = ({ label, value, sub, icon, color = "var(--accent)", trend, onClick, linkLabel }) => (
   <div
     onClick={onClick}
@@ -257,6 +306,17 @@ export default function DashboardPage() {
   const pLeaveDays = leaves.filter(l => l.status === "pending")
     .reduce((s, l) => s + (parseInt(l.days) || 1), 0);
 
+  // Month-to-date comparison — only meaningful in month mode. `momCutoff` is the
+  // latest day the running month has data for (network-wide); prior two months
+  // are summed over that same 1..cutoff window so each branch card can show how
+  // this month is tracking vs the same date range last month + the month before.
+  const momShow = filterMode === "month";
+  const momCutoff = momShow ? lastDayWithData(entries, filterYear, filterMonth) : 0;
+  const momPrev1 = shiftMonth(filterYear, filterMonth, 1);
+  const momPrev2 = shiftMonth(filterYear, filterMonth, 2);
+  const momPrev1Label = _MTD_MONS[momPrev1.m - 1];
+  const momPrev2Label = _MTD_MONS[momPrev2.m - 1];
+
   // Build + filter + sort branch data
   let branchData = branches.map(b => {
     const bEntries = entries.filter(ent => ent.branch_id === b.id && inPeriod(ent.date));
@@ -362,10 +422,18 @@ export default function DashboardPage() {
     // reflect the same number you see inside the branch.
     const net = income - expenses - totalGst;
 
+    // Month-to-date collection for this branch vs the same date window of the
+    // prior two months. `momShow`/`momCutoff` come from the network-wide setup
+    // above so every card compares over the identical 1..cutoff range.
+    const momCurr = (momShow && momCutoff > 0) ? cumulativeCollection(entries, filterYear, filterMonth, momCutoff, b.id) : 0;
+    const momP1   = (momShow && momCutoff > 0) ? cumulativeCollection(entries, momPrev1.y, momPrev1.m, momCutoff, b.id) : 0;
+    const momP2   = (momShow && momCutoff > 0) ? cumulativeCollection(entries, momPrev2.y, momPrev2.m, momCutoff, b.id) : 0;
+
     return {
       b,
       i: income,
       iOnline, iCash, iMatS,
+      momCurr, momP1, momP2,
       e: expenses,
       n: net,
       staffCount: staff.filter(s => s.branch_id === b.id).length,
@@ -1354,6 +1422,7 @@ export default function DashboardPage() {
               </Card>
             ) : (
               <DraggableCardGrid branchData={branchData} isAdmin={isAdmin} isYearly={isYearly} factor={factor} cardOrder={cardOrder} setCardOrder={setCardOrder} dragId={dragId}
+                momShow={momShow && momCutoff > 0} momCutoff={momCutoff} momPrev1Label={momPrev1Label} momPrev2Label={momPrev2Label}
                 onCardClick={(bid) => router.push(`/dashboard/branches?branchId=${bid}`)}
                 onCalendarClick={(bid) => router.push(`/dashboard/branches?branchId=${bid}&calendar=1`)} />
             )}
@@ -1478,7 +1547,7 @@ function KPICard({ label, value, color, sub }) {
 }
 
 // ─── Draggable Branch Card Grid ───────────────────────────────────────────────
-function DraggableCardGrid({ branchData, isAdmin, isYearly, factor, cardOrder, setCardOrder, dragId, onCardClick, onCalendarClick }) {
+function DraggableCardGrid({ branchData, isAdmin, isYearly, factor, cardOrder, setCardOrder, dragId, momShow, momCutoff, momPrev1Label, momPrev2Label, onCardClick, onCalendarClick }) {
   const [dragOver, setDragOver] = useState(null);
   const [dragging, setDragging] = useState(null);
   const wasDragged = useRef(false);
@@ -1541,7 +1610,7 @@ function DraggableCardGrid({ branchData, isAdmin, isYearly, factor, cardOrder, s
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-      {ordered.map(({ b, i, e, vInc, vMatE, vOther, fShopRent, fRoomRent, fWifi, fElec, actualSalary, actualLeaves, n, staffCount }) => {
+      {ordered.map(({ b, i, e, vInc, vMatE, vOther, fShopRent, fRoomRent, fWifi, fElec, actualSalary, actualLeaves, n, staffCount, momCurr, momP1, momP2 }) => {
         const hasData = i !== 0 || e !== 0;
         const isDragging = dragging === b.id;
         const isOver = dragOver === b.id;
@@ -1606,9 +1675,70 @@ function DraggableCardGrid({ branchData, isAdmin, isYearly, factor, cardOrder, s
               <CompactStat label="Elec/Wifi" val={INR(fElec + fWifi)} col="var(--orange)" />
               <CompactStat label="Leaves" val={actualLeaves + " d"} col="var(--text3)" />
             </div>
+
+            {/* Month-to-date vs same date-window of the prior two months. */}
+            {momShow && (
+              <MoMCompareRow curr={momCurr} p1={momP1} p2={momP2} cutoff={momCutoff}
+                p1Label={momPrev1Label} p2Label={momPrev2Label} />
+            )}
           </div>
         );
       })}
+    </div>
+  );
+}
+
+// Compact month-to-date comparison shown on each branch card + reused (wider)
+// on the Daily Business chart. `curr` = this month's collection through day
+// `cutoff`; `p1`/`p2` = the same 1..cutoff window of the prior two months.
+// Delta is coloured green when the running month is ahead, red when behind.
+function MoMCompareRow({ curr, p1, p2, cutoff, p1Label, p2Label }) {
+  const d1 = curr - p1;
+  const d2 = curr - p2;
+  const chip = (label, prev, delta) => (
+    <div style={{ display: "flex", alignItems: "center", gap: 4, minWidth: 0 }}>
+      <span style={{ fontSize: 8.5, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.3 }}>vs {label}</span>
+      <span style={{ fontSize: 10.5, fontWeight: 800, color: delta > 0 ? "var(--green)" : delta < 0 ? "var(--red)" : "var(--text3)", whiteSpace: "nowrap", fontFamily: "var(--font-headline, var(--font-outfit))" }}>
+        {delta > 0 ? "▲" : delta < 0 ? "▼" : "·"} {fmtDelta(delta)}
+      </span>
+      <span style={{ fontSize: 8.5, color: "var(--text3)", fontWeight: 600, whiteSpace: "nowrap" }}>({INR(prev)})</span>
+    </div>
+  );
+  return (
+    <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px dashed rgba(255,255,255,0.08)", display: "flex", flexDirection: "column", gap: 4 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 6 }}>
+        <span style={{ fontSize: 8.5, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.4 }}>Till day {cutoff}</span>
+        <span style={{ fontSize: 11, fontWeight: 800, color: "var(--green)", fontFamily: "var(--font-headline, var(--font-outfit))" }}>{INR(curr)}</span>
+      </div>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+        {chip(p1Label, p1, d1)}
+        {chip(p2Label, p2, d2)}
+      </div>
+    </div>
+  );
+}
+
+// Larger month-to-date delta pill for the Daily Business chart. Shows the delta
+// vs one prior month plus a % swing and that month's baseline over the same
+// 1..cutoff window. Green = ahead, red = behind.
+function MoMDeltaPill({ label, prev, delta, cutoff }) {
+  const pct = prev > 0 ? Math.round((delta / prev) * 100) : null;
+  const up = delta > 0, flat = delta === 0;
+  const col = flat ? "var(--text3)" : up ? "var(--green)" : "var(--red)";
+  return (
+    <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", gap: 2, padding: "6px 12px", borderRadius: 10, background: "var(--bg4)", border: `1px solid ${col}44`, minWidth: 130 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        <span style={{ fontSize: 9.5, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 0.8, fontWeight: 700 }}>vs {label} (1–{cutoff})</span>
+      </div>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+        <span style={{ fontSize: 15, fontWeight: 900, color: col, fontFamily: "var(--font-headline, var(--font-outfit))" }}>
+          {flat ? "·" : up ? "▲" : "▼"} {fmtDelta(delta)}
+        </span>
+        {pct !== null && !flat && (
+          <span style={{ fontSize: 10, fontWeight: 800, color: col }}>{pct > 0 ? "+" : ""}{pct}%</span>
+        )}
+      </div>
+      <span style={{ fontSize: 9.5, color: "var(--text3)", fontWeight: 600 }}>{label}: {INR(prev)}</span>
     </div>
   );
 }
@@ -2624,6 +2754,19 @@ function DailyBusinessChart({ entries, branches = [], filterYear, filterMonth })
   const avg = workingDays ? Math.round(totalBusiness / workingDays) : 0;
   const bestIdx = byDay.indexOf(Math.max(...byDay));
   const monthLabel = new Date(filterYear, filterMonth - 1, 1).toLocaleString("en-US", { month: "long", year: "numeric" });
+  const monthShort = new Date(filterYear, filterMonth - 1, 1).toLocaleString("en-US", { month: "short" });
+
+  // Month-to-date comparison — running collection through the latest day with
+  // data, measured against the same 1..cutoff window of the prior two months.
+  let momCutoff = 0;
+  byDay.forEach((v, i) => { if (v > 0) momCutoff = i + 1; });
+  const _p1 = shiftMonth(filterYear, filterMonth, 1);
+  const _p2 = shiftMonth(filterYear, filterMonth, 2);
+  const mtdCurr = momCutoff > 0 ? cumulativeCollection(entries, filterYear, filterMonth, momCutoff) : 0;
+  const mtdP1 = momCutoff > 0 ? cumulativeCollection(entries, _p1.y, _p1.m, momCutoff) : 0;
+  const mtdP2 = momCutoff > 0 ? cumulativeCollection(entries, _p2.y, _p2.m, momCutoff) : 0;
+  const mtdP1Label = _MTD_MONS[_p1.m - 1];
+  const mtdP2Label = _MTD_MONS[_p2.m - 1];
 
   // Chart dims — a touch more air between bars + softer baseline.
   const H = 230;               // plot height
@@ -2675,6 +2818,19 @@ function DailyBusinessChart({ entries, branches = [], filterYear, filterMonth })
           </label>
         </div>
       </div>
+
+      {/* Month-to-date comparison strip — "till day N" running collection vs the
+          same 1..N window of the previous two months. */}
+      {momCutoff > 0 && (
+        <div style={{ display: "flex", alignItems: "stretch", gap: 10, flexWrap: "wrap", marginBottom: 16, padding: "12px 14px", borderRadius: 12, background: "var(--bg3)", border: "1px solid var(--border)" }}>
+          <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", paddingRight: 14, borderRight: "1px solid var(--border)" }}>
+            <span style={{ fontSize: 9, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, fontWeight: 700 }}>{monthShort} · till day {momCutoff}</span>
+            <span style={{ fontSize: 20, fontWeight: 900, color: "var(--green)", fontFamily: "var(--font-headline, var(--font-outfit))" }}>{INR(mtdCurr)}</span>
+          </div>
+          <MoMDeltaPill label={mtdP1Label} prev={mtdP1} delta={mtdCurr - mtdP1} cutoff={momCutoff} />
+          <MoMDeltaPill label={mtdP2Label} prev={mtdP2} delta={mtdCurr - mtdP2} cutoff={momCutoff} />
+        </div>
+      )}
 
       {totalBusiness === 0 ? (
         <div style={{ height: H, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text3)", fontStyle: "italic", fontSize: 13 }}>No business entries recorded for {monthLabel} yet.</div>
