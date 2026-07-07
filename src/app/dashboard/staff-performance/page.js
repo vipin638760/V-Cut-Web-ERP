@@ -151,12 +151,17 @@ export default function StaffPerformancePage() {
   const inactive = filtered.filter(r => r.status === "inactive");
 
   const typeOf = (r) => branchesById.get(r.branchId)?.type;
+  const matchesSearch = (r, q) => !q
+    || (r.s.name || "").toLowerCase().includes(q)
+    || branchName(r.branchId).toLowerCase().includes(q)
+    || (r.s.role || "").toLowerCase().includes(q);
 
-  // Faceted counts — each control's numbers reflect the *other* filter, so the
-  // Active/Inactive tallies + KPI band follow the Mens/Unisex selection and
-  // vice-versa. Search is intentionally excluded so the totals stay stable.
+  // Faceted counts — each control's numbers reflect the *other* filter plus the
+  // search box, so the KPI band + Active/Inactive tallies follow whatever's
+  // currently on screen (e.g. searching a branch scopes every total to it).
   const kpi = useMemo(() => {
-    const byType = typeFilter === "all" ? rows : rows.filter(r => typeOf(r) === typeFilter);
+    const q = search.trim().toLowerCase();
+    const byType = rows.filter(r => (typeFilter === "all" || typeOf(r) === typeFilter) && matchesSearch(r, q));
     const act = byType.filter(r => r.status !== "inactive").length;
     return {
       totBill: byType.reduce((s, r) => s + r.billing, 0),
@@ -166,17 +171,19 @@ export default function StaffPerformancePage() {
       act, inact: byType.length - act, total: byType.length,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, typeFilter, branchesById]);
+  }, [rows, typeFilter, branchesById, search]);
 
   const typeCounts = useMemo(() => {
-    const byStatus = statusFilter === "all" ? rows
-      : rows.filter(r => statusFilter === "active" ? r.status !== "inactive" : r.status === "inactive");
+    const q = search.trim().toLowerCase();
+    const byStatus = rows.filter(r =>
+      (statusFilter === "all" || (statusFilter === "active" ? r.status !== "inactive" : r.status === "inactive"))
+      && matchesSearch(r, q));
     return {
       mens: byStatus.filter(r => typeOf(r) === "mens").length,
       unisex: byStatus.filter(r => typeOf(r) === "unisex").length,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, statusFilter, branchesById]);
+  }, [rows, statusFilter, branchesById, search]);
 
   const selected = selectedId ? staff.find(s => s.id === selectedId) : null;
 
