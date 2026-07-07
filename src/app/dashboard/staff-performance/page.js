@@ -157,6 +157,7 @@ export default function StaffPerformancePage() {
     return {
       totBill: byType.reduce((s, r) => s + r.billing, 0),
       totInc: byType.reduce((s, r) => s + r.incentive, 0),
+      totSal: byType.reduce((s, r) => s + r.salary, 0),
       act, inact: byType.length - act, total: byType.length,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -197,6 +198,7 @@ export default function StaffPerformancePage() {
         <KpiTile label="Inactive" value={kpi.inact} color="var(--red)" sub={`in ${new Date(statusMonth + "-01").toLocaleDateString("en-US", { month: "short", year: "numeric" })}`} />
         <KpiTile label="Total Billing" value={INR(kpi.totBill)} color="var(--accent)" />
         <KpiTile label="Total Incentive" value={INR(kpi.totInc)} color="var(--gold)" />
+        {isAdmin && <KpiTile label="Total Salary" value={INR(kpi.totSal)} color="var(--blue, #60a5fa)" sub="payroll cost" />}
       </div>
 
       {/* Controls */}
