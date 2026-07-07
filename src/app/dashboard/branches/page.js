@@ -2940,6 +2940,55 @@ export default function BranchesPage() {
           </Card>
         </div>
 
+        {/* Shop Target — the branch should bill at least 3× its salary cost.
+            Admin-only since it derives from salary. Income (collection) is the
+            "achieved" figure, matching the Income Breakdown total above. */}
+        {isAdmin && (() => {
+          const shopTgt = Math.round(totalSalary * 3);
+          const shopPct = shopTgt > 0 ? Math.round(totalIncSum / shopTgt * 100) : 0;
+          const shopMet = shopTgt > 0 && totalIncSum >= shopTgt;
+          const shopShort = Math.max(0, shopTgt - totalIncSum);
+          const shopExcess = Math.max(0, totalIncSum - shopTgt);
+          const accent = shopMet ? "var(--green)" : "var(--red)";
+          const stat = (label, value, color) => (
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 10, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1 }}>{label}</div>
+              <div style={{ fontSize: 20, fontWeight: 900, color, marginTop: 4, fontFamily: "var(--font-headline, var(--font-outfit))" }}>{value}</div>
+            </div>
+          );
+          return (
+            <Card style={{ marginBottom: 20, padding: 0, overflow: "hidden",
+              border: `1px solid ${shopMet ? "rgba(74,222,128,0.35)" : "rgba(248,113,113,0.35)"}`,
+              boxShadow: shopMet ? "0 0 24px -10px rgba(74,222,128,0.5)" : "0 0 24px -10px rgba(248,113,113,0.5)" }}>
+              <div style={{ padding: "14px 16px", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                <div style={{ fontWeight: 700, color: accent, fontSize: 12, textTransform: "uppercase", letterSpacing: 1 }}>
+                  🎯 Shop Target · 3× Salary
+                </div>
+                <span style={{ fontSize: 11, fontWeight: 900, letterSpacing: 1, textTransform: "uppercase", padding: "4px 12px", borderRadius: 20,
+                  color: accent, background: shopMet ? "rgba(74,222,128,0.12)" : "rgba(248,113,113,0.12)", border: `1px solid ${accent}` }}>
+                  {shopTgt <= 0 ? "No target" : shopMet ? "Met ✓" : "Not met"}
+                </span>
+              </div>
+              <div style={{ padding: 16, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 18, alignItems: "center" }}>
+                {stat("Target (3× Salary)", INR(shopTgt), "var(--text)")}
+                {stat("Achieved (Income)", INR(totalIncSum), "var(--green)")}
+                {shopMet
+                  ? stat("Excess", `+${INR(shopExcess)}`, "var(--green)")
+                  : stat("Shortfall", INR(shopShort), "var(--red)")}
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 }}>
+                    <span>Achieved</span><span style={{ color: accent }}>{shopPct}%</span>
+                  </div>
+                  <div style={{ height: 8, background: "var(--border)", borderRadius: 8, overflow: "hidden" }}>
+                    <div style={{ width: `${Math.min(shopPct, 100)}%`, height: "100%", borderRadius: 8, background: shopMet ? "linear-gradient(90deg,#22a354,var(--green))" : "linear-gradient(90deg,#2f6fb0,var(--blue, #60a5fa))" }} />
+                  </div>
+                  <div style={{ fontSize: 10, color: "var(--text3)", marginTop: 6 }}>Salary {INR(totalSalary)} × 3</div>
+                </div>
+              </div>
+            </Card>
+          );
+        })()}
+
         {/* Quick action: open the standalone attendance calendar modal for this branch.
             Kept above the detail sections so it stays in a fixed spot. */}
         <div style={{ display: "flex", justifyContent: "flex-end", margin: "8px 0 16px" }}>
