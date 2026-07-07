@@ -3,7 +3,7 @@ import { useEffect, useState, useRef } from "react";
 import { collection, onSnapshot, query, orderBy, where, getDocs, deleteDoc, doc, addDoc, updateDoc, writeBatch } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
-import { INR, branchIncomeInPeriod, makeFilterPrefix, periodLabel, proRataSalary, salaryByBranchForMonth, branchSalaryShare, getStaffSalaryForMonth, staffLeavesInMonth, staffStatusForMonth, parseLocalDate, MASK, effectiveCashInHand, computeIncentiveExpense, getMonthlyFixed, effectiveBranchOnDate } from "@/lib/calculations";
+import { INR, MONTHS, branchIncomeInPeriod, makeFilterPrefix, periodLabel, proRataSalary, salaryByBranchForMonth, branchSalaryShare, getStaffSalaryForMonth, staffLeavesInMonth, staffStatusForMonth, parseLocalDate, MASK, effectiveCashInHand, computeIncentiveExpense, getMonthlyFixed, effectiveBranchOnDate, shiftMonth, lastDayWithData, cumulativeCollection, monthCollection, fmtDelta } from "@/lib/calculations";
 import { Icon, IconBtn, Pill, Card, PeriodWidget, ToggleGroup, TH, TD, Modal, SearchSelect, BranchEmployeeSearch, useConfirm, useToast } from "@/components/ui";
 import { useRouter } from "next/navigation";
 import VLoader from "@/components/VLoader";
@@ -35,9 +35,28 @@ const NOW = new Date();
 
 // Inline SVG chart — branch-scoped daily/monthly collection (cash + online + mat sale).
 // Uses the same bar-chart idiom as dashboard's DailyBusinessChart but branch-only + supports yearly mode.
-function BranchCollectionChart({ periodEntries, filterMode, filterYear, filterMonth, endMonth, onDayClick, monthlyExpense = {} }) {
+function BranchCollectionChart({ periodEntries, allEntries = [], branchId, filterMode, filterYear, filterMonth, endMonth, onDayClick, monthlyExpense = {} }) {
   const [hover, setHover] = useState(null);
   const isMonth = filterMode === "month";
+
+  // Month-to-date comparison — running collection through the latest day with
+  // data this month, vs the same 1..cutoff window of the prior two months, plus
+  // the two prior full-month totals so the branch shows its recent trend.
+  let mtdCutoff = 0, mtdCurr = 0, mtd = [];
+  if (isMonth) {
+    mtdCutoff = lastDayWithData(allEntries, filterYear, filterMonth, branchId);
+    if (mtdCutoff > 0) {
+      mtdCurr = cumulativeCollection(allEntries, filterYear, filterMonth, mtdCutoff, branchId);
+      mtd = [1, 2].map(back => {
+        const { y, m } = shiftMonth(filterYear, filterMonth, back);
+        return {
+          label: MONTHS[m - 1], y, m,
+          tillDate: cumulativeCollection(allEntries, y, m, mtdCutoff, branchId),
+          full: monthCollection(allEntries, y, m, branchId),
+        };
+      });
+    }
+  }
 
   const buckets = [];
   if (isMonth) {
@@ -121,6 +140,33 @@ function BranchCollectionChart({ periodEntries, filterMode, filterYear, filterMo
           </div>
         </div>
       </div>
+      {/* Month-to-date comparison — this branch's running collection vs the same
+          date window of the last two months + those months' full totals. */}
+      {isMonth && mtdCutoff > 0 && (
+        <div style={{ display: "flex", alignItems: "stretch", gap: 10, flexWrap: "wrap", marginBottom: 12, padding: "10px 12px", borderRadius: 10, background: "var(--bg3)", border: "1px solid var(--border)" }}>
+          <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", paddingRight: 12, borderRight: "1px solid var(--border)" }}>
+            <span style={{ fontSize: 8.5, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 0.8, fontWeight: 700 }}>This month · till day {mtdCutoff}</span>
+            <span style={{ fontSize: 18, fontWeight: 900, color: "var(--green)" }}>{INR(mtdCurr)}</span>
+          </div>
+          {mtd.map(mo => {
+            const delta = mtdCurr - mo.tillDate;
+            const up = delta > 0, flat = delta === 0;
+            const col = flat ? "var(--text3)" : up ? "var(--green)" : "var(--red)";
+            const pct = mo.tillDate > 0 ? Math.round((delta / mo.tillDate) * 100) : null;
+            return (
+              <div key={mo.label} style={{ display: "flex", flexDirection: "column", justifyContent: "center", gap: 1, padding: "4px 10px", borderRadius: 8, background: "var(--bg4)", border: `1px solid ${col}44`, minWidth: 128 }}>
+                <span style={{ fontSize: 8.5, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 0.6, fontWeight: 700 }}>vs {mo.label} (1–{mtdCutoff})</span>
+                <span style={{ display: "flex", alignItems: "baseline", gap: 5 }}>
+                  <span style={{ fontSize: 14, fontWeight: 900, color: col }}>{flat ? "·" : up ? "▲" : "▼"} {fmtDelta(delta)}</span>
+                  {pct !== null && !flat && <span style={{ fontSize: 9.5, fontWeight: 800, color: col }}>{pct > 0 ? "+" : ""}{pct}%</span>}
+                </span>
+                <span style={{ fontSize: 8.5, color: "var(--text3)", fontWeight: 600 }}>{mo.label} full: {INR(mo.full)}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
       {total === 0 ? (
         <div style={{ height: H, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text3)", fontStyle: "italic", fontSize: 12 }}>No entries recorded for this period.</div>
       ) : (
@@ -2528,7 +2574,7 @@ export default function BranchesPage() {
             router.push(`/dashboard/entry?${params.toString()}`);
           };
           return (<>
-            <BranchCollectionChart periodEntries={periodEntries} filterMode={filterMode} filterYear={filterYear} filterMonth={filterMonth} endMonth={endMonth} onDayClick={openDay}
+            <BranchCollectionChart periodEntries={periodEntries} allEntries={entries} branchId={b.id} filterMode={filterMode} filterYear={filterYear} filterMonth={filterMonth} endMonth={endMonth} onDayClick={openDay}
               monthlyExpense={Object.fromEntries(breakdownStats.filter(s => s.monthPrefix).map(s => [s.monthPrefix, (s.income || 0) - (s.pl || 0)]))} />
             {filterMode === "year" && isAdmin && (
               <BranchExpenseChart breakdownStats={breakdownStats} filterYear={filterYear}
