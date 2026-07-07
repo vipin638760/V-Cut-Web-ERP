@@ -35,6 +35,7 @@ export default function StaffPerformancePage() {
 
   const [search, setSearch] = useState("");
   const [sortCol, setSortCol] = useState("billing"); // billing | incentive | pct | name
+  const [statusFilter, setStatusFilter] = useState("all"); // all | active | inactive
   const [selectedId, setSelectedId] = useState(null);
 
   const currentUser = useCurrentUser() || {};
@@ -182,16 +183,27 @@ export default function StaffPerformancePage() {
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search name, branch or role…"
             style={{ width: "100%", background: "var(--bg3)", border: "1px solid var(--border)", borderRadius: 10, padding: "10px 12px 10px 36px", color: "var(--text)", fontSize: 13, boxSizing: "border-box" }} />
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Sort</span>
-          <ToggleGroup options={[["billing", "Billing"], ["incentive", "Incentive"], ["pct", "Target %"], ["name", "Name"]]} value={sortCol} onChange={setSortCol} />
+        <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Show</span>
+            <ToggleGroup options={[["all", `All (${kpi.total})`], ["active", `Active (${kpi.act})`], ["inactive", `Inactive (${kpi.inact})`]]} value={statusFilter} onChange={setStatusFilter}
+              colors={{ all: "var(--blue)", active: "var(--green)", inactive: "var(--red)" }} />
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Sort</span>
+            <ToggleGroup options={[["billing", "Billing"], ["incentive", "Incentive"], ["pct", "Target %"], ["name", "Name"]]} value={sortCol} onChange={setSortCol} />
+          </div>
         </div>
       </div>
 
       {/* Active section */}
-      <StaffSection title="Active" color="var(--green)" rows={active} isAdmin={isAdmin} branchName={branchName} onOpen={setSelectedId} />
+      {statusFilter !== "inactive" && (
+        <StaffSection title="Active" color="var(--green)" rows={active} isAdmin={isAdmin} branchName={branchName} onOpen={setSelectedId} />
+      )}
       {/* Inactive section */}
-      <StaffSection title="Inactive" color="var(--red)" rows={inactive} isAdmin={isAdmin} branchName={branchName} onOpen={setSelectedId} />
+      {statusFilter !== "active" && (
+        <StaffSection title="Inactive" color="var(--red)" rows={inactive} isAdmin={isAdmin} branchName={branchName} onOpen={setSelectedId} />
+      )}
 
       {/* Detail modal */}
       {selected && (
