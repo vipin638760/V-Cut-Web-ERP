@@ -3,7 +3,7 @@ import { useEffect, useState, useMemo } from "react";
 import { collection, onSnapshot, query, orderBy, doc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
-import { INR, MONTHS, makeFilterPrefix, periodLabel, staffStatusForMonth, staffLeavesInMonth, proRataSalary, effectiveBranchOnDate, toTitleCase } from "@/lib/calculations";
+import { INR, MONTHS, makeFilterPrefix, periodLabel, staffStatusForMonth, staffLeavesInMonth, proRataSalary, proRataSalaryDetail, effectiveBranchOnDate, toTitleCase } from "@/lib/calculations";
 import { PeriodWidget, Card, Pill, TH, TD, Icon, Modal, ToggleGroup } from "@/components/ui";
 import VLoader from "@/components/VLoader";
 
@@ -39,6 +39,7 @@ export default function StaffPerformancePage() {
   const [typeFilter, setTypeFilter] = useState("all"); // all | mens | unisex
   const [targetFilter, setTargetFilter] = useState("all"); // all | met | notmet
   const [selectedId, setSelectedId] = useState(null);
+  const [salaryStaffId, setSalaryStaffId] = useState(null); // salary breakdown modal
   const [savedFilters, setSavedFilters] = useState(false); // a saved preset exists
   const [savedFlash, setSavedFlash] = useState(false);     // transient "Saved ✓" feedback
 
@@ -154,7 +155,8 @@ export default function StaffPerformancePage() {
     // bill at least three times what they cost; as the period accrues, salary
     // and target grow together — e.g. ₹6,000 salary over 10 days → ₹18,000 target.
     const tgt = Math.round(salary * 3);
-    const pct = tgt > 0 ? Math.min(Math.round(agg.billing / tgt * 100), 100) : 0;
+    // Real, uncapped % — can exceed 100 (the meter bar caps its width at 100).
+    const pct = tgt > 0 ? Math.round(agg.billing / tgt * 100) : 0;
     const shortfall = Math.max(0, tgt - agg.billing);
 
     const st = staffStatusForMonth(s, statusMonth);
@@ -244,6 +246,15 @@ export default function StaffPerformancePage() {
   }, [rows, statusFilter, branchesById, search]);
 
   const selected = selectedId ? staff.find(s => s.id === selectedId) : null;
+  const salarySelected = salaryStaffId ? staff.find(s => s.id === salaryStaffId) : null;
+  // Every month in the current period — feeds the salary breakdown modal.
+  const periodMonths = (() => {
+    const startM = isYearly ? 1 : filterMonth;
+    const endM = isYearly ? factor : filterMonth;
+    const arr = [];
+    for (let m = startM; m <= endM; m++) arr.push(`${filterYear}-${String(m).padStart(2, "0")}`);
+    return arr;
+  })();
 
   if (loading) return <VLoader fullscreen label="Loading Staff Performance" />;
 
@@ -321,11 +332,11 @@ export default function StaffPerformancePage() {
 
       {/* Active section */}
       {statusFilter !== "inactive" && (
-        <StaffSection title="Active" color="var(--green)" rows={active} isAdmin={isAdmin} branchName={branchName} onOpen={setSelectedId} />
+        <StaffSection title="Active" color="var(--green)" rows={active} isAdmin={isAdmin} branchName={branchName} onOpen={setSelectedId} onSalaryClick={setSalaryStaffId} />
       )}
       {/* Inactive section */}
       {statusFilter !== "active" && (
-        <StaffSection title="Inactive" color="var(--red)" rows={inactive} isAdmin={isAdmin} branchName={branchName} onOpen={setSelectedId} />
+        <StaffSection title="Inactive" color="var(--red)" rows={inactive} isAdmin={isAdmin} branchName={branchName} onOpen={setSelectedId} onSalaryClick={setSalaryStaffId} />
       )}
 
       {/* Detail modal */}
@@ -345,6 +356,21 @@ export default function StaffPerformancePage() {
           onClose={() => setSelectedId(null)}
         />
       )}
+
+      {/* Salary breakdown modal — admin only */}
+      {salarySelected && isAdmin && (
+        <SalaryBreakdownModal
+          staff={salarySelected}
+          months={periodMonths}
+          branches={branches}
+          salHistory={salHistory}
+          staffList={staff}
+          globalSettings={globalSettings}
+          leaves={leaves}
+          entries={entries}
+          onClose={() => setSalaryStaffId(null)}
+        />
+      )}
     </div>
   );
 }
@@ -359,7 +385,7 @@ function KpiTile({ label, value, color, sub }) {
   );
 }
 
-function StaffSection({ title, color, rows, isAdmin, branchName, onOpen }) {
+function StaffSection({ title, color, rows, isAdmin, branchName, onOpen, onSalaryClick }) {
   return (
     <div>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
@@ -395,13 +421,21 @@ function StaffSection({ title, color, rows, isAdmin, branchName, onOpen }) {
                     <TD right style={{ color: "var(--accent)", fontWeight: 800 }}>{INR(r.billing)}</TD>
                     <TD right style={{ color: "var(--gold)", fontWeight: 700 }}>{INR(r.incentive)}</TD>
                     <TD right style={{ color: "#c084fc", fontWeight: 600 }}>{INR(r.material)}</TD>
-                    {isAdmin && <TD right style={{ color: "var(--blue, #60a5fa)", fontWeight: 600 }}>{INR(r.salary)}</TD>}
+                    {isAdmin && (
+                      <TD right>
+                        <button onClick={(e) => { e.stopPropagation(); onSalaryClick?.(r.s.id); }}
+                          title="See how this salary is calculated"
+                          style={{ background: "none", border: "none", padding: 0, cursor: "pointer", color: "var(--blue, #60a5fa)", fontWeight: 700, fontFamily: "inherit", fontSize: "inherit", textDecoration: "underline", textDecorationStyle: "dotted", textUnderlineOffset: 3 }}>
+                          {INR(r.salary)}
+                        </button>
+                      </TD>
+                    )}
                     <TD right style={{ color: "var(--text3)" }}>{r.leaveDays} d</TD>
                     <TD right>
                       <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 3 }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "flex-end" }}>
                           <div style={{ width: 60, height: 5, background: "var(--border)", borderRadius: 6, overflow: "hidden" }}>
-                            <div style={{ width: `${r.pct}%`, height: "100%", background: r.pct >= 100 ? "var(--green)" : "var(--blue, #60a5fa)" }} />
+                            <div style={{ width: `${Math.min(r.pct, 100)}%`, height: "100%", background: r.pct >= 100 ? "var(--green)" : "var(--blue, #60a5fa)" }} />
                           </div>
                           <span style={{ fontSize: 11, fontWeight: 800, color: r.pct >= 100 ? "var(--green)" : "var(--text2)" }}>{r.pct}%</span>
                         </div>
@@ -557,6 +591,64 @@ function StaffHistoryModal({ staff, entries, branchesById, branchName, transfers
         </div>
       </div>
     </Modal>
+  );
+}
+
+// Explains how a staff member's period salary is derived, month by month:
+// base ÷ days-in-month × payable days (present + paid leaves capped at quota).
+function SalaryBreakdownModal({ staff, months, branches, salHistory, staffList, globalSettings, leaves, entries, onClose }) {
+  const details = months.map(mp => proRataSalaryDetail(staff, mp, branches, salHistory, staffList, globalSettings, leaves, entries));
+  const total = details.reduce((s, d) => s + d.amount, 0);
+  const monLabel = (mp) => { const [y, m] = mp.split("-").map(Number); return `${MONTHS[m - 1]} ${y}`; };
+
+  return (
+    <Modal isOpen={true} title={`${toTitleCase(staff.name)} · Salary Breakdown`} onClose={onClose} width={720}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 16, maxHeight: "72vh", overflowY: "auto", padding: "2px" }}>
+        {/* Formula */}
+        <div style={{ padding: "12px 14px", borderRadius: 12, background: "var(--bg3)", border: "1px solid var(--border)", fontSize: 12, color: "var(--text2)", lineHeight: 1.6 }}>
+          <strong style={{ color: "var(--text)" }}>How it's calculated</strong><br />
+          Monthly salary = <span style={{ color: "var(--blue, #60a5fa)", fontWeight: 700 }}>base ÷ days-in-month × payable days</span>.
+          Payable days = days present + paid leaves, where paid leaves are capped at the branch's monthly quota (present days are never paid twice).
+        </div>
+
+        {details.map(d => (
+          <div key={d.monthStr} style={{ border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", background: "var(--bg3)", borderBottom: "1px solid var(--border)" }}>
+              <span style={{ fontSize: 13, fontWeight: 800, color: "var(--text)" }}>{monLabel(d.monthStr)}</span>
+              <span style={{ fontSize: 15, fontWeight: 900, color: "var(--blue, #60a5fa)", fontFamily: "var(--font-headline, var(--font-outfit))" }}>{INR(d.amount)}</span>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 1, background: "var(--border)" }}>
+              <SalCell label="Base salary" value={INR(d.baseSalary)} />
+              <SalCell label="Days in month" value={d.daysInMonth} />
+              <SalCell label="Per-day rate" value={INR(d.perDayRate)} />
+              <SalCell label="Days present" value={d.presentDays} color="var(--green)" />
+              <SalCell label={`Paid leaves`} value={`${d.paidLeaveUsed} / ${d.quota}`} color="#c084fc" />
+              {d.unpaidLeaveDays > 0 && <SalCell label="Unpaid leaves" value={d.unpaidLeaveDays} color="var(--red)" />}
+              <SalCell label="Payable days" value={d.payableDays} color="var(--accent)" bold />
+            </div>
+            <div style={{ padding: "9px 14px", background: "var(--bg4)", fontSize: 11, color: "var(--text3)", fontFamily: "var(--font-headline, var(--font-outfit))" }}>
+              {INR(d.baseSalary)} ÷ {d.daysInMonth} × {d.payableDays} = <strong style={{ color: "var(--blue, #60a5fa)" }}>{INR(d.amount)}</strong>
+            </div>
+          </div>
+        ))}
+
+        {details.length > 1 && (
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 16px", borderRadius: 12, background: "linear-gradient(135deg, rgba(96,165,250,0.1), rgba(96,165,250,0.02))", border: "1px solid rgba(96,165,250,0.3)" }}>
+            <span style={{ fontSize: 12, fontWeight: 800, color: "var(--blue, #60a5fa)", textTransform: "uppercase", letterSpacing: 1 }}>Period total</span>
+            <span style={{ fontSize: 18, fontWeight: 900, color: "var(--blue, #60a5fa)", fontFamily: "var(--font-headline, var(--font-outfit))" }}>{INR(total)}</span>
+          </div>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+function SalCell({ label, value, color = "var(--text)", bold }) {
+  return (
+    <div style={{ background: "var(--bg2)", padding: "10px 12px" }}>
+      <div style={{ fontSize: 9, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 0.6 }}>{label}</div>
+      <div style={{ fontSize: 14, fontWeight: bold ? 900 : 700, color, marginTop: 3, fontFamily: "var(--font-headline, var(--font-outfit))" }}>{value}</div>
+    </div>
   );
 }
 

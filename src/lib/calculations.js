@@ -373,6 +373,49 @@ export function proRataSalary(st, monthStr, branches, salaryHistory, staffList, 
   return Math.round((salary / daysInMonth) * payableDays);
 }
 
+// Per-month breakdown of proRataSalary's attendance-based path — returns every
+// intermediate value so the UI can explain how a salary figure is derived:
+// base ÷ days-in-month × payable, where payable = present days + paid leaves
+// (capped at the monthly quota, never double-counting a present day).
+export function proRataSalaryDetail(st, monthStr, branches, salaryHistory, staffList, globalSettings = {}, leaves = [], entries = []) {
+  const salary = getStaffSalaryForMonth(st.id, monthStr, salaryHistory, staffList) || 0;
+  const [yr, mo] = monthStr.split('-').map(Number);
+  const daysInMonth = new Date(yr, mo, 0).getDate();
+  const branch = branches?.find(b => b.id === st.branch_id);
+  let quota = branch && branch.type === 'unisex' ? 3 : 2;
+  if (globalSettings) {
+    if (branch?.type === 'mens' && globalSettings.mens_leaves !== undefined) quota = globalSettings.mens_leaves;
+    if (branch?.type === 'unisex' && globalSettings.unisex_leaves !== undefined) quota = globalSettings.unisex_leaves;
+  }
+  const approvedLeaves = (leaves || []).filter(l =>
+    l.staff_id === st.id && l.status === 'approved' && l.date && l.date.startsWith(monthStr));
+  const totalLeaveDays = approvedLeaves.reduce((s, l) => s + (Number(l.days) || 1), 0);
+
+  const presentSet = new Set();
+  for (const e of entries) {
+    if (!e.date || !e.date.startsWith(monthStr)) continue;
+    if ((e.staff_billing || []).some(x => x.staff_id === st.id && x.present !== false)) presentSet.add(e.date);
+  }
+  const presentDays = presentSet.size;
+  const leaveDates = approvedLeaves.map(l => l.date).filter(Boolean).sort();
+  let paidLeaveUsed = 0;
+  const paid = new Set(presentSet);
+  for (const d of leaveDates) {
+    if (paidLeaveUsed >= quota) break;
+    if (paid.has(d)) continue;
+    paid.add(d);
+    paidLeaveUsed++;
+  }
+  const payableDays = Math.min(daysInMonth, paid.size);
+  const rate = daysInMonth ? salary / daysInMonth : 0;
+  const amount = Math.round(rate * payableDays);
+  return {
+    monthStr, baseSalary: salary, daysInMonth, presentDays, quota,
+    totalLeaveDays, paidLeaveUsed, unpaidLeaveDays: Math.max(0, totalLeaveDays - paidLeaveUsed),
+    payableDays, perDayRate: Math.round(rate), amount,
+  };
+}
+
 // Distinct days a staff member was PRESENT at each branch in a month. Aligned
 // with [[staffPresentDaysInMonth]]'s gate: a `staff_billing` row with
 // `present !== false`. Borrowed/loan shifts land in the HOST branch's entry
