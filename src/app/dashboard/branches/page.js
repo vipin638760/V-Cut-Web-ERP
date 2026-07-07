@@ -4232,11 +4232,19 @@ export default function BranchesPage() {
       )}
 
       {/* Controls */}
-      <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap", background: "var(--bg3)", border: "1px solid var(--border)", borderRadius: 8, padding: "8px 12px", marginBottom: 16 }}>
-        <ToggleGroup label="P&L" options={[["all","All"],["profit","Profit"],["loss","Loss"]]} value={brFilter} onChange={setBrFilter} />
-        {isAdmin && <ToggleGroup label="Target" options={[["all","All"],["met","Met"],["notmet","Not Met"]]} value={brTargetFilter} onChange={setBrTargetFilter}
-          colors={{ all: "var(--blue)", met: "var(--green)", notmet: "var(--red)" }} />}
-        <ToggleGroup label="Type" options={[["all","All"],["mens","Mens"],["unisex","Unisex"]]} value={brTypeFilter} onChange={setBrTypeFilter} />
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", background: "var(--bg3)", border: "1px solid var(--border)", borderRadius: 8, padding: "8px 12px", marginBottom: 16 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 10px", border: "1px solid var(--border2)", borderRadius: 10, background: "var(--bg4)" }}>
+          <ToggleGroup label="P&L" options={[["all","All"],["profit","Profit"],["loss","Loss"]]} value={brFilter} onChange={setBrFilter} />
+        </div>
+        {isAdmin && (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 10px", border: "1px solid var(--border2)", borderRadius: 10, background: "var(--bg4)" }}>
+            <ToggleGroup label="Target" options={[["all","All"],["met","Met"],["notmet","Not Met"]]} value={brTargetFilter} onChange={setBrTargetFilter}
+              colors={{ all: "var(--blue)", met: "var(--green)", notmet: "var(--red)" }} />
+          </div>
+        )}
+        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 10px", border: "1px solid var(--border2)", borderRadius: 10, background: "var(--bg4)" }}>
+          <ToggleGroup label="Type" options={[["all","All"],["mens","Mens"],["unisex","Unisex"]]} value={brTypeFilter} onChange={setBrTypeFilter} />
+        </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span style={{ fontSize: 10, color: "var(--text3)", textTransform: "uppercase", letterSpacing: ".5px" }}>Sort</span>
           <SearchSelect
