@@ -103,9 +103,6 @@ export default function StaffPerformancePage() {
   // Per-staff row for the selected period.
   const rows = useMemo(() => staff.map(s => {
     const agg = periodAgg.get(s.id) || { billing: 0, incentive: 0, material: 0, days: new Set(), branches: new Set() };
-    const baseTgt = s.target || 50000;
-    const tgt = baseTgt * factor;
-    const pct = tgt > 0 ? Math.min(Math.round(agg.billing / tgt * 100), 100) : 0;
 
     let salary = 0, salaryFull = 0, leaveDays = 0;
     const startM = isYearly ? 1 : filterMonth;
@@ -119,10 +116,17 @@ export default function StaffPerformancePage() {
       leaveDays += staffLeavesInMonth(s.id, mp, leaves);
     }
 
+    // Target = 3× the salary cost incurred so far (pro-rata). A stylist should
+    // bill at least three times what they cost; as the period accrues, salary
+    // and target grow together — e.g. ₹6,000 salary over 10 days → ₹18,000 target.
+    const tgt = Math.round(salary * 3);
+    const pct = tgt > 0 ? Math.min(Math.round(agg.billing / tgt * 100), 100) : 0;
+    const shortfall = Math.max(0, tgt - agg.billing);
+
     const st = staffStatusForMonth(s, statusMonth);
     const branchId = effectiveBranchOnDate(s, todayStr, transfers) || s.branch_id;
     return {
-      s, tgt, pct, salary, salaryFull, leaveDays,
+      s, tgt, pct, shortfall, salary, salaryFull, leaveDays,
       billing: agg.billing, incentive: agg.incentive, material: agg.material,
       daysBilled: agg.days.size, branchesBilled: agg.branches.size,
       status: st.status, branchId,
@@ -168,6 +172,8 @@ export default function StaffPerformancePage() {
       totInc: byType.reduce((s, r) => s + r.incentive, 0),
       totSal: byType.reduce((s, r) => s + r.salary, 0),
       totSalFull: byType.reduce((s, r) => s + r.salaryFull, 0),
+      totTgt: byType.reduce((s, r) => s + r.tgt, 0),
+      totShort: byType.reduce((s, r) => s + r.shortfall, 0),
       act, inact: byType.length - act, total: byType.length,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -212,6 +218,8 @@ export default function StaffPerformancePage() {
         <KpiTile label="Total Incentive" value={INR(kpi.totInc)} color="var(--gold)" />
         {isAdmin && <KpiTile label="Total Salary" value={INR(kpi.totSal)} color="var(--blue, #60a5fa)" sub="payroll cost · after proration" />}
         {isAdmin && <KpiTile label="Full Salary" value={INR(kpi.totSalFull)} color="var(--blue, #60a5fa)" sub="final · no proration" />}
+        {isAdmin && <KpiTile label="Total Target" value={INR(kpi.totTgt)} color="var(--text)" sub="3× salary till date" />}
+        {isAdmin && <KpiTile label="Target Shortfall" value={INR(kpi.totShort)} color={kpi.totShort > 0 ? "var(--red)" : "var(--green)"} sub={kpi.totShort > 0 ? "below 3× salary" : "target met ✓"} />}
       </div>
 
       {/* Controls */}
@@ -318,11 +326,21 @@ function StaffSection({ title, color, rows, isAdmin, branchName, onOpen }) {
                     {isAdmin && <TD right style={{ color: "var(--blue, #60a5fa)", fontWeight: 600 }}>{INR(r.salary)}</TD>}
                     <TD right style={{ color: "var(--text3)" }}>{r.leaveDays} d</TD>
                     <TD right>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "flex-end" }}>
-                        <div style={{ width: 60, height: 5, background: "var(--border)", borderRadius: 6, overflow: "hidden" }}>
-                          <div style={{ width: `${r.pct}%`, height: "100%", background: r.pct >= 100 ? "var(--green)" : "var(--blue, #60a5fa)" }} />
+                      <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 3 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "flex-end" }}>
+                          <div style={{ width: 60, height: 5, background: "var(--border)", borderRadius: 6, overflow: "hidden" }}>
+                            <div style={{ width: `${r.pct}%`, height: "100%", background: r.pct >= 100 ? "var(--green)" : "var(--blue, #60a5fa)" }} />
+                          </div>
+                          <span style={{ fontSize: 11, fontWeight: 800, color: r.pct >= 100 ? "var(--green)" : "var(--text2)" }}>{r.pct}%</span>
                         </div>
-                        <span style={{ fontSize: 11, fontWeight: 800, color: r.pct >= 100 ? "var(--green)" : "var(--text2)" }}>{r.pct}%</span>
+                        {isAdmin && r.tgt > 0 && (
+                          <div style={{ fontSize: 10, fontWeight: 600, whiteSpace: "nowrap" }}>
+                            <span style={{ color: "var(--text3)" }}>{INR(r.tgt)}</span>
+                            {r.shortfall > 0
+                              ? <span style={{ color: "var(--red)", fontWeight: 800 }}> · short {INR(r.shortfall)}</span>
+                              : <span style={{ color: "var(--green)", fontWeight: 800 }}> · met ✓</span>}
+                          </div>
+                        )}
                       </div>
                     </TD>
                     <TD right style={{ color: "var(--text3)", fontSize: 12 }}>{r.daysBilled}</TD>
@@ -391,7 +409,7 @@ function StaffHistoryModal({ staff, entries, branchesById, branchName, transfers
           <InfoChip label="Status (this month)" value={st.status} color={st.status === "inactive" ? "var(--red)" : st.status === "partial" ? "var(--orange)" : "var(--green)"} />
           <InfoChip label="Joined" value={staff.join || "—"} />
           {staff.exit_date && <InfoChip label="Exited" value={staff.exit_date} color="var(--red)" />}
-          <InfoChip label="Monthly target" value={INR(staff.target || 50000)} />
+          <InfoChip label="Target rule" value="3× salary" color="var(--accent)" />
         </div>
 
         {/* Lifetime totals */}
