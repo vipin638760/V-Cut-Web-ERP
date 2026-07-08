@@ -47,7 +47,7 @@ function ReqDayPopover({ bk, reqDaily }) {
   return (
     <div style={{ position: "absolute", top: "100%", right: 0, marginTop: 6, zIndex: 30, minWidth: 220, background: "var(--bg2)", border: "1px solid var(--border2)", borderRadius: 10, padding: "10px 12px", boxShadow: "0 12px 30px rgba(0,0,0,0.6)", textAlign: "left" }}>
       <div style={{ fontSize: 10, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 }}>Req / Day break-up</div>
-      {Row("Fixed (rent · elec · wifi)", bk.fixed, "var(--orange)")}
+      {Row("Fixed (shop + room rent · elec · wifi)", bk.fixed, "var(--orange)")}
       {Row("Salary (full month)", bk.salary, "var(--blue, #60a5fa)")}
       {Row("Variable (inc · mat · petrol)", bk.variable, "var(--red)")}
       {Row("GST", bk.gst, "var(--red)")}
