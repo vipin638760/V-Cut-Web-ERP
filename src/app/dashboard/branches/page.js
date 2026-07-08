@@ -35,8 +35,37 @@ const NOW = new Date();
 
 // Inline SVG chart — branch-scoped daily/monthly collection (cash + online + mat sale).
 // Uses the same bar-chart idiom as dashboard's DailyBusinessChart but branch-only + supports yearly mode.
-function BranchCollectionChart({ periodEntries, allEntries = [], branchId, filterMode, filterYear, filterMonth, endMonth, onDayClick, monthlyExpense = {}, reqDaily = 0 }) {
+// Break-up popover for the branch "Req / Day" figure.
+function ReqDayPopover({ bk, reqDaily }) {
+  const total = bk.fixed + bk.salary + bk.variable + bk.gst;
+  const Row = (label, val, color) => (
+    <div style={{ display: "flex", justifyContent: "space-between", gap: 16, padding: "3px 0", fontSize: 11 }}>
+      <span style={{ color: "var(--text3)" }}>{label}</span>
+      <span style={{ color, fontWeight: 700 }}>{INR(val)}</span>
+    </div>
+  );
+  return (
+    <div style={{ position: "absolute", top: "100%", right: 0, marginTop: 6, zIndex: 30, minWidth: 220, background: "var(--bg2)", border: "1px solid var(--border2)", borderRadius: 10, padding: "10px 12px", boxShadow: "0 12px 30px rgba(0,0,0,0.6)", textAlign: "left" }}>
+      <div style={{ fontSize: 10, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 }}>Req / Day break-up</div>
+      {Row("Fixed (rent · elec · wifi)", bk.fixed, "var(--orange)")}
+      {Row("Salary (full month)", bk.salary, "var(--blue, #60a5fa)")}
+      {Row("Variable (inc · mat · petrol)", bk.variable, "var(--red)")}
+      {Row("GST", bk.gst, "var(--red)")}
+      <div style={{ borderTop: "1px dashed var(--border2)", margin: "6px 0", paddingTop: 6, display: "flex", justifyContent: "space-between", fontSize: 11 }}>
+        <span style={{ color: "var(--text2)", fontWeight: 700 }}>Total ÷ {bk.days} days</span>
+        <span style={{ color: "var(--text)", fontWeight: 800 }}>{INR(total)}</span>
+      </div>
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+        <span style={{ color: "var(--accent)", fontWeight: 800 }}>Req / day</span>
+        <span style={{ color: "var(--accent)", fontWeight: 900 }}>{INR(reqDaily)}</span>
+      </div>
+    </div>
+  );
+}
+
+function BranchCollectionChart({ periodEntries, allEntries = [], branchId, filterMode, filterYear, filterMonth, endMonth, onDayClick, monthlyExpense = {}, reqDaily = 0, reqDailyBreakup = null }) {
   const [hover, setHover] = useState(null);
+  const [showReq, setShowReq] = useState(false);
   const isMonth = filterMode === "month";
 
   // Month-to-date comparison — running collection through the latest day with
@@ -135,11 +164,15 @@ function BranchCollectionChart({ periodEntries, allEntries = [], branchId, filte
             <div style={{ fontSize: 14, fontWeight: 800, color: "var(--blue, #60a5fa)" }}>{INR(avg)}</div>
           </div>
           {isMonth && reqDaily > 0 && (
-            <div style={{ textAlign: "right" }} title="Daily income needed to cover fixed expenses + full salary">
+            <div style={{ textAlign: "right", position: "relative" }}>
               <div style={{ fontSize: 9, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase" }}>Req / Day</div>
-              <div style={{ fontSize: 14, fontWeight: 800, color: avg >= reqDaily ? "var(--green)" : "var(--red)" }}>
-                {avg >= reqDaily ? "▲ " : "▼ "}{INR(reqDaily)}
-              </div>
+              <button onClick={() => setShowReq(v => !v)} title="Click for the full break-up"
+                style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: "inherit" }}>
+                <span style={{ fontSize: 14, fontWeight: 800, color: avg >= reqDaily ? "var(--green)" : "var(--red)", textDecoration: "underline", textDecorationStyle: "dotted", textUnderlineOffset: 3 }}>
+                  {avg >= reqDaily ? "▲ " : "▼ "}{INR(reqDaily)}
+                </span>
+              </button>
+              {showReq && reqDailyBreakup && <ReqDayPopover bk={reqDailyBreakup} reqDaily={reqDaily} />}
             </div>
           )}
           <div style={{ textAlign: "right" }}>
@@ -2722,17 +2755,22 @@ export default function BranchesPage() {
       daysInReqPeriod += new Date(filterYear, m, 0).getDate();
     }
 
-    // Required daily average — the daily income needed to cover the period's
-    // fixed expenses + full salary, spread across the calendar days. Income
-    // must clear this to break even on those two cost buckets.
-    const reqDaily = daysInReqPeriod > 0
-      ? Math.round((totalShopRent + totalRoomRent + totalElec + totalWifi + totalFullSalary) / daysInReqPeriod)
-      : 0;
-
     const gstPct = globalSettings?.gst_pct || 0;
     const totalGstEst = (totalOnline * gstPct) / 100;
     const totalIncSum = totalOnline + totalCash + totalMatInc;
     const totalVarExp = totalIncentiveExp + totalMatExp + totalOtherExp;
+
+    // Required daily average — daily income needed to cover the FULL operating
+    // cost, spread across the calendar days: fixed + full salary + variable
+    // (incentives + material + petrol/other) + GST. Income must clear this to
+    // break even on everything.
+    const reqDaily = daysInReqPeriod > 0
+      ? Math.round((totalShopRent + totalRoomRent + totalElec + totalWifi + totalFullSalary + totalVarExp + totalGstEst) / daysInReqPeriod)
+      : 0;
+    const reqDailyBreakup = {
+      fixed: totalShopRent + totalRoomRent + totalElec + totalWifi,
+      salary: totalFullSalary, variable: totalVarExp, gst: totalGstEst, days: daysInReqPeriod,
+    };
     const netSum = totalIncSum - totalVarExp;
     const fullNetSum = netSum - totalFixedSalaryComp - totalGstEst;
 
@@ -3045,7 +3083,7 @@ export default function BranchesPage() {
           };
           return (<>
             <BranchCollectionChart periodEntries={periodEntries} allEntries={entries} branchId={b.id} filterMode={filterMode} filterYear={filterYear} filterMonth={filterMonth} endMonth={endMonth} onDayClick={openDay}
-              reqDaily={isAdmin ? reqDaily : 0}
+              reqDaily={isAdmin ? reqDaily : 0} reqDailyBreakup={isAdmin ? reqDailyBreakup : null}
               monthlyExpense={Object.fromEntries(breakdownStats.filter(s => s.monthPrefix).map(s => [s.monthPrefix, (s.income || 0) - (s.pl || 0)]))} />
             {filterMode === "month" && (
               <BranchSameDateCompareChart allEntries={entries} branchId={b.id} filterYear={filterYear} filterMonth={filterMonth} />

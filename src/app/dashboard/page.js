@@ -415,13 +415,16 @@ export default function DashboardPage() {
   const tEProjected = branchData.reduce((s, d) => s + d.projectedExp, 0);
   const net = branchData.reduce((s, d) => s + d.n, 0);
 
-  // Required daily average (network) — the daily income needed to cover the
-  // month's fixed expenses + full salary, spread over the calendar days. Only
-  // meaningful in month mode (the Daily Business chart is month-only).
+  // Required daily average (network) — daily income needed to cover the FULL
+  // operating cost, spread over the calendar days: fixed + full salary +
+  // variable (incentives + material + petrol/other) + GST. Month mode only.
   const _daysInMonthReq = new Date(filterYear, filterMonth, 0).getDate();
   const _fixedNet = branchData.reduce((s, d) => s + (d.fShopRent || 0) + (d.fRoomRent || 0) + (d.fWifi || 0) + (d.fElec || 0), 0);
   const _fullSalaryNet = staff.filter(s => staffStatusForMonth(s, filterPrefix).status !== "inactive").reduce((s, st) => s + (Number(st.salary) || 0), 0);
-  const reqDailyNet = (isYearly || _daysInMonthReq <= 0) ? 0 : Math.round((_fixedNet + _fullSalaryNet) / _daysInMonthReq);
+  const _varNet = branchData.reduce((s, d) => s + (d.vInc || 0) + (d.vMatE || 0) + (d.vOther || 0), 0);
+  const _gstNet = branchData.reduce((s, d) => s + (d.totalGst || 0), 0);
+  const reqDailyBreakup = { fixed: _fixedNet, salary: _fullSalaryNet, variable: _varNet, gst: _gstNet, days: _daysInMonthReq };
+  const reqDailyNet = (isYearly || _daysInMonthReq <= 0) ? 0 : Math.round((_fixedNet + _fullSalaryNet + _varNet + _gstNet) / _daysInMonthReq);
 
   // Active stylists for the period's reference month — the selected month in
   // month mode, or the current month (or Dec of a past year) in year mode.
@@ -1294,7 +1297,7 @@ export default function DashboardPage() {
 
       {/* Daily business bar chart — month mode only */}
       {filterMode === "month" && (dashView === "all" || dashView === "shop") && (
-        <DailyBusinessChart entries={entries} branches={branches} filterYear={filterYear} filterMonth={filterMonth} reqDaily={isAdmin ? reqDailyNet : 0} />
+        <DailyBusinessChart entries={entries} branches={branches} filterYear={filterYear} filterMonth={filterMonth} reqDaily={isAdmin ? reqDailyNet : 0} reqDailyBreakup={isAdmin ? reqDailyBreakup : null} />
       )}
 
       {/* Same-date-across-last-3-months compare */}
@@ -2681,9 +2684,39 @@ function SameDateCompareChart({ entries, branches = [], filterYear, filterMonth 
   );
 }
 
-function DailyBusinessChart({ entries, branches = [], filterYear, filterMonth, reqDaily = 0 }) {
+// Break-up popover for the "Req / Day" figure — how the fixed + salary +
+// variable + GST monthly cost divides down to a daily break-even.
+function ReqDayPopover({ bk, reqDaily }) {
+  const total = bk.fixed + bk.salary + bk.variable + bk.gst;
+  const Row = (label, val, color) => (
+    <div style={{ display: "flex", justifyContent: "space-between", gap: 16, padding: "3px 0", fontSize: 11 }}>
+      <span style={{ color: "var(--text3)" }}>{label}</span>
+      <span style={{ color, fontWeight: 700 }}>{INR(val)}</span>
+    </div>
+  );
+  return (
+    <div style={{ position: "absolute", top: "100%", right: 0, marginTop: 6, zIndex: 30, minWidth: 220, background: "var(--bg2)", border: "1px solid var(--border2)", borderRadius: 10, padding: "10px 12px", boxShadow: "0 12px 30px rgba(0,0,0,0.6)", textAlign: "left" }}>
+      <div style={{ fontSize: 10, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 }}>Req / Day break-up</div>
+      {Row("Fixed (rent · elec · wifi)", bk.fixed, "var(--orange)")}
+      {Row("Salary (full month)", bk.salary, "var(--blue, #60a5fa)")}
+      {Row("Variable (inc · mat · petrol)", bk.variable, "var(--red)")}
+      {Row("GST", bk.gst, "var(--red)")}
+      <div style={{ borderTop: "1px dashed var(--border2)", margin: "6px 0", paddingTop: 6, display: "flex", justifyContent: "space-between", fontSize: 11 }}>
+        <span style={{ color: "var(--text2)", fontWeight: 700 }}>Total ÷ {bk.days} days</span>
+        <span style={{ color: "var(--text)", fontWeight: 800 }}>{INR(total)}</span>
+      </div>
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+        <span style={{ color: "var(--accent)", fontWeight: 800 }}>Req / day</span>
+        <span style={{ color: "var(--accent)", fontWeight: 900 }}>{INR(reqDaily)}</span>
+      </div>
+    </div>
+  );
+}
+
+function DailyBusinessChart({ entries, branches = [], filterYear, filterMonth, reqDaily = 0, reqDailyBreakup = null }) {
   const [hover, setHover] = useState(null);
   const [showAvg, setShowAvg] = useState(false);
+  const [showReq, setShowReq] = useState(false);
   const prefix = `${filterYear}-${String(filterMonth).padStart(2, "0")}`;
   const daysInMonth = new Date(filterYear, filterMonth, 0).getDate();
   const NOW = new Date();
@@ -2778,11 +2811,15 @@ function DailyBusinessChart({ entries, branches = [], filterYear, filterMonth, r
             <div style={{ fontSize: 15, fontWeight: 800, color: "var(--blue)" }}>{INR(avg)}</div>
           </div>
           {reqDaily > 0 && (
-            <div style={{ textAlign: "right" }} title="Daily income needed to cover fixed expenses + full salary">
+            <div style={{ textAlign: "right", position: "relative" }}>
               <div style={{ fontSize: 9, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, fontWeight: 700 }}>Req / Day</div>
-              <div style={{ fontSize: 15, fontWeight: 800, color: avg >= reqDaily ? "var(--green)" : "var(--red)" }}>
-                {avg >= reqDaily ? "▲ " : "▼ "}{INR(reqDaily)}
-              </div>
+              <button onClick={() => setShowReq(v => !v)} title="Click for the full break-up"
+                style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: "inherit" }}>
+                <span style={{ fontSize: 15, fontWeight: 800, color: avg >= reqDaily ? "var(--green)" : "var(--red)", textDecoration: "underline", textDecorationStyle: "dotted", textUnderlineOffset: 3 }}>
+                  {avg >= reqDaily ? "▲ " : "▼ "}{INR(reqDaily)}
+                </span>
+              </button>
+              {showReq && reqDailyBreakup && <ReqDayPopover bk={reqDailyBreakup} reqDaily={reqDaily} />}
             </div>
           )}
           <div style={{ textAlign: "right" }}>
