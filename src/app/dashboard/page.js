@@ -415,6 +415,14 @@ export default function DashboardPage() {
   const tEProjected = branchData.reduce((s, d) => s + d.projectedExp, 0);
   const net = branchData.reduce((s, d) => s + d.n, 0);
 
+  // Required daily average (network) — the daily income needed to cover the
+  // month's fixed expenses + full salary, spread over the calendar days. Only
+  // meaningful in month mode (the Daily Business chart is month-only).
+  const _daysInMonthReq = new Date(filterYear, filterMonth, 0).getDate();
+  const _fixedNet = branchData.reduce((s, d) => s + (d.fShopRent || 0) + (d.fRoomRent || 0) + (d.fWifi || 0) + (d.fElec || 0), 0);
+  const _fullSalaryNet = staff.filter(s => staffStatusForMonth(s, filterPrefix).status !== "inactive").reduce((s, st) => s + (Number(st.salary) || 0), 0);
+  const reqDailyNet = (isYearly || _daysInMonthReq <= 0) ? 0 : Math.round((_fixedNet + _fullSalaryNet) / _daysInMonthReq);
+
   // Active stylists for the period's reference month — the selected month in
   // month mode, or the current month (or Dec of a past year) in year mode.
   // `staff.length` alone counts everyone ever added, including exited staff.
@@ -1286,7 +1294,7 @@ export default function DashboardPage() {
 
       {/* Daily business bar chart — month mode only */}
       {filterMode === "month" && (dashView === "all" || dashView === "shop") && (
-        <DailyBusinessChart entries={entries} branches={branches} filterYear={filterYear} filterMonth={filterMonth} />
+        <DailyBusinessChart entries={entries} branches={branches} filterYear={filterYear} filterMonth={filterMonth} reqDaily={isAdmin ? reqDailyNet : 0} />
       )}
 
       {/* Same-date-across-last-3-months compare */}
@@ -2673,7 +2681,7 @@ function SameDateCompareChart({ entries, branches = [], filterYear, filterMonth 
   );
 }
 
-function DailyBusinessChart({ entries, branches = [], filterYear, filterMonth }) {
+function DailyBusinessChart({ entries, branches = [], filterYear, filterMonth, reqDaily = 0 }) {
   const [hover, setHover] = useState(null);
   const [showAvg, setShowAvg] = useState(false);
   const prefix = `${filterYear}-${String(filterMonth).padStart(2, "0")}`;
@@ -2769,6 +2777,14 @@ function DailyBusinessChart({ entries, branches = [], filterYear, filterMonth })
             <div style={{ fontSize: 9, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, fontWeight: 700 }}>Daily Avg</div>
             <div style={{ fontSize: 15, fontWeight: 800, color: "var(--blue)" }}>{INR(avg)}</div>
           </div>
+          {reqDaily > 0 && (
+            <div style={{ textAlign: "right" }} title="Daily income needed to cover fixed expenses + full salary">
+              <div style={{ fontSize: 9, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, fontWeight: 700 }}>Req / Day</div>
+              <div style={{ fontSize: 15, fontWeight: 800, color: avg >= reqDaily ? "var(--green)" : "var(--red)" }}>
+                {avg >= reqDaily ? "▲ " : "▼ "}{INR(reqDaily)}
+              </div>
+            </div>
+          )}
           <div style={{ textAlign: "right" }}>
             <div style={{ fontSize: 9, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, fontWeight: 700 }}>Best Day</div>
             <div style={{ fontSize: 15, fontWeight: 800, color: "var(--green)" }}>{byDay[bestIdx] > 0 ? `${bestIdx + 1} · ${INR(byDay[bestIdx])}` : "—"}</div>
