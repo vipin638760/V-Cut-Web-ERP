@@ -422,6 +422,34 @@ function KpiTile({ label, value, color, sub }) {
 // each branch's billing vs target with a met / not-met badge. Collapsible.
 function BranchTargetsSection({ rows, branchName, branchesById, isAdmin, branchesMet }) {
   const [open, setOpen] = useState(true);
+  const [sortCol, setSortCol] = useState("billing"); // branch | staff | billing | target | pct | status
+  const [sortDir, setSortDir] = useState("desc");
+
+  const clickSort = (col) => {
+    if (sortCol === col) setSortDir(d => (d === "asc" ? "desc" : "asc"));
+    else { setSortCol(col); setSortDir(col === "branch" ? "asc" : "desc"); }
+  };
+  const sorted = useMemo(() => {
+    const dir = sortDir === "asc" ? 1 : -1;
+    return [...rows].sort((a, b) => {
+      if (sortCol === "branch") return dir * branchName(a.bid).localeCompare(branchName(b.bid));
+      if (sortCol === "staff") return dir * (a.staff - b.staff);
+      if (sortCol === "target") return dir * (a.tgt - b.tgt);
+      if (sortCol === "pct") return dir * (a.pct - b.pct);
+      if (sortCol === "status") return dir * ((a.met ? 1 : 0) - (b.met ? 1 : 0) || a.pct - b.pct);
+      return dir * (a.billing - b.billing);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows, sortCol, sortDir]);
+
+  const SortHead = ({ col, right, children }) => (
+    <TH right={right}>
+      <span onClick={() => clickSort(col)} style={{ cursor: "pointer", userSelect: "none", whiteSpace: "nowrap", color: sortCol === col ? "var(--accent)" : "inherit" }}>
+        {children}<span style={{ fontSize: 9, marginLeft: 3 }}>{sortCol === col ? (sortDir === "asc" ? "▲" : "▼") : "⇅"}</span>
+      </span>
+    </TH>
+  );
+
   if (!rows.length) return null;
   return (
     <div>
@@ -440,13 +468,16 @@ function BranchTargetsSection({ rows, branchName, branchesById, isAdmin, branche
             <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, minWidth: 640 }}>
               <thead>
                 <tr>
-                  <TH>Branch</TH><TH right>Staff</TH><TH right>Billing</TH>
-                  {isAdmin && <TH right>Target (3×)</TH>}
-                  <TH right>Achieved</TH><TH right>Status</TH>
+                  <SortHead col="branch">Branch</SortHead>
+                  <SortHead col="staff" right>Staff</SortHead>
+                  <SortHead col="billing" right>Billing</SortHead>
+                  {isAdmin && <SortHead col="target" right>Target (3×)</SortHead>}
+                  <SortHead col="pct" right>Achieved</SortHead>
+                  <SortHead col="status" right>Status</SortHead>
                 </tr>
               </thead>
               <tbody>
-                {rows.map(b => (
+                {sorted.map(b => (
                   <tr key={b.bid}>
                     <TD style={{ fontWeight: 700 }}>{branchName(b.bid)}
                       <span style={{ fontSize: 9, fontWeight: 800, textTransform: "uppercase", letterSpacing: 0.5, marginLeft: 8,
