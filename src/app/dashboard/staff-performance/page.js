@@ -34,7 +34,12 @@ export default function StaffPerformancePage() {
   const [filterMonth, setFilterMonth] = useState(NOW.getMonth() + 1);
 
   const [search, setSearch] = useState("");
-  const [sortCol, setSortCol] = useState("billing"); // billing | incentive | pct | name
+  const [sortCol, setSortCol] = useState("billing"); // billing | incentive | material | salary | pct | days | leaves | name | branch | role
+  const [sortDir, setSortDir] = useState("desc");
+  const applySort = (col) => {
+    if (sortCol === col) setSortDir(d => (d === "asc" ? "desc" : "asc"));
+    else { setSortCol(col); setSortDir(["name", "branch", "role"].includes(col) ? "asc" : "desc"); }
+  };
   const [statusFilter, setStatusFilter] = useState("all"); // all | active | inactive
   const [typeFilter, setTypeFilter] = useState("all"); // all | mens | unisex
   const [targetFilter, setTargetFilter] = useState("all"); // all | met | notmet
@@ -191,15 +196,23 @@ export default function StaffPerformancePage() {
       (r.s.name || "").toLowerCase().includes(q) ||
       branchName(r.branchId).toLowerCase().includes(q) ||
       (r.s.role || "").toLowerCase().includes(q));
+    const dir = sortDir === "asc" ? 1 : -1;
     return [...list].sort((a, b) => {
-      if (sortCol === "name") return (a.s.name || "").localeCompare(b.s.name || "");
-      if (sortCol === "branch") return branchName(a.branchId).localeCompare(branchName(b.branchId)) || b.billing - a.billing;
-      if (sortCol === "incentive") return b.incentive - a.incentive;
-      if (sortCol === "pct") return b.pct - a.pct;
-      return b.billing - a.billing;
+      switch (sortCol) {
+        case "name": return dir * (a.s.name || "").localeCompare(b.s.name || "");
+        case "branch": return dir * branchName(a.branchId).localeCompare(branchName(b.branchId));
+        case "role": return dir * (a.s.role || "").localeCompare(b.s.role || "");
+        case "incentive": return dir * (a.incentive - b.incentive);
+        case "material": return dir * (a.material - b.material);
+        case "salary": return dir * (a.salary - b.salary);
+        case "leaves": return dir * (a.leaveDays - b.leaveDays);
+        case "pct": return dir * (a.pct - b.pct);
+        case "days": return dir * (a.daysBilled - b.daysBilled);
+        default: return dir * (a.billing - b.billing);
+      }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, search, sortCol, typeFilter, targetFilter, branchesById]);
+  }, [rows, search, sortCol, sortDir, typeFilter, targetFilter, branchesById]);
 
   // Met / not-met counts over the current type + status + search context.
   const targetCounts = useMemo(() => {
@@ -340,7 +353,7 @@ export default function StaffPerformancePage() {
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <span style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Sort</span>
-            <ToggleGroup options={[["billing", "Billing"], ["incentive", "Incentive"], ["pct", "Target %"], ["name", "Name"], ["branch", "Branch"]]} value={sortCol} onChange={setSortCol} />
+            <ToggleGroup options={[["billing", "Billing"], ["incentive", "Incentive"], ["pct", "Target %"], ["name", "Name"], ["branch", "Branch"]]} value={sortCol} onChange={applySort} />
           </div>
           {/* Save / clear the current filter preset for future visits */}
           <div style={{ display: "flex", alignItems: "center", gap: 8, paddingLeft: 8, borderLeft: "1px solid var(--border)" }}>
@@ -365,11 +378,11 @@ export default function StaffPerformancePage() {
 
       {/* Active section */}
       {statusFilter !== "inactive" && (
-        <StaffSection title="Active" color="var(--green)" rows={active} isAdmin={isAdmin} branchName={branchName} onOpen={setSelectedId} onSalaryClick={setSalaryStaffId} />
+        <StaffSection title="Active" color="var(--green)" rows={active} isAdmin={isAdmin} branchName={branchName} onOpen={setSelectedId} onSalaryClick={setSalaryStaffId} sortCol={sortCol} sortDir={sortDir} onSort={applySort} />
       )}
       {/* Inactive section */}
       {statusFilter !== "active" && (
-        <StaffSection title="Inactive" color="var(--red)" rows={inactive} isAdmin={isAdmin} branchName={branchName} onOpen={setSelectedId} onSalaryClick={setSalaryStaffId} />
+        <StaffSection title="Inactive" color="var(--red)" rows={inactive} isAdmin={isAdmin} branchName={branchName} onOpen={setSelectedId} onSalaryClick={setSalaryStaffId} sortCol={sortCol} sortDir={sortDir} onSort={applySort} />
       )}
 
       {/* Detail modal */}
@@ -512,7 +525,14 @@ function BranchTargetsSection({ rows, branchName, branchesById, isAdmin, branche
   );
 }
 
-function StaffSection({ title, color, rows, isAdmin, branchName, onOpen, onSalaryClick }) {
+function StaffSection({ title, color, rows, isAdmin, branchName, onOpen, onSalaryClick, sortCol, sortDir, onSort }) {
+  const SortHead = ({ col, right, children }) => (
+    <TH right={right}>
+      <span onClick={() => onSort?.(col)} style={{ cursor: "pointer", userSelect: "none", whiteSpace: "nowrap", color: sortCol === col ? "var(--accent)" : "inherit" }}>
+        {children}<span style={{ fontSize: 9, marginLeft: 3 }}>{sortCol === col ? (sortDir === "asc" ? "▲" : "▼") : "⇅"}</span>
+      </span>
+    </TH>
+  );
   return (
     <div>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
@@ -528,10 +548,10 @@ function StaffSection({ title, color, rows, isAdmin, branchName, onOpen, onSalar
             <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, minWidth: 720 }}>
               <thead>
                 <tr>
-                  <TH>Staff</TH><TH>Branch</TH><TH>Role</TH>
-                  <TH right>Billing</TH><TH right>Incentive</TH><TH right>Material</TH>
-                  {isAdmin && <TH right>Salary</TH>}
-                  <TH right>Leaves</TH><TH right>Target</TH><TH right>Days</TH><TH></TH>
+                  <SortHead col="name">Staff</SortHead><SortHead col="branch">Branch</SortHead><SortHead col="role">Role</SortHead>
+                  <SortHead col="billing" right>Billing</SortHead><SortHead col="incentive" right>Incentive</SortHead><SortHead col="material" right>Material</SortHead>
+                  {isAdmin && <SortHead col="salary" right>Salary</SortHead>}
+                  <SortHead col="leaves" right>Leaves</SortHead><SortHead col="pct" right>Target</SortHead><SortHead col="days" right>Days</SortHead><TH></TH>
                 </tr>
               </thead>
               <tbody>
