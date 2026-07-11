@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, Fragment } from "react";
 import { collection, onSnapshot, query, orderBy, deleteDoc, doc, updateDoc, writeBatch } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
@@ -19,6 +19,10 @@ export default function LeavesPage() {
   const [globalSettings, setGlobalSettings] = useState(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("pending");
+  // Group the leaves table by employee (expandable). On by default.
+  const [groupByStaff, setGroupByStaff] = useState(true);
+  const [expandedStaff, setExpandedStaff] = useState(() => new Set());
+  const toggleExpand = (sid) => setExpandedStaff(prev => { const n = new Set(prev); n.has(sid) ? n.delete(sid) : n.add(sid); return n; });
 
   // Apply leave form
   const [showForm, setShowForm] = useState(false);
@@ -125,6 +129,46 @@ export default function LeavesPage() {
       : activeTab === "approved" ? approved
       : rejected;
     return pool.filter(l => inPeriod(l.date));
+  })();
+
+  // Per-leave paid vs loss-of-pay split. Within each staff+month, approved
+  // leave-days fill the monthly quota (paid) in date order; anything beyond is
+  // loss of pay. Mirrors the payroll pro-rata rule.
+  const paidLopByLeaveId = useMemo(() => {
+    const map = {};
+    const byKey = {};
+    leaves.filter(l => l.status === "approved" && l.date).forEach(l => {
+      const key = `${l.staff_id}|${l.date.slice(0, 7)}`;
+      (byKey[key] ||= []).push(l);
+    });
+    Object.entries(byKey).forEach(([key, arr]) => {
+      const staffId = key.split("|")[0];
+      const s = staff.find(x => x.id === staffId);
+      const quota = s ? getStaffQuota(s) : 2;
+      arr.sort((a, b) => (a.date || "").localeCompare(b.date || "") || (a.id || "").localeCompare(b.id || ""));
+      let cum = 0;
+      arr.forEach(l => {
+        const days = parseInt(l.days) || 1;
+        const paid = Math.max(0, Math.min(days, quota - cum));
+        map[l.id] = { paidDays: paid, lopDays: days - paid };
+        cum += days;
+      });
+    });
+    return map;
+  }, [leaves, staff, branches, globalSettings]);
+
+  // Group the visible leaves by employee with paid / LOP / day totals.
+  const staffGroups = (() => {
+    const m = new Map();
+    displayLeaves.forEach(l => { if (!m.has(l.staff_id)) m.set(l.staff_id, []); m.get(l.staff_id).push(l); });
+    return [...m.entries()].map(([sid, ls]) => {
+      const s = staff.find(x => x.id === sid);
+      const b = s ? branches.find(x => x.id === s.branch_id) : null;
+      const totalDays = ls.reduce((sum, l) => sum + (parseInt(l.days) || 1), 0);
+      const paidDays = ls.reduce((sum, l) => sum + (paidLopByLeaveId[l.id]?.paidDays || 0), 0);
+      const lopDays = ls.reduce((sum, l) => sum + (paidLopByLeaveId[l.id]?.lopDays || 0), 0);
+      return { sid, s, b, ls: ls.sort((a, b2) => (a.date || "").localeCompare(b2.date || "")), count: ls.length, totalDays, paidDays, lopDays };
+    }).sort((a, b) => (a.s?.name || "").localeCompare(b.s?.name || ""));
   })();
 
   const handleApprove = async (id) => {
@@ -346,6 +390,64 @@ export default function LeavesPage() {
   const eligibleStaff = staff.filter(s => form.branch_ids.includes(s.branch_id));
 
   const statusColor = { pending: "orange", approved: "green", rejected: "red" };
+
+  // A single leave row. `child` indents it under an expanded staff group and
+  // hides the (redundant) staff name, showing a paid / loss-of-pay pill instead.
+  const renderLeaveRow = (l, { child = false } = {}) => {
+    const s = staff.find(x => x.id === l.staff_id);
+    const pl = paidLopByLeaveId[l.id];
+    return (
+      <tr key={l.id} style={child ? { background: "var(--bg2)" } : undefined}>
+        <TD style={{ fontWeight: 600, paddingLeft: child ? 34 : undefined, color: child ? "var(--text3)" : "var(--text)" }}>
+          {child ? <span style={{ fontSize: 11 }}>↳</span> : (s ? s.name : l.staff_id)}
+        </TD>
+        <TD style={{ fontWeight: 500, whiteSpace: "nowrap" }}>{l.date || "—"}</TD>
+        <TD right style={{ color: "var(--blue)", fontWeight: 600 }}>{l.days || 1}</TD>
+        <TD style={{ fontSize: 11, color: "var(--text2)" }}>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+            {l.type || "Leave"}
+            {l.status === "approved" && pl && (
+              pl.lopDays > 0
+                ? <Pill label={pl.paidDays > 0 ? `LOP ${pl.lopDays}` : "Loss of Pay"} color="red" />
+                : <Pill label="Paid" color="green" />
+            )}
+          </span>
+        </TD>
+        <TD style={{ fontSize: 11, color: "var(--text3)", maxWidth: 180 }}>{l.reason || "—"}</TD>
+        <TD><Pill label={l.status || "pending"} color={statusColor[l.status] || "orange"} /></TD>
+        {canAction && (
+          <TD sticky>
+            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              {l.status === "pending" ? (
+                <>
+                  <button onClick={() => handleApprove(l.id)} title="Approve"
+                    style={{ display: "flex", alignItems: "center", gap: 4, padding: "5px 10px", borderRadius: 6, background: "rgba(74,222,128,0.15)", border: "1px solid rgba(74,222,128,0.35)", color: "var(--green)", cursor: "pointer", fontWeight: 700, fontSize: 11 }}>
+                    <Icon name="check" size={12} /> Approve
+                  </button>
+                  <button onClick={() => handleReject(l.id)} title="Reject"
+                    style={{ display: "flex", alignItems: "center", gap: 4, padding: "5px 10px", borderRadius: 6, background: "rgba(248,113,113,0.12)", border: "1px solid rgba(248,113,113,0.3)", color: "var(--red)", cursor: "pointer", fontWeight: 700, fontSize: 11 }}>
+                    <Icon name="close" size={12} /> Reject
+                  </button>
+                </>
+              ) : l.processed ? (
+                <button onClick={() => handleUnmarkProcessed(l.id)} title="Click to untick (unmark processed)"
+                  style={{ display: "flex", alignItems: "center", gap: 4, padding: "5px 10px", borderRadius: 6, background: "rgba(74,222,128,0.18)", border: "1px solid rgba(74,222,128,0.45)", color: "var(--green)", cursor: "pointer", fontWeight: 700, fontSize: 11 }}>
+                  <Icon name="check" size={12} /> Processed
+                </button>
+              ) : (
+                <button onClick={() => handleMarkProcessed(l)} title="Mark as processed"
+                  style={{ display: "flex", alignItems: "center", gap: 4, padding: "5px 10px", borderRadius: 6, background: "var(--bg4)", border: "1px dashed var(--border2)", color: "var(--text2)", cursor: "pointer", fontWeight: 700, fontSize: 11 }}>
+                  <Icon name="check" size={12} /> Tick
+                </button>
+              )}
+              <IconBtn name="edit" title="Edit record" variant="secondary" onClick={() => setEditLeave({ id: l.id, staff_id: l.staff_id, date: l.date || "", days: l.days || 1, type: l.type || "Leave 1", reason: l.reason || "" })} />
+              {canAction && <IconBtn name="del" title="Delete record" variant="danger" onClick={() => handleDelete(l.id)} />}
+            </div>
+          </TD>
+        )}
+      </tr>
+    );
+  };
 
   if (loading) return <VLoader fullscreen label="Loading Leaves" />;
 
@@ -636,6 +738,15 @@ export default function LeavesPage() {
         ))}
       </div>
 
+      {/* Group toggle */}
+      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 10 }}>
+        <label title="Group rows by employee — expand to see each date, paid days and loss of pay"
+          style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "8px 14px", borderRadius: 10, background: "var(--bg3)", border: `1px solid ${groupByStaff ? "var(--accent)" : "var(--border)"}`, cursor: "pointer", userSelect: "none" }}>
+          <input type="checkbox" checked={groupByStaff} onChange={e => setGroupByStaff(e.target.checked)} style={{ accentColor: "var(--accent)", cursor: "pointer" }} />
+          <span style={{ fontSize: 11, fontWeight: 700, color: groupByStaff ? "var(--accent)" : "var(--text2)", textTransform: "uppercase", letterSpacing: 0.5 }}>Group by Employee</span>
+        </label>
+      </div>
+
       {/* Leaves Table */}
       <Card>
         <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12.5 }}>
@@ -651,56 +762,49 @@ export default function LeavesPage() {
             </tr>
           </thead>
           <tbody>
-            {sort.sortRows(displayLeaves, {
+            {/* Flat view */}
+            {!groupByStaff && sort.sortRows(displayLeaves, {
               staff:  l => (staff.find(x => x.id === l.staff_id)?.name || "").toLowerCase(),
               date:   l => l.date || "",
               days:   l => Number(l.days) || 1,
               type:   l => (l.type || "").toLowerCase(),
               reason: l => (l.reason || "").toLowerCase(),
               status: l => l.status || "pending",
-            }).map(l => {
-              const s = staff.find(x => x.id === l.staff_id);
+            }).map(l => renderLeaveRow(l))}
+
+            {/* Grouped-by-employee view */}
+            {groupByStaff && staffGroups.map(g => {
+              const open = expandedStaff.has(g.sid);
               return (
-                <tr key={l.id}>
-                  <TD style={{ fontWeight: 600 }}>{s ? s.name : l.staff_id}</TD>
-                  <TD style={{ fontWeight: 500, whiteSpace: "nowrap" }}>{l.date || "—"}</TD>
-                  <TD right style={{ color: "var(--blue)", fontWeight: 600 }}>{l.days || 1}</TD>
-                  <TD style={{ fontSize: 11, color: "var(--text2)" }}>{l.type || "Leave"}</TD>
-                  <TD style={{ fontSize: 11, color: "var(--text3)", maxWidth: 180 }}>{l.reason || "—"}</TD>
-                  <TD><Pill label={l.status || "pending"} color={statusColor[l.status] || "orange"} /></TD>
-                  {canAction && (
-                    <TD sticky>
-                      <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                        {l.status === "pending" ? (
-                          <>
-                            <button onClick={() => handleApprove(l.id)} title="Approve"
-                              style={{ display: "flex", alignItems: "center", gap: 4, padding: "5px 10px", borderRadius: 6, background: "rgba(74,222,128,0.15)", border: "1px solid rgba(74,222,128,0.35)", color: "var(--green)", cursor: "pointer", fontWeight: 700, fontSize: 11 }}>
-                              <Icon name="check" size={12} /> Approve
-                            </button>
-                            <button onClick={() => handleReject(l.id)} title="Reject"
-                              style={{ display: "flex", alignItems: "center", gap: 4, padding: "5px 10px", borderRadius: 6, background: "rgba(248,113,113,0.12)", border: "1px solid rgba(248,113,113,0.3)", color: "var(--red)", cursor: "pointer", fontWeight: 700, fontSize: 11 }}>
-                              <Icon name="close" size={12} /> Reject
-                            </button>
-                          </>
-                        ) : l.processed ? (
-                          <button onClick={() => handleUnmarkProcessed(l.id)} title="Click to untick (unmark processed)"
-                            style={{ display: "flex", alignItems: "center", gap: 4, padding: "5px 10px", borderRadius: 6, background: "rgba(74,222,128,0.18)", border: "1px solid rgba(74,222,128,0.45)", color: "var(--green)", cursor: "pointer", fontWeight: 700, fontSize: 11 }}>
-                            <Icon name="check" size={12} /> Processed
-                          </button>
-                        ) : (
-                          <button onClick={() => handleMarkProcessed(l)} title="Mark as processed"
-                            style={{ display: "flex", alignItems: "center", gap: 4, padding: "5px 10px", borderRadius: 6, background: "var(--bg4)", border: "1px dashed var(--border2)", color: "var(--text2)", cursor: "pointer", fontWeight: 700, fontSize: 11 }}>
-                            <Icon name="check" size={12} /> Tick
-                          </button>
-                        )}
-                        <IconBtn name="edit" title="Edit record" variant="secondary" onClick={() => setEditLeave({ id: l.id, staff_id: l.staff_id, date: l.date || "", days: l.days || 1, type: l.type || "Leave 1", reason: l.reason || "" })} />
-                        {canAction && <IconBtn name="del" title="Delete record" variant="danger" onClick={() => handleDelete(l.id)} />}
-                      </div>
+                <Fragment key={g.sid}>
+                  <tr onClick={() => toggleExpand(g.sid)} style={{ cursor: "pointer", background: open ? "var(--bg3)" : "transparent" }}
+                    onMouseEnter={e => { if (!open) e.currentTarget.style.background = "var(--bg4)"; }}
+                    onMouseLeave={e => { if (!open) e.currentTarget.style.background = "transparent"; }}>
+                    <TD style={{ fontWeight: 700 }}>
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                        <span style={{ fontSize: 10, color: "var(--text3)", transition: "transform .15s", transform: open ? "rotate(90deg)" : "none" }}>▶</span>
+                        {g.s ? g.s.name : g.sid}
+                        {g.b && <span style={{ fontSize: 10, color: "var(--text3)", fontWeight: 600 }}>· {g.b.name?.replace("V-CUT ", "")}</span>}
+                      </span>
                     </TD>
-                  )}
-                </tr>
+                    <TD style={{ color: "var(--text3)", fontSize: 11, fontWeight: 700 }}>{g.count} leave{g.count === 1 ? "" : "s"}</TD>
+                    <TD right style={{ color: "var(--blue)", fontWeight: 800 }}>{g.totalDays}</TD>
+                    <TD>
+                      <span style={{ display: "inline-flex", gap: 6, flexWrap: "wrap" }}>
+                        {g.paidDays > 0 && <Pill label={`Paid ${g.paidDays}`} color="green" />}
+                        {g.lopDays > 0 && <Pill label={`LOP ${g.lopDays}`} color="red" />}
+                        {g.paidDays === 0 && g.lopDays === 0 && <span style={{ fontSize: 11, color: "var(--text3)" }}>—</span>}
+                      </span>
+                    </TD>
+                    <TD />
+                    <TD style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700 }}>{open ? "Hide" : "View dates"}</TD>
+                    {canAction && <TD sticky />}
+                  </tr>
+                  {open && g.ls.map(l => renderLeaveRow(l, { child: true }))}
+                </Fragment>
               );
             })}
+
             {displayLeaves.length === 0 && (
               <tr>
                 <td colSpan={7} style={{ textAlign: "center", padding: 32, color: "var(--text3)" }}>
