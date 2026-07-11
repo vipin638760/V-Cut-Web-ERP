@@ -1423,6 +1423,7 @@ export default function BranchesPage() {
     if (brSortCol === "income") return brSortDir === "desc" ? b.i - a.i : a.i - b.i;
     if (brSortCol === "pl") return brSortDir === "desc" ? b.n - a.n : a.n - b.n;
     if (brSortCol === "expense") return brSortDir === "desc" ? b.e - a.e : a.e - b.e;
+    if (brSortCol === "targetPct") return brSortDir === "desc" ? b.targetPct - a.targetPct : a.targetPct - b.targetPct;
     return brSortDir === "desc" ? b.b.name.localeCompare(a.b.name) : a.b.name.localeCompare(b.b.name);
   });
 
@@ -4313,7 +4314,7 @@ export default function BranchesPage() {
           <SearchSelect
             value={brSortCol}
             onChange={v => setBrSortCol(v)}
-            options={[{ value: "name", label: "Name" }, { value: "income", label: "Income" }, { value: "pl", label: "Net P&L" }, { value: "expense", label: "Expenses" }]}
+            options={[{ value: "name", label: "Name" }, { value: "income", label: "Income" }, { value: "pl", label: "Net P&L" }, { value: "expense", label: "Expenses" }, { value: "targetPct", label: "Target %" }]}
             allowEmpty={false}
             buttonStyle={{ padding: "4px 8px", border: "1px solid var(--border2)", borderRadius: 16, fontSize: 11, background: "var(--bg4)", color: "var(--text)", fontFamily: "var(--font-outfit)" }}
           />
@@ -4322,7 +4323,7 @@ export default function BranchesPage() {
             title="Save current sort as default"
             onClick={() => {
               try { localStorage.setItem("vcut_branch_sort", JSON.stringify({ col: brSortCol, dir: brSortDir })); } catch {}
-              const colLabel = { income: "Income", pl: "Net P&L", expense: "Expenses", name: "Name" }[brSortCol] || brSortCol;
+              const colLabel = { income: "Income", pl: "Net P&L", expense: "Expenses", name: "Name", targetPct: "Target %" }[brSortCol] || brSortCol;
               toast({ title: "Default saved", message: `Branch sort: ${colLabel} ${brSortDir === "desc" ? "↓" : "↑"}`, type: "success" });
             }}
             style={{ padding: "4px 8px", borderRadius: 16, fontSize: 10, fontWeight: 700, background: "var(--bg4)", border: "1px solid var(--border2)", color: "var(--accent)", cursor: "pointer", letterSpacing: ".5px", textTransform: "uppercase" }}
