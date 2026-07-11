@@ -65,6 +65,7 @@ export default function PayablesPage() {
   const [branches, setBranches] = useState([]);
   const [payables, setPayables] = useState([]);
   const [fixedExpenses, setFixedExpenses] = useState([]);
+  const [expenseTypes, setExpenseTypes] = useState([]);
   const [loading, setLoading] = useState(true);
 
   const [month, setMonth] = useState(thisMonth());
@@ -82,6 +83,7 @@ export default function PayablesPage() {
         sn => { setPayables(sn.docs.map(d => ({ ...d.data(), id: d.id }))); setLoading(false); },
         () => setLoading(false)),
       onSnapshot(collection(db, "fixed_expenses"), sn => setFixedExpenses(sn.docs.map(d => ({ ...d.data(), id: d.id })))),
+      onSnapshot(collection(db, "expense_types"), sn => setExpenseTypes(sn.docs.map(d => ({ ...d.data(), id: d.id })))),
     ];
     return () => unsubs.forEach(u => u());
   }, []);
@@ -237,11 +239,20 @@ export default function PayablesPage() {
   const pullFixedBills = async () => {
     const existing = new Set(monthItemsAll.map(p => `${(p.category || "").toLowerCase()}|${p.branch_id || ""}`));
     const monthFixed = fixedExpenses.filter(e => (e.date || "").startsWith(month));
+    // Full fixed-column set the Operations "Fixed" tab renders: 8 core bills
+    // (with a branch-master fallback field) + any active custom expense_types
+    // tagged category "fixed" (no master fallback — value comes from fixed_expenses).
+    const cols = [
+      ...FIXED_BILLS,
+      ...expenseTypes
+        .filter(t => t.active !== false && t.category === "fixed" && !FIXED_BILLS.some(fb => fb.type === t.name))
+        .map(t => ({ type: t.name, field: null })),
+    ];
     const toAdd = [];
     branches.forEach(b => {
-      FIXED_BILLS.forEach(({ type, field }) => {
+      cols.forEach(({ type, field }) => {
         const rec = monthFixed.find(e => e.branch_id === b.id && e.type === type);
-        const amount = rec ? Number(rec.amount) || 0 : Number(b[field]) || 0;
+        const amount = rec ? Number(rec.amount) || 0 : (field ? Number(b[field]) || 0 : 0);
         if (amount <= 0) return;
         if (existing.has(`${type.toLowerCase()}|${b.id}`)) return;
         toAdd.push({ type, amount, branch: b });
