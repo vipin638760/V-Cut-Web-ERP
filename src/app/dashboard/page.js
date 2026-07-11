@@ -2573,16 +2573,9 @@ function SameDateCompareChart({ entries, branches = [], filterYear, filterMonth 
   const newest = monTotals[2], prev = monTotals[1];
   const delta = prev > 0 ? Math.round(((newest - prev) / prev) * 100) : null;
 
-  // Month directly before the oldest card (e.g. March for an Apr·May·Jun set)
-  // so even the first card can show a month-over-month change badge.
-  const before = shiftMonth(months[0].y, months[0].m, 1);
-  const beforeTotal = entries.reduce((s, e) => {
-    if (!e.date) return s;
-    const [ey, em] = e.date.split("-").map(Number);
-    if (ey !== before.y || em !== before.m) return s;
-    const matSale = (e.staff_billing || []).reduce((ss, sb) => ss + (sb.material || 0), 0);
-    return s + (e.online || 0) + (e.cash || 0) + matSale;
-  }, 0);
+  // Average total across the compared months — each card's badge shows how far
+  // that month sits above / below this group average.
+  const monAvg = monTotals.length ? monTotals.reduce((s, t) => s + t, 0) / monTotals.length : 0;
 
   const H = 200;
   const GROUP_GAP = 12;
@@ -2607,16 +2600,14 @@ function SameDateCompareChart({ entries, branches = [], filterYear, filterMonth 
         </div>
         <div style={{ display: "flex", gap: 10, alignItems: "stretch", flexWrap: "wrap" }}>
           {months.map((mo, i) => {
-            const prevTot = i > 0 ? monTotals[i - 1] : beforeTotal;
-            const prevLabel = i > 0 ? months[i - 1].label : new Date(before.y, before.m - 1, 1).toLocaleDateString("en-US", { month: "short" });
-            const moDelta = prevTot > 0 ? Math.round(((monTotals[i] - prevTot) / prevTot) * 100) : null;
+            const moDelta = monAvg > 0 ? Math.round(((monTotals[i] - monAvg) / monAvg) * 100) : null;
             return (
             <div key={i} style={{ display: "flex", flexDirection: "column", gap: 3, padding: "8px 12px", borderRadius: 10, background: "var(--bg3)", border: `1px solid ${COLORS[i]}55`, minWidth: 132 }}>
               <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
                 <span style={{ width: 10, height: 10, borderRadius: 3, background: COLORS[i] }} />
                 <span style={{ fontSize: 11, fontWeight: 800, color: "var(--text)" }}>{mo.label} {mo.y}</span>
                 {moDelta !== null && (
-                  <span title={`vs ${prevLabel}`} style={{ marginLeft: "auto", fontSize: 10, fontWeight: 800, color: moDelta >= 0 ? "var(--green)" : "var(--red)", background: moDelta >= 0 ? "rgba(74,222,128,0.12)" : "rgba(248,113,113,0.12)", borderRadius: 6, padding: "1px 6px", whiteSpace: "nowrap" }}>
+                  <span title={`vs ${months.map(m => m.label).join(" · ")} average (${INR(Math.round(monAvg))})`} style={{ marginLeft: "auto", fontSize: 10, fontWeight: 800, color: moDelta >= 0 ? "var(--green)" : "var(--red)", background: moDelta >= 0 ? "rgba(74,222,128,0.12)" : "rgba(248,113,113,0.12)", borderRadius: 6, padding: "1px 6px", whiteSpace: "nowrap" }}>
                     {moDelta >= 0 ? "▲" : "▼"} {Math.abs(moDelta)}%
                   </span>
                 )}
