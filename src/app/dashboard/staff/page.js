@@ -88,6 +88,30 @@ export default function StaffPage() {
   }, []);
 
 
+  // Deep-link from Payroll's "fix branch" action: ?edit=<staffId> opens that
+  // staff's edit form once the roster has loaded (one-shot).
+  const [editLinkDone, setEditLinkDone] = useState(false);
+  useEffect(() => {
+    if (editLinkDone || loading || !canEdit || staff.length === 0) return;
+    const params = new URLSearchParams(window.location.search);
+    const id = params.get("edit");
+    if (!id) { setEditLinkDone(true); return; }
+    const s = staff.find(x => x.id === id);
+    if (s) {
+      setForm({
+        name: s.name || "", branch_id: s.branch_id || "", role: s.role || "", mobile: s.mobile || "",
+        salary: s.salary || "", incentive_pct: s.incentive_pct ?? 10, target: s.target || "",
+        join: s.join || "", exit_date: s.exit_date || "",
+      });
+      setEditId(s.id);
+      setIncrement("");
+      setShowForm(true);
+    }
+    setEditLinkDone(true);
+    // Strip the param so a refresh doesn't re-open the form.
+    window.history.replaceState(null, "", window.location.pathname);
+  }, [loading, staff, canEdit, editLinkDone]);
+
   const statusRefMon = filterMode === "month" ? filterPrefix : filterYear + "-" + String(NOW.getMonth() + 1).padStart(2, "0");
 
   // Filtered list
