@@ -345,9 +345,12 @@ export default function PayrollTab() {
           return s.status !== 'inactive';
         });
         const totalEligible = eligibleByStatus.length;
+        // Gender defaults to "male" unless explicitly marked female — so only
+        // females need setting; everyone else counts as male automatically.
+        const genderOf = (s) => (s.gender || "").toLowerCase() === "female" ? "female" : "male";
         const visibleStaff = eligibleByStatus
           .filter(s => !empQ || (s.name || "").toLowerCase().includes(empQ))
-          .filter(s => genderFilter === "all" || (s.gender || "").toLowerCase() === genderFilter)
+          .filter(s => genderFilter === "all" || genderOf(s) === genderFilter)
           .filter(s => {
             if (paidFilter === "all") return true;
             const isPaid = !!getRelease(s.id);
@@ -358,8 +361,8 @@ export default function PayrollTab() {
         const paidPool = eligibleByStatus.filter(s => !empQ || (s.name || "").toLowerCase().includes(empQ));
         const paidCount = paidPool.filter(s => !!getRelease(s.id)).length;
         const unpaidCount = paidPool.length - paidCount;
-        const maleCount = paidPool.filter(s => (s.gender || "").toLowerCase() === "male").length;
         const femaleCount = paidPool.filter(s => (s.gender || "").toLowerCase() === "female").length;
+        const maleCount = paidPool.length - femaleCount;
 
         // Aggregate totals across the visible (filtered) roster — drives the KPI strip.
         const kpi = visibleStaff.reduce((acc, s) => {
