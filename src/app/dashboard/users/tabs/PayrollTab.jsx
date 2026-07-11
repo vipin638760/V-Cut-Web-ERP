@@ -159,6 +159,9 @@ export default function PayrollTab() {
   // Gender filter — "all" | "male" | "female" (staff.gender). Drives roster + KPIs.
   const [genderFilter, setGenderFilter] = useState("all");
 
+  // Hide staff whose net pay is ₹0 (e.g. no billing / fully advanced). On by default.
+  const [hideZeroPay, setHideZeroPay] = useState(true);
+
   // Multi-select for bulk release (staff_id set).
   const [selectedStaff, setSelectedStaff] = useState(() => new Set());
   const toggleStaff = (id) => setSelectedStaff(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
@@ -348,6 +351,18 @@ export default function PayrollTab() {
         // Gender defaults to "male" unless explicitly marked female — so only
         // females need setting; everyone else counts as male automatically.
         const genderOf = (s) => (s.gender || "").toLowerCase() === "female" ? "female" : "male";
+        // Net pay for a staff this period (earned − approved advances) — used by the "hide ₹0 pay" toggle.
+        const netOf = (s) => {
+          let earned = 0;
+          if (filterMode === 'year') {
+            const limit = (filterYear === new Date().getFullYear()) ? new Date().getMonth() + 1 : 12;
+            for (let m = 1; m <= limit; m++) earned += proRataSalary(s, `${filterYear}-${String(m).padStart(2,'0')}`, branches, salHistory, staff, {}, leaves, entries);
+          } else {
+            earned = proRataSalary(s, filterPrefix, branches, salHistory, staff, {}, leaves, entries);
+          }
+          const advApproved = getStaffAdvances(s.id).filter(a => a.status === 'approved').reduce((sum, a) => sum + Number(a.amount), 0);
+          return earned - advApproved;
+        };
         const visibleStaff = eligibleByStatus
           .filter(s => !empQ || (s.name || "").toLowerCase().includes(empQ))
           .filter(s => genderFilter === "all" || genderOf(s) === genderFilter)
@@ -356,6 +371,7 @@ export default function PayrollTab() {
             const isPaid = !!getRelease(s.id);
             return paidFilter === "paid" ? isPaid : !isPaid;
           })
+          .filter(s => !hideZeroPay || netOf(s) > 0)
           .sort((a, b) => a.name.localeCompare(b.name));
         // Paid/unpaid counts across the search-filtered roster (before the paid filter) for the toggle badges.
         const paidPool = eligibleByStatus.filter(s => !empQ || (s.name || "").toLowerCase().includes(empQ));
@@ -504,6 +520,13 @@ export default function PayrollTab() {
               options={[["all", "All"], ["male", `Male${maleCount ? ` · ${maleCount}` : ""}`], ["female", `Female${femaleCount ? ` · ${femaleCount}` : ""}`]]}
               value={genderFilter} onChange={setGenderFilter}
               colors={{ male: "linear-gradient(135deg,#2f6fb0,#60a5fa)", female: "linear-gradient(135deg,#be5bd4,#e879f9)" }} />
+
+            {/* Hide ₹0 net-pay staff — on by default */}
+            <label title="Hide staff with ₹0 net pay this period"
+              style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "9px 14px", borderRadius: 10, background: "var(--bg3)", border: `1px solid ${hideZeroPay ? "var(--accent)" : "var(--border)"}`, cursor: "pointer", userSelect: "none" }}>
+              <input type="checkbox" checked={hideZeroPay} onChange={e => setHideZeroPay(e.target.checked)} style={{ accentColor: "var(--accent)", cursor: "pointer" }} />
+              <span style={{ fontSize: 11, fontWeight: 700, color: hideZeroPay ? "var(--accent)" : "var(--text2)", textTransform: "uppercase", letterSpacing: 0.5, whiteSpace: "nowrap" }}>Hide ₹0 Pay</span>
+            </label>
 
             {/* Bulk release bar — only shows when at least one eligible row is ticked */}
             {selectedIds.length > 0 && (
