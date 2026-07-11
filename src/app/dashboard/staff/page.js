@@ -56,7 +56,7 @@ export default function StaffPage() {
   const [attendanceModal, setAttendanceModal] = useState(null); // { staff, month: "YYYY-MM" }
 
   // Form state
-  const [form, setForm] = useState({ name: "", branch_id: "", role: "", mobile: "", salary: "", incentive_pct: "10", target: "", join: "", exit_date: "" });
+  const [form, setForm] = useState({ name: "", branch_id: "", role: "", mobile: "", gender: "", salary: "", incentive_pct: "10", target: "", join: "", exit_date: "" });
   const [increment, setIncrement] = useState("");
 
   // Status toggle pending state
@@ -99,7 +99,7 @@ export default function StaffPage() {
     const s = staff.find(x => x.id === id);
     if (s) {
       setForm({
-        name: s.name || "", branch_id: s.branch_id || "", role: s.role || "", mobile: s.mobile || "",
+        name: s.name || "", branch_id: s.branch_id || "", role: s.role || "", mobile: s.mobile || "", gender: s.gender || "",
         salary: s.salary || "", incentive_pct: s.incentive_pct ?? 10, target: s.target || "",
         join: s.join || "", exit_date: s.exit_date || "",
       });
@@ -179,6 +179,7 @@ export default function StaffPage() {
       branch_id: form.branch_id,
       role: form.role,
       mobile: form.mobile,
+      gender: form.gender || null,
       salary: effectiveSalary,
       incentive_pct: Number(form.incentive_pct) || 10,
       target: Number(form.target) || 50000,
@@ -224,7 +225,7 @@ export default function StaffPage() {
       const savedName = payload.name;
       setShowForm(false);
       setEditId(null);
-      setForm({ name: "", branch_id: "", role: "", mobile: "", salary: "", incentive_pct: "10", target: "", join: "", exit_date: "" });
+      setForm({ name: "", branch_id: "", role: "", mobile: "", gender: "", salary: "", incentive_pct: "10", target: "", join: "", exit_date: "" });
       toast({ title: wasEdit ? "Record Updated" : "Employee Added", message: `${savedName} has been ${wasEdit ? 'updated' : 'added'} successfully.`, type: "success" });
     } catch (err) {
       confirm({ title: "Save Failed", message: err.message, confirmText: "OK", cancelText: "Close", type: "danger", onConfirm: () => {} });
@@ -233,7 +234,7 @@ export default function StaffPage() {
 
   const handleEdit = (s) => {
     setForm({
-      name: s.name || "", branch_id: s.branch_id || "", role: s.role || "", mobile: s.mobile || "",
+      name: s.name || "", branch_id: s.branch_id || "", role: s.role || "", mobile: s.mobile || "", gender: s.gender || "",
       salary: s.salary || "", incentive_pct: s.incentive_pct ?? 10, target: s.target || "",
       join: s.join || "", exit_date: s.exit_date || "",
     });
@@ -439,7 +440,7 @@ export default function StaffPage() {
 
         <div style={{ marginLeft: "auto", display: "flex", gap: 12 }}>
           {canEdit && (
-            <button onClick={() => { setShowForm(true); setEditId(null); setForm({ name: "", branch_id: "", role: "", mobile: "", salary: "", incentive_pct: "10", target: "", join: new Date().toISOString().split("T")[0], exit_date: "" }); }}
+            <button onClick={() => { setShowForm(true); setEditId(null); setForm({ name: "", branch_id: "", role: "", mobile: "", gender: "", salary: "", incentive_pct: "10", target: "", join: new Date().toISOString().split("T")[0], exit_date: "" }); }}
               style={{ padding: "8px 20px", fontSize: 13, borderRadius: 10, background: "var(--accent)", color: "#000", border: "none", cursor: "pointer", fontWeight: 800, display: "flex", alignItems: "center", gap: 8, boxShadow: "var(--accent-glow)" }}>
               <Icon name="plus" size={16} /> Add Staff Member
             </button>
@@ -466,7 +467,22 @@ export default function StaffPage() {
               />
             </FormField>
           </div>
-          <FormField label="Mobile Number"><input value={form.mobile} onChange={e => setForm({ ...form, mobile: e.target.value })} placeholder="9999999999" /></FormField>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+            <FormField label="Mobile Number"><input value={form.mobile} onChange={e => setForm({ ...form, mobile: e.target.value })} placeholder="9999999999" /></FormField>
+            <FormField label="Gender">
+              <div style={{ display: "flex", gap: 8 }}>
+                {[["male", "Male"], ["female", "Female"]].map(([val, lbl]) => {
+                  const on = form.gender === val;
+                  return (
+                    <button key={val} type="button" onClick={() => setForm({ ...form, gender: on ? "" : val })}
+                      style={{ flex: 1, padding: "10px 12px", borderRadius: 10, border: `1px solid ${on ? "var(--accent)" : "var(--border)"}`, background: on ? "rgba(var(--accent-rgb),0.12)" : "var(--bg3)", color: on ? "var(--accent)" : "var(--text2)", fontSize: 12, fontWeight: 700, cursor: "pointer", letterSpacing: 0.3 }}>
+                      {lbl}
+                    </button>
+                  );
+                })}
+              </div>
+            </FormField>
+          </div>
 
           {isAdmin && (
             <>
