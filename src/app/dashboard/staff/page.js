@@ -215,7 +215,8 @@ export default function StaffPage() {
             effective_from: effectiveFrom,
             changed_by: currentUser?.name || "admin",
             changed_at: new Date().toISOString(),
-            note: isInitialAdminSetup ? "Initial salary set by admin (backdated to joining date)" : undefined,
+            // Firestore rejects `undefined` — only include note when there's one.
+            note: isInitialAdminSetup ? "Initial salary set by admin (backdated to joining date)" : null,
           });
         }
       } else {
