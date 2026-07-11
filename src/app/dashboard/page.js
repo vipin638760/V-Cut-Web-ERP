@@ -2595,11 +2595,19 @@ function SameDateCompareChart({ entries, branches = [], filterYear, filterMonth 
           <div style={{ fontSize: 10, color: "var(--text3)", fontWeight: 600, marginTop: 2 }}>Prior 3 completed months — {new Date(filterYear, filterMonth - 1, 1).toLocaleDateString("en-US", { month: "long" })} has its own chart above</div>
         </div>
         <div style={{ display: "flex", gap: 10, alignItems: "stretch", flexWrap: "wrap" }}>
-          {months.map((mo, i) => (
+          {months.map((mo, i) => {
+            const prevTot = i > 0 ? monTotals[i - 1] : 0;
+            const moDelta = i > 0 && prevTot > 0 ? Math.round(((monTotals[i] - prevTot) / prevTot) * 100) : null;
+            return (
             <div key={i} style={{ display: "flex", flexDirection: "column", gap: 3, padding: "8px 12px", borderRadius: 10, background: "var(--bg3)", border: `1px solid ${COLORS[i]}55`, minWidth: 132 }}>
               <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
                 <span style={{ width: 10, height: 10, borderRadius: 3, background: COLORS[i] }} />
                 <span style={{ fontSize: 11, fontWeight: 800, color: "var(--text)" }}>{mo.label} {mo.y}</span>
+                {moDelta !== null && (
+                  <span title={`vs ${months[i - 1].label}`} style={{ marginLeft: "auto", fontSize: 10, fontWeight: 800, color: moDelta >= 0 ? "var(--green)" : "var(--red)", background: moDelta >= 0 ? "rgba(74,222,128,0.12)" : "rgba(248,113,113,0.12)", borderRadius: 6, padding: "1px 6px", whiteSpace: "nowrap" }}>
+                    {moDelta >= 0 ? "▲" : "▼"} {Math.abs(moDelta)}%
+                  </span>
+                )}
               </div>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 10 }}>
                 <span style={{ color: "var(--text3)", fontWeight: 700 }}>Total</span>
@@ -2614,7 +2622,8 @@ function SameDateCompareChart({ entries, branches = [], filterYear, filterMonth 
                 <span style={{ color: "var(--green)", fontWeight: 800 }}>{monStats[i].bestVal > 0 ? `${mo.label} ${monStats[i].bestDay} · ${INR(monStats[i].bestVal)}` : "—"}</span>
               </div>
             </div>
-          ))}
+            );
+          })}
           {delta !== null && (
             <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", textAlign: "right", paddingLeft: 4 }}>
               <div style={{ fontSize: 9, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, fontWeight: 700 }}>Month vs Prev</div>
