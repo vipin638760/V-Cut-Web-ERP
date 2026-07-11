@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState, Fragment, useRef } from "react";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import { collection, onSnapshot, doc, setDoc, addDoc, deleteDoc, query, orderBy } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useCurrentUser, getCurrentUser } from "@/lib/currentUser";
@@ -172,6 +172,8 @@ export default function PayrollTab() {
   const currentUser = useCurrentUser() || {};
   const isAdmin = currentUser.role === "admin";
   const isAccountant = currentUser.role === "accountant";
+  const canEditStaff = isAdmin || isAccountant;
+  const router = useRouter();
 
   useEffect(() => {
     if (!db) return;
@@ -649,7 +651,18 @@ export default function PayrollTab() {
                       ) : <span style={{ opacity: 0 }}>·</span>}
                     </TD>
                     <TD style={{ fontWeight: 700 }}>{s.name}</TD>
-                    <TD style={{ color: "var(--text3)", fontSize: 11 }}>{b?.name?.replace("V-CUT ","") || "—"}</TD>
+                    <TD style={{ color: "var(--text3)", fontSize: 11 }}>
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                        {b?.name?.replace("V-CUT ","") || "—"}
+                        {canEditStaff && (
+                          <button onClick={() => router.push(`/dashboard/staff?edit=${s.id}`)}
+                            title="Wrong branch? Fix in Staff Management"
+                            style={{ display: "inline-flex", alignItems: "center", gap: 3, padding: "2px 7px", borderRadius: 6, background: "var(--bg4)", border: "1px solid var(--border)", color: "var(--accent)", cursor: "pointer", fontSize: 9, fontWeight: 800, textTransform: "uppercase", letterSpacing: 0.5, lineHeight: 1.4 }}>
+                            <Icon name="edit" size={10} /> Fix
+                          </button>
+                        )}
+                      </span>
+                    </TD>
                     {!isAccountant && <TD right style={{ color: "var(--text3)" }}>{INR(s.salary)}</TD>}
                     <TD right style={{ fontWeight: 600, fontFamily: "var(--font-headline, var(--font-outfit))" }}>
                       <button onClick={() => setEarnModal(s)} title="How is this earned salary calculated?"
