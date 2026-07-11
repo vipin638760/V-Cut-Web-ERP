@@ -5,7 +5,7 @@ import { collection, onSnapshot, doc, setDoc, addDoc, deleteDoc, query, orderBy 
 import { db } from "@/lib/firebase";
 import { useCurrentUser, getCurrentUser } from "@/lib/currentUser";
 import { INR, proRataSalary, makeFilterPrefix, staffStatusForMonth, staffLeavesInMonth, branchSalaryShare, salaryByBranchForMonth, getStaffSalaryForMonth, presentDaysByBranch } from "@/lib/calculations";
-import { Card, Pill, TH, TD, PeriodWidget, Modal, Icon, useConfirm, useToast, useSort } from "@/components/ui";
+import { Card, Pill, TH, TD, PeriodWidget, Modal, Icon, useConfirm, useToast, useSort, ToggleGroup } from "@/components/ui";
 import VLoader from "@/components/VLoader";
 import AttendanceCalendarModal from "@/components/AttendanceCalendarModal";
 
@@ -151,6 +151,10 @@ export default function PayrollTab() {
 
   // Free-text employee search — filters visibleStaff by name (case-insensitive).
   const [employeeSearch, setEmployeeSearch] = useState("");
+
+  // Paid / not-paid filter — "all" | "paid" | "unpaid". A staff is "paid" when a
+  // payroll_release exists for this period. Drives roster + KPI (Net Payable) totals.
+  const [paidFilter, setPaidFilter] = useState("all");
 
   // Multi-select for bulk release (staff_id set).
   const [selectedStaff, setSelectedStaff] = useState(() => new Set());
@@ -338,7 +342,16 @@ export default function PayrollTab() {
         const totalEligible = eligibleByStatus.length;
         const visibleStaff = eligibleByStatus
           .filter(s => !empQ || (s.name || "").toLowerCase().includes(empQ))
+          .filter(s => {
+            if (paidFilter === "all") return true;
+            const isPaid = !!getRelease(s.id);
+            return paidFilter === "paid" ? isPaid : !isPaid;
+          })
           .sort((a, b) => a.name.localeCompare(b.name));
+        // Paid/unpaid counts across the search-filtered roster (before the paid filter) for the toggle badges.
+        const paidPool = eligibleByStatus.filter(s => !empQ || (s.name || "").toLowerCase().includes(empQ));
+        const paidCount = paidPool.filter(s => !!getRelease(s.id)).length;
+        const unpaidCount = paidPool.length - paidCount;
 
         // Aggregate totals across the visible (filtered) roster — drives the KPI strip.
         const kpi = visibleStaff.reduce((acc, s) => {
@@ -469,6 +482,12 @@ export default function PayrollTab() {
               )}
             </div>
 
+            {/* Paid / Not-paid filter — reshapes the roster + KPI (Net Payable) totals */}
+            <ToggleGroup
+              options={[["all", `All${paidPool.length ? ` · ${paidPool.length}` : ""}`], ["paid", `Paid${paidCount ? ` · ${paidCount}` : ""}`], ["unpaid", `Not Paid${unpaidCount ? ` · ${unpaidCount}` : ""}`]]}
+              value={paidFilter} onChange={setPaidFilter}
+              colors={{ paid: "linear-gradient(135deg,#22a354,#4ade80)", unpaid: "linear-gradient(135deg,#f97316,#fb923c)" }} />
+
             {/* Bulk release bar — only shows when at least one eligible row is ticked */}
             {selectedIds.length > 0 && (
               <div style={{ flex: 1, minWidth: 220, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "8px 14px", background: "linear-gradient(90deg, rgba(var(--accent-rgb),0.12), rgba(var(--accent-rgb),0.04))", border: "1px solid rgba(var(--accent-rgb),0.35)", borderRadius: 10, flexWrap: "wrap" }}>
@@ -531,7 +550,9 @@ export default function PayrollTab() {
               <div style={{ fontSize: 22, fontWeight: 800, color: "var(--orange)", fontFamily: "var(--font-headline, var(--font-outfit))", lineHeight: 1 }}>{INR(kpi.advPending)}</div>
             </div>
             <div style={{ padding: "14px 18px", borderRadius: 12, background: "linear-gradient(135deg, rgba(var(--accent-rgb),0.16), rgba(var(--accent-rgb),0.04))", border: "1px solid rgba(var(--accent-rgb),0.45)" }}>
-              <div style={{ fontSize: 9, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.5, marginBottom: 6 }}>Net Payable</div>
+              <div style={{ fontSize: 9, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.5, marginBottom: 6 }}>
+                Net Payable{paidFilter === "paid" ? " · Paid" : paidFilter === "unpaid" ? " · Outstanding" : ""}
+              </div>
               <div style={{ fontSize: 22, fontWeight: 800, color: kpi.net < 0 ? "var(--red)" : "var(--accent)", fontFamily: "var(--font-headline, var(--font-outfit))", lineHeight: 1 }}>{INR(kpi.net)}</div>
             </div>
           </div>
