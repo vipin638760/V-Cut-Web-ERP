@@ -3,7 +3,7 @@ import { useEffect, useState, useRef } from "react";
 import { collection, onSnapshot, query, orderBy, where, getDocs, deleteDoc, doc, addDoc, updateDoc, writeBatch } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
-import { INR, MONTHS, branchIncomeInPeriod, makeFilterPrefix, periodLabel, proRataSalary, salaryByBranchForMonth, branchSalaryShare, getStaffSalaryForMonth, staffLeavesInMonth, staffStatusForMonth, parseLocalDate, MASK, effectiveCashInHand, computeIncentiveExpense, getMonthlyFixed, effectiveBranchOnDate, shiftMonth, lastDayWithData, cumulativeCollection, monthCollection, fmtDelta } from "@/lib/calculations";
+import { INR, MONTHS, branchIncomeInPeriod, makeFilterPrefix, periodLabel, proRataSalary, salaryByBranchForMonth, branchSalaryShare, presentDaysByBranch, getStaffSalaryForMonth, staffLeavesInMonth, staffStatusForMonth, parseLocalDate, MASK, effectiveCashInHand, computeIncentiveExpense, getMonthlyFixed, effectiveBranchOnDate, shiftMonth, lastDayWithData, cumulativeCollection, monthCollection, fmtDelta } from "@/lib/calculations";
 import { Icon, IconBtn, Pill, Card, PeriodWidget, ToggleGroup, TH, TD, Modal, SearchSelect, BranchEmployeeSearch, useConfirm, useToast } from "@/components/ui";
 import { useRouter } from "next/navigation";
 import VLoader from "@/components/VLoader";
@@ -3251,6 +3251,26 @@ export default function BranchesPage() {
           const presentDaysInMonth = (sid, prefix) =>
             periodEntries.filter(e => e.date?.startsWith(prefix) && (e.staff_billing || []).some(x => x.staff_id === sid && x.present !== false)).length;
 
+          // This-branch share of a staff's month salary, computed with the EXACT
+          // same algorithm as salaryByBranchForMonth (the figure the Expense
+          // Breakdown "Salary" line + branch P&L use) so the per-staff Salary
+          // column sums precisely to that top figure. Full attendance-gated
+          // salary from proRataSalary, split by present-days per branch, drift
+          // parked on the largest share; pure paid-leave months fall to home.
+          const branchSalaryForStaffMonth = (st, prefix) => {
+            const full = proRataSalary(st, prefix, branches, salHistory, staff, globalSettings, leaves, entries);
+            if (!full) return 0;
+            const days = presentDaysByBranch(st.id, prefix, entries);
+            let total = 0; days.forEach(n => total += n);
+            if (total === 0) return st.branch_id === b.id ? full : 0;
+            const parts = []; let allocated = 0;
+            days.forEach((n, bid) => { const amt = Math.round(full * n / total); parts.push([bid, amt]); allocated += amt; });
+            const drift = full - allocated;
+            if (drift !== 0) { parts.sort((a, c) => c[1] - a[1]); parts[0][1] += drift; }
+            const found = parts.find(p => p[0] === b.id);
+            return found ? found[1] : 0;
+          };
+
           // Borrowed-in staff: present in this branch's entries this period but
           // home elsewhere. Surface them so the roster + its salary total
           // reconcile with the branch P&L, which already charges their
@@ -3282,10 +3302,10 @@ export default function BranchesPage() {
               lop = Math.max(0, leavesTaken - quotaPerMonth);
               // Days paid = days present at THIS branch + paid-leave days.
               payrollDays = daysWorked + paidLeaves;
-              // Salary earned here = days paid × per-day rate (monthly ÷ days in
-              // month). Matches the "N days paid" line and the Monthly Sal /day
-              // figure, so e.g. 7 days × ₹500 = ₹3,500.
-              curSalary = Math.round(payrollDays * (monthlySalary / daysInRefMonth));
+              // Salary charged here = the canonical branch-split figure (same as
+              // the Expense Breakdown "Salary" line + P&L), so the column total
+              // reconciles exactly instead of drifting from a local day×rate calc.
+              curSalary = branchSalaryForStaffMonth(s, filterPrefix);
             } else {
               for (let m = 1; m <= endMonth; m++) {
                 const mPrefix = `${filterYear}-${String(m).padStart(2, '0')}`;
@@ -3299,8 +3319,8 @@ export default function BranchesPage() {
                 paidLeaves += mPaidLeave;
                 lop += Math.max(0, mLeaves - quotaPerMonth);
                 daysWorked += mDays;
-                // Per-month: days paid here × that month's per-day rate.
-                curSalary += Math.round((mDays + mPaidLeave) * (mMonthlySal / mDaysInMonth));
+                // Per-month: canonical branch-split salary (matches P&L / Expense Breakdown).
+                curSalary += branchSalaryForStaffMonth(s, mPrefix);
                 if (mDays > 0) monthlyDays.push({ m: new Date(filterYear, m - 1, 1).toLocaleString("default", { month: "short" }), days: mDays });
               }
               payrollDays = daysWorked + paidLeaves;
