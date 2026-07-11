@@ -156,6 +156,9 @@ export default function PayrollTab() {
   // payroll_release exists for this period. Drives roster + KPI (Net Payable) totals.
   const [paidFilter, setPaidFilter] = useState("all");
 
+  // Gender filter — "all" | "male" | "female" (staff.gender). Drives roster + KPIs.
+  const [genderFilter, setGenderFilter] = useState("all");
+
   // Multi-select for bulk release (staff_id set).
   const [selectedStaff, setSelectedStaff] = useState(() => new Set());
   const toggleStaff = (id) => setSelectedStaff(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
@@ -344,6 +347,7 @@ export default function PayrollTab() {
         const totalEligible = eligibleByStatus.length;
         const visibleStaff = eligibleByStatus
           .filter(s => !empQ || (s.name || "").toLowerCase().includes(empQ))
+          .filter(s => genderFilter === "all" || (s.gender || "").toLowerCase() === genderFilter)
           .filter(s => {
             if (paidFilter === "all") return true;
             const isPaid = !!getRelease(s.id);
@@ -354,6 +358,8 @@ export default function PayrollTab() {
         const paidPool = eligibleByStatus.filter(s => !empQ || (s.name || "").toLowerCase().includes(empQ));
         const paidCount = paidPool.filter(s => !!getRelease(s.id)).length;
         const unpaidCount = paidPool.length - paidCount;
+        const maleCount = paidPool.filter(s => (s.gender || "").toLowerCase() === "male").length;
+        const femaleCount = paidPool.filter(s => (s.gender || "").toLowerCase() === "female").length;
 
         // Aggregate totals across the visible (filtered) roster — drives the KPI strip.
         const kpi = visibleStaff.reduce((acc, s) => {
@@ -489,6 +495,12 @@ export default function PayrollTab() {
               options={[["all", `All${paidPool.length ? ` · ${paidPool.length}` : ""}`], ["paid", `Paid${paidCount ? ` · ${paidCount}` : ""}`], ["unpaid", `Not Paid${unpaidCount ? ` · ${unpaidCount}` : ""}`]]}
               value={paidFilter} onChange={setPaidFilter}
               colors={{ paid: "linear-gradient(135deg,#22a354,#4ade80)", unpaid: "linear-gradient(135deg,#f97316,#fb923c)" }} />
+
+            {/* Gender filter */}
+            <ToggleGroup
+              options={[["all", "All"], ["male", `Male${maleCount ? ` · ${maleCount}` : ""}`], ["female", `Female${femaleCount ? ` · ${femaleCount}` : ""}`]]}
+              value={genderFilter} onChange={setGenderFilter}
+              colors={{ male: "linear-gradient(135deg,#2f6fb0,#60a5fa)", female: "linear-gradient(135deg,#be5bd4,#e879f9)" }} />
 
             {/* Bulk release bar — only shows when at least one eligible row is ticked */}
             {selectedIds.length > 0 && (
