@@ -469,11 +469,12 @@ export default function CashCollectionPage() {
 
       <PeriodWidget filterMode={filterMode} setFilterMode={setFilterMode} filterYear={filterYear} setFilterYear={setFilterYear} filterMonth={filterMonth} setFilterMonth={setFilterMonth} />
 
-      {/* Custom date range — overrides the period widget when both dates are set */}
-      <Card style={{ marginTop: 12, marginBottom: 12, padding: 14 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1 }}>
-            Custom range
+      {/* Filters — custom range + quick presets + branch multi-select in one aligned card.
+          A fixed-width label column keeps the two rows lined up instead of drifting. */}
+      <Card style={{ marginTop: 12, marginBottom: 16, padding: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", padding: "12px 16px" }}>
+          <div style={{ width: 128, flexShrink: 0, fontSize: 10, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1 }}>
+            Custom Range
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <label style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>From</label>
@@ -491,18 +492,8 @@ export default function CashCollectionPage() {
               Clear
             </button>
           )}
-          {customRangeActive && (
-            <span style={{ fontSize: 11, color: "var(--accent)", fontWeight: 700, background: "rgba(var(--accent-rgb),0.12)", padding: "4px 10px", borderRadius: 6 }}>
-              Active · overriding {filterMode === "month" ? "monthly" : "yearly"} filter
-            </span>
-          )}
-          {!customRangeActive && (dateFrom || dateTo) && (
-            <span style={{ fontSize: 11, color: "var(--text3)" }}>Pick both dates to apply</span>
-          )}
-        </div>
-        {/* Quick presets — one-click week / rolling window selection */}
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 12, paddingTop: 10, borderTop: "1px solid var(--border)" }}>
-          <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, alignSelf: "center", marginRight: 4 }}>Quick:</span>
+          <div style={{ width: 1, alignSelf: "stretch", background: "var(--border2)", margin: "0 2px" }} />
+          <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1 }}>Quick</span>
           {[
             ["This week", () => applyWeek(0)],
             ["Last week", () => applyWeek(-1)],
@@ -511,43 +502,49 @@ export default function CashCollectionPage() {
             ["This month", applyThisMonth],
           ].map(([label, fn]) => (
             <button key={label} onClick={fn}
-              style={{ padding: "5px 10px", borderRadius: 7, fontSize: 11, fontWeight: 700, background: "var(--bg4)", color: "var(--text2)", border: "1px solid var(--border2)", cursor: "pointer" }}>
+              style={{ padding: "6px 11px", borderRadius: 8, fontSize: 11, fontWeight: 700, background: "var(--bg4)", color: "var(--text2)", border: "1px solid var(--border2)", cursor: "pointer" }}>
               {label}
             </button>
           ))}
+          {customRangeActive && (
+            <span style={{ fontSize: 11, color: "var(--accent)", fontWeight: 700, background: "rgba(var(--accent-rgb),0.12)", padding: "5px 10px", borderRadius: 7 }}>
+              Active · overriding {filterMode === "month" ? "monthly" : "yearly"} filter
+            </span>
+          )}
+          {!customRangeActive && (dateFrom || dateTo) && (
+            <span style={{ fontSize: 11, color: "var(--text3)" }}>Pick both dates to apply</span>
+          )}
         </div>
-      </Card>
 
-      {/* Branch multi-select */}
-      <Card style={{ marginTop: 12, marginBottom: 16, padding: 14 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1 }}>
-            Select branches {selected.size > 0 && <span style={{ color: "var(--accent)" }}>({selected.size} selected)</span>}
+        <div style={{ borderTop: "1px solid var(--border)", display: "flex", alignItems: "flex-start", gap: 12, flexWrap: "wrap", padding: "12px 16px" }}>
+          <div style={{ width: 128, flexShrink: 0, fontSize: 10, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, paddingTop: 8 }}>
+            Branches
+            {selected.size > 0 && <div style={{ color: "var(--accent)", marginTop: 2, textTransform: "none", letterSpacing: 0.3 }}>{selected.size} selected</div>}
           </div>
-          <div style={{ display: "flex", gap: 8 }}>
-            <button onClick={selectAll} style={{ padding: "6px 12px", borderRadius: 7, fontSize: 11, fontWeight: 700, background: "var(--bg4)", color: "var(--text2)", border: "1px solid var(--border2)", cursor: "pointer" }}>Select all</button>
-            <button onClick={clearAll} disabled={selected.size === 0} style={{ padding: "6px 12px", borderRadius: 7, fontSize: 11, fontWeight: 700, background: "var(--bg4)", color: "var(--text2)", border: "1px solid var(--border2)", cursor: selected.size === 0 ? "default" : "pointer", opacity: selected.size === 0 ? 0.4 : 1 }}>Clear</button>
+          <div style={{ flex: "1 1 300px", display: "flex", flexWrap: "wrap", gap: 8 }}>
+            {branches.sort((a, b) => a.name.localeCompare(b.name)).map(b => {
+              const on = selected.has(b.id);
+              return (
+                <button key={b.id} onClick={() => toggle(b.id)}
+                  style={{
+                    padding: "6px 12px", borderRadius: 8, fontSize: 11, fontWeight: 700,
+                    background: on ? "rgba(var(--accent-rgb),0.18)" : "var(--bg4)",
+                    border: `1px solid ${on ? "rgba(var(--accent-rgb),0.5)" : "var(--border2)"}`,
+                    color: on ? "var(--accent)" : "var(--text2)", cursor: "pointer",
+                    display: "inline-flex", alignItems: "center", gap: 6,
+                  }}>
+                  <span style={{ width: 10, height: 10, borderRadius: 3, border: `1.5px solid ${on ? "var(--accent)" : "var(--text3)"}`, background: on ? "var(--accent)" : "transparent", display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                    {on && <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="#000" strokeWidth="4"><polyline points="20 6 9 17 4 12"/></svg>}
+                  </span>
+                  {b.name.replace("V-CUT ", "")}
+                </button>
+              );
+            })}
           </div>
-        </div>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-          {branches.sort((a, b) => a.name.localeCompare(b.name)).map(b => {
-            const on = selected.has(b.id);
-            return (
-              <button key={b.id} onClick={() => toggle(b.id)}
-                style={{
-                  padding: "6px 12px", borderRadius: 8, fontSize: 11, fontWeight: 700,
-                  background: on ? "rgba(var(--accent-rgb),0.18)" : "var(--bg4)",
-                  border: `1px solid ${on ? "rgba(var(--accent-rgb),0.5)" : "var(--border2)"}`,
-                  color: on ? "var(--accent)" : "var(--text2)", cursor: "pointer",
-                  display: "inline-flex", alignItems: "center", gap: 6,
-                }}>
-                <span style={{ width: 10, height: 10, borderRadius: 3, border: `1.5px solid ${on ? "var(--accent)" : "var(--text3)"}`, background: on ? "var(--accent)" : "transparent", display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                  {on && <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="#000" strokeWidth="4"><polyline points="20 6 9 17 4 12"/></svg>}
-                </span>
-                {b.name.replace("V-CUT ", "")}
-              </button>
-            );
-          })}
+          <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+            <button onClick={selectAll} style={{ padding: "6px 12px", borderRadius: 8, fontSize: 11, fontWeight: 700, background: "var(--bg4)", color: "var(--text2)", border: "1px solid var(--border2)", cursor: "pointer" }}>Select all</button>
+            <button onClick={clearAll} disabled={selected.size === 0} style={{ padding: "6px 12px", borderRadius: 8, fontSize: 11, fontWeight: 700, background: "var(--bg4)", color: "var(--text2)", border: "1px solid var(--border2)", cursor: selected.size === 0 ? "default" : "pointer", opacity: selected.size === 0 ? 0.4 : 1 }}>Clear</button>
+          </div>
         </div>
       </Card>
 
