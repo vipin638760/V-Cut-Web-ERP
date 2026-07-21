@@ -85,6 +85,7 @@ export default function CashCollectionPage() {
     denoms: blankDenoms,
   });
   const batchTotal = Object.values(batchForm.rows).reduce((s, r) => s + (Number(r?.collected) || 0), 0);
+  const leftTotal = Object.values(batchForm.rows).reduce((s, r) => s + (Number(r?.leftInBranch) || 0), 0);
   const denomTotal = DENOMS.reduce((s, d) => s + d * (Number(batchForm.denoms[d]) || 0), 0);
 
   useEffect(() => {
@@ -146,6 +147,23 @@ export default function CashCollectionPage() {
   const branchRows = (selected.size === 0 ? allRows : allRows.filter(r => selected.has(r.b.id)))
     .slice()
     .sort((a, b) => a.b.name.localeCompare(b.b.name));
+
+  // Per-row reconciliation for the Record Collection form. System Left is the
+  // auto leftover (Total Cash − Collected); Diff compares the manually counted
+  // leftover against it. Untouched rows contribute 0 to the diff totals.
+  const rowCalc = (r) => {
+    const st = batchForm.rows[r.b.id] || {};
+    const collected = Number(st.collected) || 0;
+    const left = Number(st.leftInBranch) || 0;
+    const touched = (st.collected !== "" && st.collected !== undefined) || (st.leftInBranch !== "" && st.leftInBranch !== undefined);
+    const autoLeft = r.totalCash - collected;
+    const diff = touched ? left - autoLeft : 0;
+    return { st, collected, left, touched, autoLeft, diff };
+  };
+  const diffTotal = branchRows.reduce((s, r) => s + rowCalc(r).diff, 0);
+  const sumOpening = branchRows.reduce((s, r) => s + r.openingBalance, 0);
+  const sumExpected = branchRows.reduce((s, r) => s + r.cih, 0);
+  const sumTotalCash = branchRows.reduce((s, r) => s + r.totalCash, 0);
 
   const totals = branchRows.reduce((acc, r) => ({
     cash: acc.cash + r.cash,
@@ -346,7 +364,8 @@ export default function CashCollectionPage() {
       await Promise.all(nonZero.map(r => {
         const branch = branches.find(b => b.id === r.bid);
         const info = rowInfo.get(r.bid) || { opening: 0, expected: 0, total: 0 };
-        const excess = (r.collected + r.leftInBranch) - info.total;
+        const autoLeft = info.total - r.collected;
+        const excess = (r.collected + r.leftInBranch) - info.total; // = counted left − system left
         return addDoc(collection(db, "cash_collections"), {
           branch_id: r.bid,
           branch_name: branch?.name || "",
@@ -355,7 +374,8 @@ export default function CashCollectionPage() {
           opening_balance: info.opening,
           expected: info.total,              // total cash the branch should have held in the window
           period_expected: info.expected,    // CIH accrued inside the window only
-          left_in_branch: r.leftInBranch,
+          left_in_branch: r.leftInBranch,    // manually counted leftover at the branch
+          auto_left: autoLeft,               // system leftover: expected total − collected
           excess,
           reason: r.reason || "",
           note: batchForm.note?.trim() || "",
@@ -697,6 +717,7 @@ export default function CashCollectionPage() {
                   <TH>Branch</TH>
                   <TH right>Expected</TH>
                   <TH right>Collected</TH>
+                  <TH right title="Manually counted leftover · system-computed leftover below it when they differ">Left at Branch</TH>
                   <TH right>Excess / Less</TH>
                   <TH>Reason</TH>
                   <TH>By</TH>
@@ -705,19 +726,27 @@ export default function CashCollectionPage() {
               </thead>
               <tbody>
                 {periodCollections.length === 0 && (
-                  <tr><td colSpan={canRecord ? 8 : 7} style={{ padding: 24, textAlign: "center", color: "var(--text3)" }}>No collections recorded for {plabel}.</td></tr>
+                  <tr><td colSpan={canRecord ? 9 : 8} style={{ padding: 24, textAlign: "center", color: "var(--text3)" }}>No collections recorded for {plabel}.</td></tr>
                 )}
                 {periodCollections.map(c => {
                   const expected = Number(c.expected) || 0;
                   const excess = typeof c.excess === "number" ? c.excess : (Number(c.amount) || 0) - expected;
                   const excessLabel = excess > 0 ? `+${INR(excess)}` : excess < 0 ? `-${INR(Math.abs(excess))}` : "—";
                   const excessColor = excess > 0 ? "var(--green)" : excess < 0 ? "var(--red)" : "var(--text3)";
+                  const countedLeft = typeof c.left_in_branch === "number" ? c.left_in_branch : null;
+                  const autoLeft = typeof c.auto_left === "number" ? c.auto_left : (expected > 0 ? expected - (Number(c.amount) || 0) : null);
                   return (
                     <tr key={c.id} style={{ borderBottom: "1px solid var(--border)" }}>
                       <TD style={{ fontWeight: 600 }}>{c.collected_on}</TD>
                       <TD>{(c.branch_name || branches.find(b => b.id === c.branch_id)?.name || "—").replace("V-CUT ", "")}</TD>
                       <TD right style={{ color: "var(--text3)" }}>{expected > 0 ? INR(expected) : "—"}</TD>
                       <TD right style={{ color: "var(--accent)", fontWeight: 800 }}>{INR(c.amount)}</TD>
+                      <TD right>
+                        <span style={{ color: countedLeft != null ? "var(--gold)" : "var(--text3)", fontWeight: countedLeft != null ? 700 : 500 }}>{countedLeft != null ? INR(countedLeft) : "—"}</span>
+                        {countedLeft != null && autoLeft != null && countedLeft !== autoLeft && (
+                          <div style={{ fontSize: 9.5, color: "var(--text3)", marginTop: 2 }}>sys {INR(autoLeft)}</div>
+                        )}
+                      </TD>
                       <TD right style={{ color: excessColor, fontWeight: excess !== 0 ? 700 : 500 }}>{excessLabel}</TD>
                       <TD style={{ color: "var(--text3)", fontSize: 11 }}>{c.reason || c.note || "—"}</TD>
                       <TD style={{ color: "var(--text3)", fontSize: 11 }}>{c.created_by || "—"}</TD>
@@ -735,6 +764,7 @@ export default function CashCollectionPage() {
                     <TD></TD>
                     <TD></TD>
                     <TD right style={{ fontWeight: 800, color: "var(--accent)" }}>{INR(periodCollections.reduce((s, c) => s + (Number(c.amount) || 0), 0))}</TD>
+                    <TD right style={{ fontWeight: 800, color: "var(--gold)" }}>{INR(periodCollections.reduce((s, c) => s + (Number(c.left_in_branch) || 0), 0))}</TD>
                     <TD right style={{ fontWeight: 800, color: "var(--text2)" }}>{(() => {
                       const sum = periodCollections.reduce((s, c) => s + (typeof c.excess === "number" ? c.excess : 0), 0);
                       return sum === 0 ? "—" : (sum > 0 ? `+${INR(sum)}` : `-${INR(Math.abs(sum))}`);
@@ -750,96 +780,111 @@ export default function CashCollectionPage() {
       )}
 
       {/* Batch Record Collection — all branches at once */}
-      <Modal isOpen={showForm} onClose={() => setShowForm(false)} title="Record Cash Collection" width={980}>
-        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-          <div style={{ display: "grid", gridTemplateColumns: "200px 1fr", gap: 12 }}>
+      <Modal isOpen={showForm} onClose={() => setShowForm(false)} title="Record Cash Collection" width={1100}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "210px 1fr", gap: 12 }}>
             <div>
               <label style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Collected On *</label>
               <input type="date" value={batchForm.collected_on} onChange={e => setBatchForm(f => ({ ...f, collected_on: e.target.value }))}
-                style={{ width: "100%", padding: "10px 12px", borderRadius: 8, background: "var(--bg4)", border: "1px solid var(--border2)", color: "var(--text)", fontSize: 13, marginTop: 4 }} />
+                style={{ width: "100%", padding: "10px 12px", borderRadius: 10, background: "var(--bg4)", border: "1px solid var(--border2)", color: "var(--text)", fontSize: 13, marginTop: 5 }} />
             </div>
             <div>
               <label style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Note</label>
               <input type="text" placeholder="Collector name, handover reference, etc." value={batchForm.note} onChange={e => setBatchForm(f => ({ ...f, note: e.target.value }))}
-                style={{ width: "100%", padding: "10px 12px", borderRadius: 8, background: "var(--bg4)", border: "1px solid var(--border2)", color: "var(--text)", fontSize: 13, marginTop: 4 }} />
+                style={{ width: "100%", padding: "10px 12px", borderRadius: 10, background: "var(--bg4)", border: "1px solid var(--border2)", color: "var(--text)", fontSize: 13, marginTop: 5 }} />
             </div>
           </div>
 
-          {/* Period banner — makes the opening-balance concept explicit. */}
-          <div style={{ padding: "10px 14px", borderRadius: 10, background: "var(--bg3)", border: "1px solid var(--border)", fontSize: 12, color: "var(--text2)", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-            <span style={{ fontSize: 10, color: "var(--text3)", fontWeight: 800, textTransform: "uppercase", letterSpacing: 1 }}>Window</span>
-            <strong style={{ color: "var(--gold)" }}>{plabel}</strong>
-            <span style={{ color: "var(--text3)" }}>·</span>
-            <span style={{ fontSize: 11, color: "var(--text3)" }}>
-              Opening Balance = prior CIH not yet collected (before {periodStart})
-              &nbsp;+&nbsp;Expected Cash = CIH in this window
-              &nbsp;=&nbsp;Total Cash (what each branch should physically hold)
-            </span>
+          {/* Window banner — the reconciliation formula as chips instead of a wall of text */}
+          <div style={{ padding: "12px 16px", borderRadius: 12, background: "var(--bg3)", border: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+            <div style={{ paddingRight: 14, borderRight: "1px solid var(--border2)" }}>
+              <div style={{ fontSize: 9, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1 }}>Window</div>
+              <div style={{ fontSize: 13, fontWeight: 800, color: "var(--gold)", marginTop: 2, whiteSpace: "nowrap" }}>{plabel}</div>
+            </div>
+            {[
+              ["Opening Bal.", sumOpening, "var(--orange)", `Uncollected before ${periodStart}`],
+              ["+", null],
+              ["This Window", sumExpected, "var(--gold)", "Cash-in-hand accrued in the window"],
+              ["=", null],
+              ["Total Cash", sumTotalCash, "var(--text)", "What branches should physically hold"],
+            ].map(([label, value, color, sub], i) => value === null ? (
+              <span key={i} style={{ fontSize: 16, fontWeight: 800, color: "var(--text3)" }}>{label}</span>
+            ) : (
+              <div key={i} style={{ minWidth: 120 }}>
+                <div style={{ fontSize: 9, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1 }}>{label}</div>
+                <div style={{ fontSize: 15, fontWeight: 800, color, marginTop: 2 }}>{INR(value)}</div>
+                <div style={{ fontSize: 9.5, color: "var(--text3)", marginTop: 1 }}>{sub}</div>
+              </div>
+            ))}
           </div>
 
           {/* Per-branch rows */}
-          <div style={{ border: "1px solid var(--border2)", borderRadius: 10, overflow: "hidden" }}>
-            <div style={{ maxHeight: 360, overflowY: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
+          <div style={{ border: "1px solid var(--border2)", borderRadius: 12, overflow: "hidden" }}>
+            <div style={{ maxHeight: 380, overflowY: "auto", overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12, minWidth: 900 }}>
                 <thead style={{ position: "sticky", top: 0, background: "var(--bg4)", zIndex: 1 }}>
                   <tr>
                     <TH>Branch</TH>
-                    <TH right title="Outstanding cash from before this window — carried forward">Opening Bal.</TH>
-                    <TH right title="Cash-in-hand accrued inside this window">Expected</TH>
-                    <TH right title="Opening + Expected — the cash a branch should be holding">Total Cash</TH>
-                    <TH right>Collected</TH>
-                    <TH right title="Physical cash still at the branch after this collection">Left at Branch</TH>
-                    <TH right>Excess / Less</TH>
+                    <TH right title="Opening balance + this window's cash-in-hand — what the branch should be holding">Total Cash</TH>
+                    <TH right title="Cash taken by the collector">Collected</TH>
+                    <TH right title="Auto-computed leftover: Total Cash − Collected. Click the value to copy it into Counted Left.">System Left <span style={{ fontSize: 8, color: "var(--accent)" }}>AUTO</span></TH>
+                    <TH right title="Cash physically counted and left behind at the branch">Counted Left <span style={{ fontSize: 8, color: "var(--gold)" }}>MANUAL</span></TH>
+                    <TH right title="Counted Left − System Left. Any mismatch needs a reason.">Diff vs Auto</TH>
                     <TH>Reason</TH>
                   </tr>
                 </thead>
                 <tbody>
                   {branchRows.length === 0 && (
-                    <tr><td colSpan={8} style={{ padding: 24, textAlign: "center", color: "var(--text3)", fontSize: 12 }}>No branches available for {plabel}.</td></tr>
+                    <tr><td colSpan={7} style={{ padding: 24, textAlign: "center", color: "var(--text3)", fontSize: 12 }}>No branches available for {plabel}.</td></tr>
                   )}
                   {branchRows.map(r => {
-                    const rowState = batchForm.rows[r.b.id] || {};
+                    const { st: rowState, collected, left, touched, autoLeft, diff } = rowCalc(r);
                     const opening = r.openingBalance;
                     const expected = r.cih;
                     const total = r.totalCash;
-                    const collected = Number(rowState.collected) || 0;
-                    const leftRaw = rowState.leftInBranch;
-                    const left = Number(leftRaw) || 0;
-                    const hasCollectedInput = rowState.collected !== "" && rowState.collected !== undefined;
-                    const hasLeftInput = leftRaw !== "" && leftRaw !== undefined;
-                    // Reconciliation only meaningful once at least one side is entered; once entered the
-                    // un-filled side is treated as 0 (e.g. "collected 3500, left 0" means all taken).
-                    const recon = (hasCollectedInput || hasLeftInput) ? (collected + left) - total : 0;
-                    const diffLabel = recon > 0 ? `+${INR(recon)}` : recon < 0 ? `-${INR(Math.abs(recon))}` : "—";
-                    const diffColor = recon > 0 ? "var(--green)" : recon < 0 ? "var(--red)" : "var(--text3)";
-                    const reasonRequired = recon !== 0;
+                    const diffLabel = !touched ? "—" : diff > 0 ? `+${INR(diff)}` : diff < 0 ? `-${INR(Math.abs(diff))}` : "✓ Match";
+                    const diffColor = !touched ? "var(--text3)" : diff > 0 ? "var(--green)" : diff < 0 ? "var(--red)" : "var(--green)";
+                    const reasonRequired = touched && diff !== 0;
                     return (
-                      <tr key={r.b.id} style={{ borderBottom: "1px solid var(--border)" }}>
-                        <TD style={{ fontWeight: 600 }}>{r.b.name.replace("V-CUT ", "")}</TD>
-                        <TD right style={{ color: opening > 0 ? "var(--orange)" : "var(--text3)" }}>{opening > 0 ? INR(opening) : "—"}</TD>
-                        <TD right style={{ color: expected > 0 ? "var(--gold)" : "var(--text3)" }}>{expected > 0 ? INR(expected) : "—"}</TD>
-                        <TD right style={{ color: "var(--text2)", fontWeight: 700 }}>{INR(total)}</TD>
-                        <TD right style={{ padding: "6px 8px" }}>
+                      <tr key={r.b.id} style={{ borderBottom: "1px solid var(--border)", background: touched ? "rgba(var(--accent-rgb),0.05)" : "transparent" }}>
+                        <TD style={{ fontWeight: 700 }}>{r.b.name.replace("V-CUT ", "")}</TD>
+                        <TD right>
+                          <div style={{ color: "var(--text)", fontWeight: 800, fontSize: 13 }}>{INR(total)}</div>
+                          <div style={{ fontSize: 9.5, color: "var(--text3)", marginTop: 1, whiteSpace: "nowrap" }}>
+                            <span style={{ color: opening > 0 ? "var(--orange)" : "var(--text3)" }}>{opening > 0 ? INR(opening) : "₹0"}</span>
+                            {" + "}
+                            <span style={{ color: expected > 0 ? "var(--gold)" : "var(--text3)" }}>{expected > 0 ? INR(expected) : "₹0"}</span>
+                          </div>
+                        </TD>
+                        <TD right style={{ padding: "8px" }}>
                           <input type="number" min="0" placeholder="0"
                             value={rowState.collected ?? ""}
                             onChange={e => setBatchForm(f => ({ ...f, rows: { ...f.rows, [r.b.id]: { ...(f.rows[r.b.id] || {}), collected: e.target.value } } }))}
-                            style={{ width: 96, padding: "6px 8px", borderRadius: 6, background: "var(--bg3)", border: `1px solid ${collected > 0 ? "var(--accent)" : "var(--border)"}`, color: collected > 0 ? "var(--accent)" : "var(--text)", fontSize: 13, fontWeight: 700, outline: "none", textAlign: "right" }}
+                            style={{ width: 100, padding: "7px 9px", borderRadius: 8, background: "var(--bg3)", border: `1px solid ${collected > 0 ? "var(--accent)" : "var(--border)"}`, color: collected > 0 ? "var(--accent)" : "var(--text)", fontSize: 13, fontWeight: 700, outline: "none", textAlign: "right" }}
                           />
                         </TD>
-                        <TD right style={{ padding: "6px 8px" }}>
+                        <TD right>
+                          <button
+                            title="Click to copy into Counted Left"
+                            onClick={() => setBatchForm(f => ({ ...f, rows: { ...f.rows, [r.b.id]: { ...(f.rows[r.b.id] || {}), leftInBranch: String(Math.max(0, autoLeft)) } } }))}
+                            style={{ padding: "4px 8px", borderRadius: 7, fontSize: 12, fontWeight: 700, background: "transparent", border: "1px dashed var(--border2)", color: autoLeft > 0 ? "var(--text2)" : autoLeft < 0 ? "var(--red)" : "var(--text3)", cursor: "pointer" }}>
+                            {INR(autoLeft)}
+                          </button>
+                        </TD>
+                        <TD right style={{ padding: "8px" }}>
                           <input type="number" min="0" placeholder="0"
                             value={rowState.leftInBranch ?? ""}
                             onChange={e => setBatchForm(f => ({ ...f, rows: { ...f.rows, [r.b.id]: { ...(f.rows[r.b.id] || {}), leftInBranch: e.target.value } } }))}
-                            style={{ width: 96, padding: "6px 8px", borderRadius: 6, background: "var(--bg3)", border: `1px solid ${left > 0 ? "var(--gold)" : "var(--border)"}`, color: left > 0 ? "var(--gold)" : "var(--text)", fontSize: 13, fontWeight: 700, outline: "none", textAlign: "right" }}
+                            style={{ width: 100, padding: "7px 9px", borderRadius: 8, background: "var(--bg3)", border: `1px solid ${left > 0 ? "var(--gold)" : "var(--border)"}`, color: left > 0 ? "var(--gold)" : "var(--text)", fontSize: 13, fontWeight: 700, outline: "none", textAlign: "right" }}
                           />
                         </TD>
-                        <TD right style={{ color: diffColor, fontWeight: recon !== 0 ? 700 : 500 }}>{diffLabel}</TD>
-                        <TD style={{ padding: "6px 10px" }}>
+                        <TD right style={{ color: diffColor, fontWeight: touched ? 700 : 500, fontSize: touched && diff === 0 ? 11 : 12, whiteSpace: "nowrap" }}>{diffLabel}</TD>
+                        <TD style={{ padding: "8px 10px" }}>
                           <input type="text"
                             placeholder={reasonRequired ? "Required — explain the diff" : "Optional"}
                             value={rowState.reason ?? ""}
                             onChange={e => setBatchForm(f => ({ ...f, rows: { ...f.rows, [r.b.id]: { ...(f.rows[r.b.id] || {}), reason: e.target.value } } }))}
-                            style={{ width: "100%", padding: "6px 8px", borderRadius: 6, background: "var(--bg3)", border: `1px solid ${reasonRequired && !rowState.reason ? "var(--red)" : "var(--border)"}`, color: "var(--text)", fontSize: 12, outline: "none" }}
+                            style={{ width: "100%", minWidth: 140, padding: "7px 9px", borderRadius: 8, background: "var(--bg3)", border: `1px solid ${reasonRequired && !rowState.reason ? "var(--red)" : "var(--border)"}`, color: "var(--text)", fontSize: 12, outline: "none" }}
                           />
                         </TD>
                       </tr>
@@ -849,12 +894,13 @@ export default function CashCollectionPage() {
                 <tfoot>
                   <tr style={{ background: "var(--bg3)", borderTop: "2px solid var(--border2)" }}>
                     <TD style={{ fontWeight: 800, color: "var(--gold)", textTransform: "uppercase", letterSpacing: 0.5 }}>Totals</TD>
-                    <TD right style={{ fontWeight: 700, color: "var(--orange)" }}>{INR(branchRows.reduce((s, r) => s + r.openingBalance, 0))}</TD>
-                    <TD right style={{ fontWeight: 700, color: "var(--gold)" }}>{INR(branchRows.reduce((s, r) => s + r.cih, 0))}</TD>
-                    <TD right style={{ fontWeight: 800, color: "var(--text2)" }}>{INR(branchRows.reduce((s, r) => s + r.totalCash, 0))}</TD>
+                    <TD right style={{ fontWeight: 800, color: "var(--text2)" }}>{INR(sumTotalCash)}</TD>
                     <TD right style={{ fontWeight: 800, color: "var(--accent)", fontSize: 14 }}>{INR(batchTotal)}</TD>
-                    <TD right style={{ fontWeight: 800, color: "var(--gold)" }}>{INR(Object.values(batchForm.rows).reduce((s, r) => s + (Number(r?.leftInBranch) || 0), 0))}</TD>
-                    <TD right></TD>
+                    <TD right style={{ fontWeight: 700, color: "var(--text2)" }}>{INR(sumTotalCash - batchTotal)}</TD>
+                    <TD right style={{ fontWeight: 800, color: "var(--gold)", fontSize: 14 }}>{INR(leftTotal)}</TD>
+                    <TD right style={{ fontWeight: 800, color: diffTotal > 0 ? "var(--green)" : diffTotal < 0 ? "var(--red)" : "var(--text3)" }}>
+                      {diffTotal === 0 ? "—" : diffTotal > 0 ? `+${INR(diffTotal)}` : `-${INR(Math.abs(diffTotal))}`}
+                    </TD>
                     <TD></TD>
                   </tr>
                 </tfoot>
@@ -863,22 +909,25 @@ export default function CashCollectionPage() {
           </div>
 
           {/* Batch-level denomination breakdown */}
-          <div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
+          <div style={{ border: "1px solid var(--border2)", borderRadius: 12, padding: 14 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
               <label style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Denomination of total collected</label>
               <span style={{ fontSize: 11, color: "var(--text3)" }}>
                 Denom total = <span style={{ color: denomTotal === 0 ? "var(--text3)" : denomTotal === batchTotal ? "var(--green)" : "var(--red)", fontWeight: 800 }}>{INR(denomTotal)}</span>
                 {denomTotal > 0 && denomTotal !== batchTotal && (
-                  <span style={{ marginLeft: 6, color: "var(--red)" }}>≠ {INR(batchTotal)}</span>
+                  <span style={{ marginLeft: 6, color: "var(--red)" }}>≠ collected {INR(batchTotal)}</span>
+                )}
+                {denomTotal > 0 && denomTotal === batchTotal && (
+                  <span style={{ marginLeft: 6, color: "var(--green)" }}>✓ matches</span>
                 )}
               </span>
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(110px, 1fr))", gap: 8 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(104px, 1fr))", gap: 8 }}>
               {DENOMS.map(d => {
                 const count = Number(batchForm.denoms[d]) || 0;
                 const sub = d * count;
                 return (
-                  <div key={d} style={{ background: "var(--bg4)", border: "1px solid var(--border2)", borderRadius: 8, padding: "8px 10px" }}>
+                  <div key={d} style={{ background: "var(--bg4)", border: `1px solid ${count > 0 ? "rgba(var(--accent-rgb),0.4)" : "var(--border2)"}`, borderRadius: 10, padding: "8px 10px" }}>
                     <div style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, display: "flex", justifyContent: "space-between" }}>
                       <span>₹{d}</span>
                       {sub > 0 && <span style={{ color: "var(--accent)" }}>{INR(sub)}</span>}
@@ -887,7 +936,7 @@ export default function CashCollectionPage() {
                       type="number" min="0" placeholder="0"
                       value={batchForm.denoms[d]}
                       onChange={e => setBatchForm(f => ({ ...f, denoms: { ...f.denoms, [d]: e.target.value } }))}
-                      style={{ width: "100%", marginTop: 4, padding: "6px 8px", borderRadius: 6, background: "var(--bg3)", border: "1px solid var(--border)", color: "var(--text)", fontSize: 14, fontWeight: 700, outline: "none", textAlign: "right" }}
+                      style={{ width: "100%", marginTop: 4, padding: "6px 8px", borderRadius: 7, background: "var(--bg3)", border: "1px solid var(--border)", color: "var(--text)", fontSize: 14, fontWeight: 700, outline: "none", textAlign: "right" }}
                     />
                   </div>
                 );
@@ -895,15 +944,25 @@ export default function CashCollectionPage() {
             </div>
           </div>
 
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginTop: 6 }}>
-            <div style={{ fontSize: 11, color: "var(--text3)" }}>
-              Each branch saves as its own collection · FIFO applied per branch · denomination recorded against the whole batch.
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <div style={{ fontSize: 11.5, color: "var(--text3)", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <span style={{ fontWeight: 800, color: "var(--accent)" }}>{INR(batchTotal)}</span> collected
+              <span>·</span>
+              <span style={{ fontWeight: 800, color: "var(--gold)" }}>{INR(leftTotal)}</span> counted left at branches
+              {diffTotal !== 0 && (
+                <>
+                  <span>·</span>
+                  <span style={{ fontWeight: 800, color: diffTotal > 0 ? "var(--green)" : "var(--red)" }}>
+                    Δ {diffTotal > 0 ? "+" : "-"}{INR(Math.abs(diffTotal))} vs system
+                  </span>
+                </>
+              )}
             </div>
             <div style={{ display: "flex", gap: 8 }}>
               <button onClick={() => setShowForm(false)}
                 style={{ padding: "10px 18px", borderRadius: 10, background: "var(--bg4)", color: "var(--text3)", border: "1px solid var(--border2)", fontWeight: 600, fontSize: 12, cursor: "pointer" }}>Cancel</button>
-              <button onClick={saveCollection} disabled={batchTotal <= 0}
-                style={{ padding: "10px 22px", borderRadius: 10, background: batchTotal <= 0 ? "var(--bg4)" : "linear-gradient(135deg,var(--accent),var(--gold2))", color: batchTotal <= 0 ? "var(--text3)" : "#000", border: "none", fontWeight: 800, fontSize: 12, cursor: batchTotal <= 0 ? "not-allowed" : "pointer", textTransform: "uppercase", letterSpacing: 0.5 }}>
+              <button onClick={saveCollection} disabled={batchTotal <= 0 && leftTotal <= 0}
+                style={{ padding: "10px 22px", borderRadius: 10, background: (batchTotal <= 0 && leftTotal <= 0) ? "var(--bg4)" : "linear-gradient(135deg,var(--accent),var(--gold2))", color: (batchTotal <= 0 && leftTotal <= 0) ? "var(--text3)" : "#000", border: "none", fontWeight: 800, fontSize: 12, cursor: (batchTotal <= 0 && leftTotal <= 0) ? "not-allowed" : "pointer", textTransform: "uppercase", letterSpacing: 0.5 }}>
                 Save Batch
               </button>
             </div>
