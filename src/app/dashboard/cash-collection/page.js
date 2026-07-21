@@ -71,6 +71,7 @@ export default function CashCollectionPage() {
   const customRangeActive = Boolean(dateFrom && dateTo);
 
   const [selected, setSelected] = useState(new Set());
+  const [selInit, setSelInit] = useState(false); // one-shot default/restore guard
   const [expanded, setExpanded] = useState(null); // branch_id whose daily view is open
 
   // Record-collection form state — batch mode, all branches at once.
@@ -189,6 +190,31 @@ export default function CashCollectionPage() {
   });
   const selectAll = () => setSelected(new Set(branches.map(b => b.id)));
   const clearAll = () => setSelected(new Set());
+
+  // Default: every branch checked. If a saved subset exists (from "Save"), restore
+  // it instead. Runs once, after branches load.
+  const BRANCHES_KEY = "vcut_cashcollection_branches";
+  useEffect(() => {
+    if (selInit || branches.length === 0) return;
+    let saved = null;
+    try { const raw = localStorage.getItem(BRANCHES_KEY); if (raw) saved = JSON.parse(raw); } catch {}
+    const valid = Array.isArray(saved) ? saved.filter(id => branches.some(b => b.id === id)) : [];
+    setSelected(new Set(valid.length ? valid : branches.map(b => b.id)));
+    setSelInit(true);
+  }, [branches, selInit]);
+
+  const allSelected = branches.length > 0 && selected.size === branches.length;
+  // Persist the current selection as the default. When all are ticked we clear
+  // the saved subset so the page falls back to "all branches" again.
+  const saveSelection = () => {
+    try {
+      if (allSelected || selected.size === 0) localStorage.removeItem(BRANCHES_KEY);
+      else localStorage.setItem(BRANCHES_KEY, JSON.stringify([...selected]));
+      toast({ title: "Saved", message: allSelected ? "All branches will show by default." : `${selected.size} branch${selected.size === 1 ? "" : "es"} saved as your default.`, type: "success" });
+    } catch (err) {
+      toast({ title: "Error", message: err.message, type: "error" });
+    }
+  };
 
   // ── Quick date range helpers (Mon-Sun weeks + rolling windows) ──
   const iso = (d) => d.toISOString().slice(0, 10);
@@ -542,6 +568,12 @@ export default function CashCollectionPage() {
             })}
           </div>
           <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+            {!allSelected && (
+              <button onClick={saveSelection} title="Remember this branch selection as your default"
+                style={{ padding: "6px 12px", borderRadius: 8, fontSize: 11, fontWeight: 800, background: "linear-gradient(135deg,var(--accent),var(--gold2))", color: "#000", border: "none", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 5 }}>
+                <Icon name="save" size={12} /> Save
+              </button>
+            )}
             <button onClick={selectAll} style={{ padding: "6px 12px", borderRadius: 8, fontSize: 11, fontWeight: 700, background: "var(--bg4)", color: "var(--text2)", border: "1px solid var(--border2)", cursor: "pointer" }}>Select all</button>
             <button onClick={clearAll} disabled={selected.size === 0} style={{ padding: "6px 12px", borderRadius: 8, fontSize: 11, fontWeight: 700, background: "var(--bg4)", color: "var(--text2)", border: "1px solid var(--border2)", cursor: selected.size === 0 ? "default" : "pointer", opacity: selected.size === 0 ? 0.4 : 1 }}>Clear</button>
           </div>
