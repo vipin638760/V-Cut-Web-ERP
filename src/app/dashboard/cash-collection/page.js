@@ -77,6 +77,7 @@ export default function CashCollectionPage() {
   // `rows[branch_id]` carries the per-branch collected + reason for excess/less.
   // `denoms` is for the whole batch (a single denomination count for the pooled cash).
   const [showForm, setShowForm] = useState(false);
+  const [branchSearch, setBranchSearch] = useState(""); // filters rows inside the record popup only
   const blankDenoms = useMemo(() => Object.fromEntries(DENOMS.map(d => [d, ""])), []);
   const [batchForm, setBatchForm] = useState({
     collected_on: new Date().toISOString().slice(0, 10),
@@ -164,6 +165,14 @@ export default function CashCollectionPage() {
   const sumOpening = branchRows.reduce((s, r) => s + r.openingBalance, 0);
   const sumExpected = branchRows.reduce((s, r) => s + r.cih, 0);
   const sumTotalCash = branchRows.reduce((s, r) => s + r.totalCash, 0);
+  // Search only narrows what's displayed in the popup — entered amounts stay
+  // keyed by branch id, and the totals row keeps summing every branch.
+  const modalRows = branchSearch.trim()
+    ? branchRows.filter(r => r.b.name.toLowerCase().includes(branchSearch.trim().toLowerCase()))
+    : branchRows;
+  const hiddenTouched = branchSearch.trim()
+    ? branchRows.filter(r => !modalRows.includes(r) && rowCalc(r).touched).length
+    : 0;
 
   const totals = branchRows.reduce((acc, r) => ({
     cash: acc.cash + r.cash,
@@ -309,12 +318,15 @@ export default function CashCollectionPage() {
   };
 
   // ── Record Collection helpers ──
-  const resetBatch = () => setBatchForm({
-    collected_on: new Date().toISOString().slice(0, 10),
-    note: "",
-    rows: {},
-    denoms: blankDenoms,
-  });
+  const resetBatch = () => {
+    setBranchSearch("");
+    setBatchForm({
+      collected_on: new Date().toISOString().slice(0, 10),
+      note: "",
+      rows: {},
+      denoms: blankDenoms,
+    });
+  };
 
   const saveCollection = async () => {
     // Per-branch reconciliation totals — pulled from the current view so every
@@ -820,6 +832,32 @@ export default function CashCollectionPage() {
 
           {/* Per-branch rows */}
           <div style={{ border: "1px solid var(--border2)", borderRadius: 12, overflow: "hidden" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderBottom: "1px solid var(--border)", background: "var(--bg3)", flexWrap: "wrap" }}>
+              <div style={{ position: "relative", flex: "1 1 220px", maxWidth: 320 }}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--text3)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"
+                  style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }}>
+                  <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                </svg>
+                <input type="text" placeholder="Search branch…" value={branchSearch}
+                  onChange={e => setBranchSearch(e.target.value)}
+                  style={{ width: "100%", padding: "8px 30px 8px 30px", borderRadius: 9, background: "var(--bg4)", border: `1px solid ${branchSearch ? "rgba(var(--accent-rgb),0.5)" : "var(--border2)"}`, color: "var(--text)", fontSize: 12.5, outline: "none" }}
+                />
+                {branchSearch && (
+                  <button onClick={() => setBranchSearch("")} title="Clear search"
+                    style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)", width: 18, height: 18, borderRadius: "50%", border: "none", background: "var(--bg3)", color: "var(--text3)", cursor: "pointer", fontSize: 11, lineHeight: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: 0 }}>
+                    ✕
+                  </button>
+                )}
+              </div>
+              <span style={{ fontSize: 11, color: "var(--text3)" }}>
+                {branchSearch.trim() ? `${modalRows.length} of ${branchRows.length} branches` : `${branchRows.length} branches`}
+              </span>
+              {hiddenTouched > 0 && (
+                <span style={{ fontSize: 11, color: "var(--orange)", fontWeight: 700 }}>
+                  {hiddenTouched} branch{hiddenTouched === 1 ? "" : "es"} with amounts hidden by search — still saved
+                </span>
+              )}
+            </div>
             <div style={{ maxHeight: 380, overflowY: "auto", overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12, minWidth: 900 }}>
                 <thead style={{ position: "sticky", top: 0, background: "var(--bg4)", zIndex: 1 }}>
@@ -834,10 +872,12 @@ export default function CashCollectionPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {branchRows.length === 0 && (
-                    <tr><td colSpan={7} style={{ padding: 24, textAlign: "center", color: "var(--text3)", fontSize: 12 }}>No branches available for {plabel}.</td></tr>
+                  {modalRows.length === 0 && (
+                    <tr><td colSpan={7} style={{ padding: 24, textAlign: "center", color: "var(--text3)", fontSize: 12 }}>
+                      {branchSearch.trim() ? <>No branch matches “{branchSearch.trim()}”.</> : <>No branches available for {plabel}.</>}
+                    </td></tr>
                   )}
-                  {branchRows.map(r => {
+                  {modalRows.map(r => {
                     const { st: rowState, collected, left, touched, autoLeft, diff } = rowCalc(r);
                     const opening = r.openingBalance;
                     const expected = r.cih;
