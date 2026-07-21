@@ -896,24 +896,42 @@ export default function CashCollectionPage() {
                         <TD right style={{ padding: "8px" }}>
                           <input type="number" min="0" placeholder="0"
                             value={rowState.collected ?? ""}
-                            onChange={e => setBatchForm(f => ({ ...f, rows: { ...f.rows, [r.b.id]: { ...(f.rows[r.b.id] || {}), collected: e.target.value } } }))}
+                            onChange={e => {
+                              const v = e.target.value;
+                              // Auto-fill Counted Left with the system leftover until the user
+                              // types their own count; clearing Collected clears the auto value.
+                              setBatchForm(f => {
+                                const prev = f.rows[r.b.id] || {};
+                                const next = { ...prev, collected: v };
+                                if (!prev.leftManual) {
+                                  next.leftInBranch = v === "" ? "" : String(Math.max(0, total - (Number(v) || 0)));
+                                }
+                                return { ...f, rows: { ...f.rows, [r.b.id]: next } };
+                              });
+                            }}
                             style={{ width: 100, padding: "7px 9px", borderRadius: 8, background: "var(--bg3)", border: `1px solid ${collected > 0 ? "var(--accent)" : "var(--border)"}`, color: collected > 0 ? "var(--accent)" : "var(--text)", fontSize: 13, fontWeight: 700, outline: "none", textAlign: "right" }}
                           />
                         </TD>
                         <TD right>
                           <button
                             title="Click to copy into Counted Left"
-                            onClick={() => setBatchForm(f => ({ ...f, rows: { ...f.rows, [r.b.id]: { ...(f.rows[r.b.id] || {}), leftInBranch: String(Math.max(0, autoLeft)) } } }))}
+                            onClick={() => setBatchForm(f => ({ ...f, rows: { ...f.rows, [r.b.id]: { ...(f.rows[r.b.id] || {}), leftInBranch: String(Math.max(0, autoLeft)), leftManual: false } } }))}
                             style={{ padding: "4px 8px", borderRadius: 7, fontSize: 12, fontWeight: 700, background: "transparent", border: "1px dashed var(--border2)", color: autoLeft > 0 ? "var(--text2)" : autoLeft < 0 ? "var(--red)" : "var(--text3)", cursor: "pointer" }}>
                             {INR(autoLeft)}
                           </button>
                         </TD>
                         <TD right style={{ padding: "8px" }}>
                           <input type="number" min="0" placeholder="0"
+                            title={rowState.leftInBranch !== "" && rowState.leftInBranch !== undefined && !rowState.leftManual ? "Auto-calculated from Collected — type to override with your physical count" : undefined}
                             value={rowState.leftInBranch ?? ""}
-                            onChange={e => setBatchForm(f => ({ ...f, rows: { ...f.rows, [r.b.id]: { ...(f.rows[r.b.id] || {}), leftInBranch: e.target.value } } }))}
-                            style={{ width: 100, padding: "7px 9px", borderRadius: 8, background: "var(--bg3)", border: `1px solid ${left > 0 ? "var(--gold)" : "var(--border)"}`, color: left > 0 ? "var(--gold)" : "var(--text)", fontSize: 13, fontWeight: 700, outline: "none", textAlign: "right" }}
+                            onChange={e => setBatchForm(f => ({ ...f, rows: { ...f.rows, [r.b.id]: { ...(f.rows[r.b.id] || {}), leftInBranch: e.target.value, leftManual: e.target.value !== "" } } }))}
+                            style={{ width: 100, padding: "7px 9px", borderRadius: 8, background: "var(--bg3)", border: `1px ${left > 0 && !rowState.leftManual ? "dashed" : "solid"} ${left > 0 ? "var(--gold)" : "var(--border)"}`, color: left > 0 ? "var(--gold)" : "var(--text)", fontSize: 13, fontWeight: 700, outline: "none", textAlign: "right" }}
                           />
+                          {rowState.leftInBranch !== "" && rowState.leftInBranch !== undefined && (
+                            <div style={{ fontSize: 8.5, fontWeight: 800, letterSpacing: 0.5, textTransform: "uppercase", color: rowState.leftManual ? "var(--gold)" : "var(--text3)", marginTop: 2 }}>
+                              {rowState.leftManual ? "manual" : "auto-filled"}
+                            </div>
+                          )}
                         </TD>
                         <TD right style={{ color: diffColor, fontWeight: touched ? 700 : 500, fontSize: touched && diff === 0 ? 11 : 12, whiteSpace: "nowrap" }}>{diffLabel}</TD>
                         <TD style={{ padding: "8px 10px" }}>
