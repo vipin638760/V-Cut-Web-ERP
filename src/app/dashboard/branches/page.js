@@ -713,7 +713,7 @@ function BranchPLTrendChart({ breakdownStats = [], filterYear }) {
 
 // Stacked bar chart — per-day (or per-month) sale split by staff member.
 // Value = sb.billing + sb.material (service sale + material sale), coloured by staff.
-function BranchStaffSalesChart({ periodEntries, branchStaff, allStaff, filterMode, filterYear, filterMonth, endMonth, onDayClick }) {
+function BranchStaffSalesChart({ periodEntries, branchStaff, allStaff, leaves = [], filterMode, filterYear, filterMonth, endMonth, onDayClick }) {
   const [hover, setHover] = useState(null);
   const [detailSid, setDetailSid] = useState(null); // per-staff breakup modal
   const isMonth = filterMode === "month";
@@ -995,6 +995,17 @@ function BranchStaffSalesChart({ periodEntries, branchStaff, allStaff, filterMod
           .filter(r => r.val > 0)
           .sort((a, b) => b.val - a.val);
         const name = staffById[detailSid]?.name || "Staff";
+        // Approved leaves for this staff in the visible period.
+        const monthPrefixes = isMonth
+          ? [`${filterYear}-${String(filterMonth).padStart(2, "0")}`]
+          : Array.from({ length: endMonth }, (_, i) => `${filterYear}-${String(i + 1).padStart(2, "0")}`);
+        const leaveRecs = (leaves || []).filter(l => l.staff_id === detailSid && l.status === "approved" && l.date && monthPrefixes.some(p => l.date.startsWith(p)));
+        const leaveDays = leaveRecs.reduce((s, l) => s + (Number(l.days) || 1), 0);
+        const saleKeys = new Set(rows.map(r => r.key));
+        // In month view, list leave dates (that weren't sale days) as their own rows.
+        const leaveRows = isMonth
+          ? leaveRecs.filter(l => !saleKeys.has(l.date)).map(l => ({ key: l.date, type: l.type || "Leave" })).sort((a, b) => b.key.localeCompare(a.key))
+          : [];
         return (
           <div onClick={() => setDetailSid(null)}
             style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 20 }}>
@@ -1007,8 +1018,8 @@ function BranchStaffSalesChart({ periodEntries, branchStaff, allStaff, filterMod
                 </div>
                 <button onClick={() => setDetailSid(null)} style={{ width: 30, height: 30, borderRadius: 8, background: "var(--bg4)", border: "1px solid var(--border2)", color: "var(--text2)", cursor: "pointer", fontSize: 16, lineHeight: 1 }}>×</button>
               </div>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 1, background: "var(--border)" }}>
-                {[["Total", INR(st.total), "var(--green)"], ["Avg", INR(st.avg), "var(--blue, #60a5fa)"], ["High", INR(st.high), "var(--green)"], [isMonth ? "Days" : "Months", st.activeCount, "var(--text)"]].map(([l, v, c]) => (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(84px, 1fr))", gap: 1, background: "var(--border)" }}>
+                {[["Total", INR(st.total), "var(--green)"], ["Avg", INR(st.avg), "var(--blue, #60a5fa)"], ["High", INR(st.high), "var(--green)"], [isMonth ? "Days Worked" : "Months", st.activeCount, "var(--text)"], ["Leaves", `${leaveDays} d`, leaveDays > 0 ? "var(--orange)" : "var(--text3)"]].map(([l, v, c]) => (
                   <div key={l} style={{ background: "var(--bg3)", padding: "10px 12px" }}>
                     <div style={{ fontSize: 8.5, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1 }}>{l}</div>
                     <div style={{ fontSize: 13, fontWeight: 800, color: c, marginTop: 2 }}>{v}</div>
@@ -1028,7 +1039,17 @@ function BranchStaffSalesChart({ periodEntries, branchStaff, allStaff, filterMod
                         <TD right style={{ color: "var(--text3)" }}>{st.total > 0 ? Math.round((r.val / st.total) * 100) : 0}%</TD>
                       </tr>
                     ))}
-                    {rows.length === 0 && <tr><TD colSpan={3} style={{ textAlign: "center", color: "var(--text3)", fontStyle: "italic", padding: 20 }}>No sales in this period.</TD></tr>}
+                    {leaveRows.map(r => (
+                      <tr key={r.key} style={{ background: "rgba(251,146,60,0.06)" }}>
+                        <TD style={{ fontWeight: 700 }}>
+                          {label(r.key)}
+                          <span style={{ marginLeft: 8, fontSize: 9, fontWeight: 800, color: "var(--orange)", background: "rgba(251,146,60,0.14)", border: "1px solid rgba(251,146,60,0.4)", borderRadius: 5, padding: "1px 6px", textTransform: "uppercase", letterSpacing: 0.5 }}>{r.type}</span>
+                        </TD>
+                        <TD right style={{ color: "var(--text3)" }}>—</TD>
+                        <TD right style={{ color: "var(--text3)" }}>—</TD>
+                      </tr>
+                    ))}
+                    {rows.length === 0 && leaveRows.length === 0 && <tr><TD colSpan={3} style={{ textAlign: "center", color: "var(--text3)", fontStyle: "italic", padding: 20 }}>No sales in this period.</TD></tr>}
                   </tbody>
                 </table>
               </div>
@@ -3165,7 +3186,7 @@ export default function BranchesPage() {
                 ]))} />
             )}
             {filterMode === "year" && isAdmin && <BranchPLTrendChart breakdownStats={breakdownStats} filterYear={filterYear} />}
-            <BranchStaffSalesChart periodEntries={periodEntries} branchStaff={branchStaff} allStaff={staff} filterMode={filterMode} filterYear={filterYear} filterMonth={filterMonth} endMonth={endMonth} onDayClick={openDay} />
+            <BranchStaffSalesChart periodEntries={periodEntries} branchStaff={branchStaff} allStaff={staff} leaves={leaves} filterMode={filterMode} filterYear={filterYear} filterMonth={filterMonth} endMonth={endMonth} onDayClick={openDay} />
           </>);
         })()}
 
