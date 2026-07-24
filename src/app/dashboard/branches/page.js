@@ -1108,6 +1108,7 @@ export default function BranchesPage() {
   const [attendanceMonth, setAttendanceMonth] = useState(null); // "YYYY-MM"
   const [attendanceSelectedDay, setAttendanceSelectedDay] = useState(null); // "YYYY-MM-DD"
   const [attChip, setAttChip] = useState(null); // null | 'present' | 'loan' | 'leave' | 'active' | 'business'
+  const [leaveStaffOpen, setLeaveStaffOpen] = useState(null); // staff id expanded in the On-leave panel
 
   // Period
   const [filterMode, setFilterMode] = useState("month");
@@ -1875,7 +1876,7 @@ export default function BranchesPage() {
     // fed to the right panel so leave dates are visible at a glance.
     const monthLeaves = days
       .filter(d => !(cutoff && d > cutoff))
-      .flatMap(d => perDay(d).approvedLeaves.map(l => ({ date: d, name: l.name, type: l.type })))
+      .flatMap(d => perDay(d).approvedLeaves.map(l => ({ date: d, id: l.id, name: l.name, type: l.type })))
       .sort((a, b) => b.date.localeCompare(a.date));
 
     // Per-chip month aggregations — drive the clickable header chips. Present /
@@ -2152,23 +2153,61 @@ export default function BranchesPage() {
                     );
                   }
                   if (attChip === "leave") {
+                    // Group leaves by staff → taken (days) + paid balance vs monthly quota.
+                    const quota = attBranch?.type === "unisex" ? (globalSettings?.unisex_leaves ?? 3) : (globalSettings?.mens_leaves ?? 2);
+                    const grp = new Map();
+                    monthLeaves.forEach(l => {
+                      const g = grp.get(l.id) || { id: l.id, name: l.name, dates: [] };
+                      g.dates.push({ date: l.date, type: l.type });
+                      grp.set(l.id, g);
+                    });
+                    const groups = [...grp.values()]
+                      .map(g => {
+                        const taken = g.dates.length;
+                        return { ...g, taken, paid: Math.min(taken, quota), lop: Math.max(0, taken - quota), balance: Math.max(0, quota - taken),
+                          dates: g.dates.sort((a, b) => b.date.localeCompare(a.date)) };
+                      })
+                      .sort((a, b) => b.taken - a.taken || a.name.localeCompare(b.name));
                     return (
                       <div>
-                        {head("On leave", LEAVE_HEX, `${monthLeaves.length} leave${monthLeaves.length === 1 ? "" : "s"}`)}
-                        {monthLeaves.length === 0 ? empty("No leaves this month.") : (
+                        {head("On leave", LEAVE_HEX, `${groups.length} staff · ${monthLeaves.length} day${monthLeaves.length === 1 ? "" : "s"}`)}
+                        {groups.length === 0 ? empty("No leaves this month.") : (
                           <div style={rowWrap}>
-                            {monthLeaves.map((l, i) => (
-                              <div key={`${l.date}-${l.name}-${i}`} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "10px 12px", background: LEAVE_BG, border: `1px solid ${LEAVE_BORDER}`, borderLeft: `3px solid ${LEAVE_HEX}`, borderRadius: 10 }}>
-                                <span style={{ display: "inline-flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-                                  {avatar(<Icon name="moon" size={14} />, LEAVE_HEX, "rgba(192,132,252,0.14)", LEAVE_BORDER)}
-                                  <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{l.name}</span>
-                                </span>
-                                <span style={{ display: "inline-flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-                                  <span style={{ fontSize: 9, fontWeight: 700, color: LEAVE_HEX, textTransform: "uppercase" }}>{l.type}</span>
-                                  <span style={{ fontSize: 11, fontWeight: 800, color: "var(--text3)" }}>{dayLabel(l.date)}</span>
-                                </span>
-                              </div>
-                            ))}
+                            {groups.map(g => {
+                              const open = leaveStaffOpen === g.id;
+                              return (
+                                <div key={g.id} style={{ background: LEAVE_BG, border: `1px solid ${LEAVE_BORDER}`, borderLeft: `3px solid ${LEAVE_HEX}`, borderRadius: 10, overflow: "hidden" }}>
+                                  <button onClick={() => setLeaveStaffOpen(o => o === g.id ? null : g.id)}
+                                    style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "10px 12px", width: "100%", background: "transparent", border: "none", cursor: "pointer", textAlign: "left" }}>
+                                    <span style={{ display: "inline-flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+                                      {avatar(<Icon name="moon" size={14} />, LEAVE_HEX, "rgba(192,132,252,0.14)", LEAVE_BORDER)}
+                                      <span style={{ minWidth: 0 }}>
+                                        <span style={{ display: "block", fontSize: 13, fontWeight: 700, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{g.name}</span>
+                                        <span style={{ fontSize: 10, color: "var(--text3)", fontWeight: 600 }}>
+                                          Taken <strong style={{ color: LEAVE_HEX }}>{g.taken}</strong> · Balance <strong style={{ color: g.balance > 0 ? "var(--green)" : "var(--red)" }}>{g.balance}</strong>/{quota}
+                                          {g.lop > 0 && <span style={{ color: "var(--red)", fontWeight: 800 }}> · LOP {g.lop}</span>}
+                                        </span>
+                                      </span>
+                                    </span>
+                                    <span style={{ fontSize: 10, color: "var(--text3)", transform: open ? "rotate(90deg)" : "none", transition: "transform .15s" }}>▶</span>
+                                  </button>
+                                  {open && (
+                                    <div style={{ padding: "0 10px 10px 52px", display: "flex", flexDirection: "column", gap: 5 }}>
+                                      {g.dates.map((d, i) => (
+                                        <button key={`${d.date}-${i}`} onClick={() => { setAttendanceSelectedDay(d.date); setAttChip(null); }}
+                                          title="Show this day on the calendar"
+                                          style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "6px 10px", background: "var(--bg3)", border: "1px solid var(--border)", borderRadius: 8, cursor: "pointer", width: "100%", textAlign: "left" }}
+                                          onMouseEnter={e => e.currentTarget.style.background = "var(--bg4)"}
+                                          onMouseLeave={e => e.currentTarget.style.background = "var(--bg3)"}>
+                                          <span style={{ fontSize: 12, fontWeight: 700, color: "var(--text2)" }}>{dayLabel(d.date)}</span>
+                                          <span style={{ fontSize: 9, fontWeight: 800, color: LEAVE_HEX, textTransform: "uppercase" }}>{d.type}</span>
+                                        </button>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
                           </div>
                         )}
                       </div>
