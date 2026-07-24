@@ -110,6 +110,7 @@ export default function POSPage() {
   // ── POS Specific State ──
   const [cart, setCart] = useState([]); // Array of { id, serviceName, price, staffId }
   const [activeCategory, setActiveCategory] = useState("Artistic Styling");
+  const [serviceSearch, setServiceSearch] = useState(""); // free-text filter across all menu services
   const [defaultStaffId, setDefaultStaffId] = useState(""); // stylist auto-applied to new cart items
   const [billPreview, setBillPreview] = useState(null); // bill data ready to print
   const [clientSearch, setClientSearch] = useState("");
@@ -2263,17 +2264,21 @@ export default function POSPage() {
                </div>
              )}
           </div>
-          <BranchSelect
-            value={selBranch}
-            onChange={(v) => { setSelBranch(v); setStaffRows({}); setOnlineInc(""); setCart([]); }}
-            branches={branches}
-            placeholder="SELECT BRANCH…"
-            buttonStyle={{
-              background: "var(--bg4)", border: "none",
-              color: selBranch ? "var(--gold)" : "var(--text3)", fontWeight: 800,
-              textTransform: "uppercase", padding: "10px 12px", borderRadius: 10,
-            }}
-          />
+          <div style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "0 6px 0 12px", borderRadius: 12, background: selBranch ? "linear-gradient(135deg, rgba(var(--accent-rgb),0.14), rgba(var(--accent-rgb),0.04))" : "var(--bg4)", border: `1px solid ${selBranch ? "rgba(var(--accent-rgb),0.4)" : "var(--border2)"}`, transition: "border-color .2s, background .2s" }}>
+            <Icon name="grid" size={15} color={selBranch ? "var(--accent)" : "var(--text3)"} />
+            <BranchSelect
+              value={selBranch}
+              onChange={(v) => { setSelBranch(v); setStaffRows({}); setOnlineInc(""); setCart([]); }}
+              branches={branches}
+              placeholder="SELECT BRANCH…"
+              stripPrefix="V-CUT "
+              buttonStyle={{
+                background: "transparent", border: "none",
+                color: selBranch ? "var(--gold)" : "var(--text3)", fontWeight: 800,
+                textTransform: "uppercase", padding: "10px 4px", borderRadius: 10, letterSpacing: 0.5,
+              }}
+            />
+          </div>
           <input
             type="date"
             value={selDate}
@@ -2366,7 +2371,26 @@ export default function POSPage() {
         <div className="pos-split" style={{ flex: 1, display: "flex", gap: 16, minHeight: 0 }}>
           {/* ── LEFT: MENU GRID ── */}
           <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 16, minWidth: 0 }}>
-            {/* Category Chips */}
+            {/* Service search */}
+            {selBranch && Object.keys(MENU).length > 0 && (
+              <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
+                <span style={{ position: "absolute", left: 14, color: "var(--text3)", display: "inline-flex", pointerEvents: "none" }}>
+                  <Icon name="search" size={15} />
+                </span>
+                <input
+                  value={serviceSearch}
+                  onChange={e => setServiceSearch(e.target.value)}
+                  placeholder="Search a service by name or price…"
+                  style={{ width: "100%", padding: "12px 40px 12px 40px", borderRadius: 12, background: "var(--bg2)", border: `1px solid ${serviceSearch ? "var(--accent)" : "var(--border)"}`, color: "var(--text)", fontSize: 13, fontWeight: 600, outline: "none", letterSpacing: 0.2, boxShadow: serviceSearch ? "0 0 0 3px rgba(var(--accent-rgb),0.12)" : "none", transition: "border-color .2s, box-shadow .2s" }}
+                />
+                {serviceSearch && (
+                  <button onClick={() => setServiceSearch("")} title="Clear"
+                    style={{ position: "absolute", right: 8, width: 26, height: 26, borderRadius: 8, background: "var(--bg4)", border: "none", color: "var(--text3)", cursor: "pointer", fontSize: 15, lineHeight: 1, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>×</button>
+                )}
+              </div>
+            )}
+            {/* Category Chips — hidden while searching (results span all categories) */}
+            {!serviceSearch.trim() && (
             <div style={{ display: "flex", gap: 10, overflowX: "auto", padding: "4px 0", scrollbarWidth: "none" }}>
               {Object.keys(MENU).map(cat => (
                 <button 
@@ -2384,6 +2408,7 @@ export default function POSPage() {
                 </button>
               ))}
             </div>
+            )}
 
             {/* Empty states */}
             {!selBranch && (
@@ -2464,12 +2489,27 @@ export default function POSPage() {
             )}
 
             {/* Service Grid — credit-card style (compact, fixed aspect) */}
-            {selBranch && Object.keys(MENU).length > 0 && (
+            {selBranch && Object.keys(MENU).length > 0 && (() => {
+              const svcQ = serviceSearch.trim().toLowerCase();
+              const shown = svcQ
+                ? Object.entries(MENU).flatMap(([cat, items]) => (items || [])
+                    .filter(s => (s.name || "").toLowerCase().includes(svcQ) || String(s.price ?? "").includes(svcQ))
+                    .map(s => ({ ...s, _cat: cat })))
+                : (MENU[activeCategory] || []);
+              if (svcQ && shown.length === 0) {
+                return (
+                  <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8, color: "var(--text3)", fontSize: 13 }}>
+                    <div style={{ fontSize: 30 }}>🔍</div>
+                    <div style={{ fontWeight: 700 }}>No service matches “{serviceSearch.trim()}”.</div>
+                  </div>
+                );
+              }
+              return (
             <div style={{
               flex: 1, overflowY: "auto", display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))",
               gap: 12, paddingRight: 8, scrollbarWidth: "thin", alignContent: "start"
             }}>
-              {MENU[activeCategory]?.map(service => (
+              {shown.map(service => (
                 <div
                   key={service.id}
                   onClick={() => addToCart(service)}
@@ -2490,13 +2530,17 @@ export default function POSPage() {
                   </div>
                   <div>
                     <div style={{ fontSize: 12, fontWeight: 800, color: "var(--text)", lineHeight: 1.2, overflow: "hidden", textOverflow: "ellipsis", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{service.name}</div>
-                    <div style={{ fontSize: 15, fontWeight: 900, color: "var(--accent)", marginTop: 4 }}>{INR(service.price)}</div>
+                    <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 6, marginTop: 4 }}>
+                      <div style={{ fontSize: 15, fontWeight: 900, color: "var(--accent)" }}>{INR(service.price)}</div>
+                      {service._cat && <div style={{ fontSize: 8.5, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 0.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "60%" }}>{service._cat}</div>}
+                    </div>
                   </div>
                   <div style={{ position: "absolute", bottom: -24, right: -24, width: 70, height: 70, background: "var(--accent)", filter: "blur(36px)", opacity: 0.06 }} />
                 </div>
               ))}
             </div>
-            )}
+              );
+            })()}
           </div>
 
           {/* ── RIGHT: CART / CHECKOUT ── */}
@@ -2518,14 +2562,18 @@ export default function POSPage() {
             <div style={{ display: "flex", flexDirection: "column", gap: 8, paddingBottom: 12, borderBottom: "1px solid var(--border2)" }}>
               <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                 <label style={{ fontSize: 9, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1 }}>Branch</label>
-                <BranchSelect
-                  value={selBranch}
-                  onChange={(v) => { setSelBranch(v); setStaffRows({}); setOnlineInc(""); setCart([]); setDefaultStaffId(""); }}
-                  branches={branches}
-                  placeholder="Select branch…"
-                  minWidth={0}
-                  buttonStyle={{ padding: "8px 10px", borderRadius: 8, background: "var(--bg4)", color: selBranch ? "var(--gold)" : "var(--text3)", fontSize: 12, fontWeight: 700 }}
-                />
+                <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 4px 0 10px", borderRadius: 10, background: selBranch ? "linear-gradient(135deg, rgba(var(--accent-rgb),0.12), rgba(var(--accent-rgb),0.03))" : "var(--bg4)", border: `1px solid ${selBranch ? "rgba(var(--accent-rgb),0.35)" : "var(--border2)"}` }}>
+                  <Icon name="grid" size={13} color={selBranch ? "var(--accent)" : "var(--text3)"} />
+                  <BranchSelect
+                    value={selBranch}
+                    onChange={(v) => { setSelBranch(v); setStaffRows({}); setOnlineInc(""); setCart([]); setDefaultStaffId(""); }}
+                    branches={branches}
+                    placeholder="Select branch…"
+                    stripPrefix="V-CUT "
+                    minWidth={0}
+                    buttonStyle={{ padding: "8px 4px", borderRadius: 8, background: "transparent", color: selBranch ? "var(--gold)" : "var(--text3)", fontSize: 12, fontWeight: 700, flex: 1 }}
+                  />
+                </div>
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                 <label style={{ fontSize: 9, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1 }}>Default Stylist (auto-assign)</label>
