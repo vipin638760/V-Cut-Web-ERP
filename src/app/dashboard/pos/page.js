@@ -2562,18 +2562,16 @@ export default function POSPage() {
             <div style={{ display: "flex", flexDirection: "column", gap: 8, paddingBottom: 12, borderBottom: "1px solid var(--border2)" }}>
               <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                 <label style={{ fontSize: 9, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1 }}>Branch</label>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 4px 0 10px", borderRadius: 10, background: selBranch ? "linear-gradient(135deg, rgba(var(--accent-rgb),0.12), rgba(var(--accent-rgb),0.03))" : "var(--bg4)", border: `1px solid ${selBranch ? "rgba(var(--accent-rgb),0.35)" : "var(--border2)"}` }}>
-                  <Icon name="grid" size={13} color={selBranch ? "var(--accent)" : "var(--text3)"} />
-                  <BranchSelect
-                    value={selBranch}
-                    onChange={(v) => { setSelBranch(v); setStaffRows({}); setOnlineInc(""); setCart([]); setDefaultStaffId(""); }}
-                    branches={branches}
-                    placeholder="Select branch…"
-                    stripPrefix="V-CUT "
-                    minWidth={0}
-                    buttonStyle={{ padding: "8px 4px", borderRadius: 8, background: "transparent", color: selBranch ? "var(--gold)" : "var(--text3)", fontSize: 12, fontWeight: 700, flex: 1 }}
-                  />
-                </div>
+                <BranchSelect
+                  value={selBranch}
+                  onChange={(v) => { setSelBranch(v); setStaffRows({}); setOnlineInc(""); setCart([]); setDefaultStaffId(""); }}
+                  branches={branches}
+                  placeholder="Select branch…"
+                  stripPrefix="V-CUT "
+                  style={{ width: "100%" }}
+                  minWidth={0}
+                  buttonStyle={{ padding: "10px 12px", borderRadius: 10, background: selBranch ? "rgba(var(--accent-rgb),0.08)" : "var(--bg4)", border: `1px solid ${selBranch ? "rgba(var(--accent-rgb),0.35)" : "var(--border2)"}`, color: selBranch ? "var(--gold)" : "var(--text3)", fontSize: 12, fontWeight: 700 }}
+                />
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                 <label style={{ fontSize: 9, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1 }}>Default Stylist (auto-assign)</label>
