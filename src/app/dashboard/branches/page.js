@@ -715,6 +715,7 @@ function BranchPLTrendChart({ breakdownStats = [], filterYear }) {
 // Value = sb.billing + sb.material (service sale + material sale), coloured by staff.
 function BranchStaffSalesChart({ periodEntries, branchStaff, allStaff, filterMode, filterYear, filterMonth, endMonth, onDayClick }) {
   const [hover, setHover] = useState(null);
+  const [detailSid, setDetailSid] = useState(null); // per-staff breakup modal
   const isMonth = filterMode === "month";
 
   const palette = ["#60a5fa", "#4ade80", "#fbbf24", "#f472b6", "#a78bfa", "#22d3ee", "#fb923c", "#34d399", "#f87171", "#c084fc", "#facc15", "#2dd4bf"];
@@ -909,15 +910,19 @@ function BranchStaffSalesChart({ periodEntries, branchStaff, allStaff, filterMod
                     const avgPct = st.high > 0 ? Math.min(100, Math.round((st.avg / st.high) * 100)) : 0;
                     const name = staffById[sid]?.name || "Unknown";
                     return (
-                      <div key={sid} style={{
-                        position: "relative",
+                      <div key={sid} onClick={() => setDetailSid(sid)} title="Click for the day-by-day break-up"
+                        style={{
+                        position: "relative", cursor: "pointer",
                         background: `linear-gradient(145deg, rgba(255,255,255,0.02), rgba(255,255,255,0)), var(--bg3)`,
                         border: `1px solid ${color}2E`,
                         borderRadius: 12,
                         padding: "14px 16px 12px",
                         boxShadow: `0 1px 2px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.04)`,
                         overflow: "hidden",
-                      }}>
+                        transition: "border-color .15s, box-shadow .15s",
+                      }}
+                        onMouseEnter={e => { e.currentTarget.style.borderColor = `${color}80`; e.currentTarget.style.boxShadow = `0 2px 10px -2px ${color}55, inset 0 1px 0 rgba(255,255,255,0.04)`; }}
+                        onMouseLeave={e => { e.currentTarget.style.borderColor = `${color}2E`; e.currentTarget.style.boxShadow = `0 1px 2px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.04)`; }}>
                         {/* Top accent strip — carries the staff color without the
                             heavy 3px left border used previously. */}
                         <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3, background: `linear-gradient(90deg, ${color}, ${color}55 70%, transparent)` }} />
@@ -973,6 +978,64 @@ function BranchStaffSalesChart({ periodEntries, branchStaff, allStaff, filterMod
           })()}
         </>
       )}
+
+      {/* Per-staff day/month break-up */}
+      {detailSid && (() => {
+        const MS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+        const label = (k) => {
+          if (!k) return "—";
+          const p = k.split("-");
+          if (p.length === 3) return `${Number(p[2])} ${MS[Number(p[1]) - 1] || ""}`.trim();
+          if (p.length === 2) return MS[Number(p[1]) - 1] || k;
+          return k;
+        };
+        const st = staffStats[detailSid] || { total: 0, avg: 0, high: 0, low: 0, activeCount: 0 };
+        const rows = buckets
+          .map(b => ({ key: b.key, val: b.stacks[detailSid] || 0 }))
+          .filter(r => r.val > 0)
+          .sort((a, b) => b.val - a.val);
+        const name = staffById[detailSid]?.name || "Staff";
+        return (
+          <div onClick={() => setDetailSid(null)}
+            style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 20 }}>
+            <div onClick={e => e.stopPropagation()}
+              style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 16, width: "min(520px, 100%)", maxHeight: "80vh", display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "0 30px 80px -20px rgba(0,0,0,0.7)" }}>
+              <div style={{ padding: "16px 18px", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div>
+                  <div style={{ fontSize: 14, fontWeight: 800, color: "var(--text)" }}>{name}</div>
+                  <div style={{ fontSize: 10, color: "var(--text3)", fontWeight: 600, textTransform: "uppercase", letterSpacing: 1 }}>{isMonth ? "Day-by-day" : "Month-by-month"} sales · service + material</div>
+                </div>
+                <button onClick={() => setDetailSid(null)} style={{ width: 30, height: 30, borderRadius: 8, background: "var(--bg4)", border: "1px solid var(--border2)", color: "var(--text2)", cursor: "pointer", fontSize: 16, lineHeight: 1 }}>×</button>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 1, background: "var(--border)" }}>
+                {[["Total", INR(st.total), "var(--green)"], ["Avg", INR(st.avg), "var(--blue, #60a5fa)"], ["High", INR(st.high), "var(--green)"], [isMonth ? "Days" : "Months", st.activeCount, "var(--text)"]].map(([l, v, c]) => (
+                  <div key={l} style={{ background: "var(--bg3)", padding: "10px 12px" }}>
+                    <div style={{ fontSize: 8.5, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1 }}>{l}</div>
+                    <div style={{ fontSize: 13, fontWeight: 800, color: c, marginTop: 2 }}>{v}</div>
+                  </div>
+                ))}
+              </div>
+              <div style={{ overflowY: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12.5 }}>
+                  <thead><tr>
+                    <TH>{isMonth ? "Date" : "Month"}</TH><TH right>Sale</TH><TH right>% of total</TH>
+                  </tr></thead>
+                  <tbody>
+                    {rows.map(r => (
+                      <tr key={r.key}>
+                        <TD style={{ fontWeight: 700 }}>{label(r.key)}</TD>
+                        <TD right style={{ color: "var(--green)", fontWeight: 700 }}>{INR(r.val)}</TD>
+                        <TD right style={{ color: "var(--text3)" }}>{st.total > 0 ? Math.round((r.val / st.total) * 100) : 0}%</TD>
+                      </tr>
+                    ))}
+                    {rows.length === 0 && <tr><TD colSpan={3} style={{ textAlign: "center", color: "var(--text3)", fontStyle: "italic", padding: 20 }}>No sales in this period.</TD></tr>}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </Card>
   );
 }
