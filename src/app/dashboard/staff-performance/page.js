@@ -6,6 +6,7 @@ import { useCurrentUser } from "@/lib/currentUser";
 import { INR, MONTHS, makeFilterPrefix, periodLabel, staffStatusForMonth, staffLeavesInMonth, proRataSalary, proRataSalaryDetail, effectiveBranchOnDate, toTitleCase } from "@/lib/calculations";
 import { PeriodWidget, Card, Pill, TH, TD, Icon, Modal, ToggleGroup } from "@/components/ui";
 import VLoader from "@/components/VLoader";
+import AttendanceCalendarModal from "@/components/AttendanceCalendarModal";
 
 const NOW = new Date();
 const todayStr = `${NOW.getFullYear()}-${String(NOW.getMonth() + 1).padStart(2, "0")}-${String(NOW.getDate()).padStart(2, "0")}`;
@@ -45,6 +46,7 @@ export default function StaffPerformancePage() {
   const [targetFilter, setTargetFilter] = useState("all"); // all | met | notmet
   const [selectedId, setSelectedId] = useState(null);
   const [salaryStaffId, setSalaryStaffId] = useState(null); // salary breakdown modal
+  const [calTarget, setCalTarget] = useState(null); // { staff, month } for attendance calendar
   const [savedFilters, setSavedFilters] = useState(false); // a saved preset exists
   const [savedFlash, setSavedFlash] = useState(false);     // transient "Saved ✓" feedback
 
@@ -399,7 +401,22 @@ export default function StaffPerformancePage() {
           globalSettings={globalSettings}
           staffList={staff}
           isAdmin={isAdmin}
+          currentMonth={filterMode === "month" ? filterPrefix : `${filterYear}-${String(NOW.getMonth() + 1).padStart(2, "0")}`}
+          onCalendar={(s, month) => setCalTarget({ staff: s, month })}
           onClose={() => setSelectedId(null)}
+        />
+      )}
+
+      {/* Attendance calendar */}
+      {calTarget && (
+        <AttendanceCalendarModal
+          target={calTarget}
+          onClose={() => setCalTarget(null)}
+          entries={entries}
+          leaves={leaves}
+          branches={branches}
+          canEdit={false}
+          currentUser={currentUser}
         />
       )}
 
@@ -611,7 +628,7 @@ function StaffSection({ title, color, rows, isAdmin, branchName, onOpen, onSalar
 
 // Lifetime + month-by-month + branch-by-branch history for one staff member,
 // scanning ALL entries (not just the selected period).
-function StaffHistoryModal({ staff, entries, branchesById, branchName, transfers, leaves, salHistory, globalSettings, staffList, branches, isAdmin, onClose }) {
+function StaffHistoryModal({ staff, entries, branchesById, branchName, transfers, leaves, salHistory, globalSettings, staffList, branches, isAdmin, currentMonth, onCalendar, onClose }) {
   const { byMonth, byBranch, lifetime } = useMemo(() => {
     const bm = new Map();   // 'YYYY-MM' → totals
     const bb = new Map();   // branchId → totals + span
@@ -663,6 +680,12 @@ function StaffHistoryModal({ staff, entries, branchesById, branchName, transfers
           <InfoChip label="Joined" value={staff.join || "—"} />
           {staff.exit_date && <InfoChip label="Exited" value={staff.exit_date} color="var(--red)" />}
           <InfoChip label="Target rule" value="3× salary" color="var(--accent)" />
+          {onCalendar && (
+            <button onClick={() => onCalendar(staff, currentMonth)} title="Attendance calendar — days & shops worked"
+              style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 12px", borderRadius: 8, background: "rgba(var(--accent-rgb),0.12)", border: "1px solid rgba(var(--accent-rgb),0.4)", color: "var(--accent)", cursor: "pointer", fontSize: 11, fontWeight: 800, textTransform: "uppercase", letterSpacing: 0.5 }}>
+              📅 View Calendar
+            </button>
+          )}
         </div>
 
         {/* Lifetime totals */}
@@ -715,7 +738,7 @@ function StaffHistoryModal({ staff, entries, branchesById, branchName, transfers
               <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, minWidth: 640 }}>
                 <thead><tr>
                   <TH>Month</TH><TH right>Billing</TH><TH right>Incentive</TH><TH right>Material</TH>
-                  {isAdmin && <TH right>Salary</TH>}<TH right>Days</TH><TH right>Leaves</TH><TH>Branches</TH>
+                  {isAdmin && <TH right>Salary</TH>}<TH right>Days</TH><TH right>Leaves</TH><TH>Branches</TH>{onCalendar && <TH></TH>}
                 </tr></thead>
                 <tbody>
                   {months.map(([mp, v]) => (
@@ -728,9 +751,15 @@ function StaffHistoryModal({ staff, entries, branchesById, branchName, transfers
                       <TD right style={{ color: "var(--text3)" }}>{v.days.size}</TD>
                       <TD right style={{ color: "var(--text3)" }}>{staffLeavesInMonth(staff.id, mp, leaves)} d</TD>
                       <TD style={{ fontSize: 11, color: "var(--text3)" }}>{[...v.branches].map(branchName).join(", ") || "—"}</TD>
+                      {onCalendar && (
+                        <TD right>
+                          <button onClick={() => onCalendar(staff, mp)} title={`Attendance calendar — ${monthLabel(mp)}`}
+                            style={{ width: 30, height: 28, borderRadius: 8, background: "rgba(var(--accent-rgb),0.1)", border: "1px solid rgba(var(--accent-rgb),0.35)", color: "var(--accent)", cursor: "pointer", fontSize: 13, lineHeight: 1, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>📅</button>
+                        </TD>
+                      )}
                     </tr>
                   ))}
-                  {months.length === 0 && <tr><TD colSpan={isAdmin ? 8 : 7} style={{ textAlign: "center", color: "var(--text3)", fontStyle: "italic" }}>No monthly history.</TD></tr>}
+                  {months.length === 0 && <tr><TD colSpan={(isAdmin ? 8 : 7) + (onCalendar ? 1 : 0)} style={{ textAlign: "center", color: "var(--text3)", fontStyle: "italic" }}>No monthly history.</TD></tr>}
                 </tbody>
               </table>
             </div>
