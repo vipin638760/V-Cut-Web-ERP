@@ -2153,24 +2153,30 @@ export default function BranchesPage() {
                     );
                   }
                   if (attChip === "leave") {
-                    // Group leaves by staff → taken (days) + paid balance vs monthly quota.
+                    // Group by staff from the RAW approved-leave records for this
+                    // branch + month, summing each record's `days` so multi-day
+                    // leaves (and days the staff also clocked work) still count
+                    // toward taken / balance vs the monthly quota.
                     const quota = attBranch?.type === "unisex" ? (globalSettings?.unisex_leaves ?? 3) : (globalSettings?.mens_leaves ?? 2);
+                    const monthPrefix = `${yr}-${String(mo).padStart(2, "0")}`;
                     const grp = new Map();
-                    monthLeaves.forEach(l => {
-                      const g = grp.get(l.id) || { id: l.id, name: l.name, dates: [] };
-                      g.dates.push({ date: l.date, type: l.type });
-                      grp.set(l.id, g);
+                    (leaves || []).forEach(l => {
+                      if (!(l.status === "approved" || !l.status)) return;
+                      if (!l.date || !l.date.startsWith(monthPrefix)) return;
+                      if (staffById.get(l.staff_id)?.branch_id !== attBranch?.id) return;
+                      const g = grp.get(l.staff_id) || { id: l.staff_id, name: staffById.get(l.staff_id)?.name || "Staff", dates: [], taken: 0 };
+                      g.taken += Number(l.days) || 1;
+                      g.dates.push({ date: l.date, type: l.type || "Paid" });
+                      grp.set(l.staff_id, g);
                     });
                     const groups = [...grp.values()]
-                      .map(g => {
-                        const taken = g.dates.length;
-                        return { ...g, taken, paid: Math.min(taken, quota), lop: Math.max(0, taken - quota), balance: Math.max(0, quota - taken),
-                          dates: g.dates.sort((a, b) => b.date.localeCompare(a.date)) };
-                      })
+                      .map(g => ({ ...g, paid: Math.min(g.taken, quota), lop: Math.max(0, g.taken - quota), balance: Math.max(0, quota - g.taken),
+                        dates: g.dates.sort((a, b) => b.date.localeCompare(a.date)) }))
                       .sort((a, b) => b.taken - a.taken || a.name.localeCompare(b.name));
+                    const totalDays = groups.reduce((s, g) => s + g.taken, 0);
                     return (
                       <div>
-                        {head("On leave", LEAVE_HEX, `${groups.length} staff · ${monthLeaves.length} day${monthLeaves.length === 1 ? "" : "s"}`)}
+                        {head("On leave", LEAVE_HEX, `${groups.length} staff · ${totalDays} day${totalDays === 1 ? "" : "s"}`)}
                         {groups.length === 0 ? empty("No leaves this month.") : (
                           <div style={rowWrap}>
                             {groups.map(g => {
@@ -2199,7 +2205,7 @@ export default function BranchesPage() {
                                           style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "6px 10px", background: "var(--bg3)", border: "1px solid var(--border)", borderRadius: 8, cursor: "pointer", width: "100%", textAlign: "left" }}
                                           onMouseEnter={e => e.currentTarget.style.background = "var(--bg4)"}
                                           onMouseLeave={e => e.currentTarget.style.background = "var(--bg3)"}>
-                                          <span style={{ fontSize: 12, fontWeight: 700, color: "var(--text2)" }}>{dayLabel(d.date)}</span>
+                                          <span style={{ fontSize: 12, fontWeight: 700, color: "var(--text2)" }}>{new Date(d.date + "T00:00").toLocaleString("en-US", { weekday: "short", day: "numeric", month: "short" })}</span>
                                           <span style={{ fontSize: 9, fontWeight: 800, color: LEAVE_HEX, textTransform: "uppercase" }}>{d.type}</span>
                                         </button>
                                       ))}
