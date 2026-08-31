@@ -48,7 +48,7 @@ function ReqDayPopover({ bk, reqDaily }) {
     <div style={{ position: "absolute", top: "100%", right: 0, marginTop: 6, zIndex: 30, minWidth: 220, background: "var(--bg2)", border: "1px solid var(--border2)", borderRadius: 10, padding: "10px 12px", boxShadow: "0 12px 30px rgba(0,0,0,0.6)", textAlign: "left" }}>
       <div style={{ fontSize: 10, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 }}>Req / Day break-up</div>
       {Row("Fixed (shop + room rent · elec · wifi)", bk.fixed, "var(--orange)")}
-      {Row("Salary (full month)", bk.salary, "var(--blue, #60a5fa)")}
+      {Row("Salary (this month)", bk.salary, "var(--blue, #60a5fa)")}
       {Row("Variable (inc · mat · petrol)", bk.variable, "var(--red)")}
       {Row("GST", bk.gst, "var(--red)")}
       <div style={{ borderTop: "1px dashed var(--border2)", margin: "6px 0", paddingTop: 6, display: "flex", justifyContent: "space-between", fontSize: 11 }}>
@@ -2848,7 +2848,7 @@ export default function BranchesPage() {
     let totalShopRent = 0, totalRoomRent = 0, totalElec = 0, totalWifi = 0, totalSalary = 0;
     // Full monthly salary (base, no proration) + calendar days in the period —
     // used for the "required daily average" break-even figure.
-    let totalFullSalary = 0, daysInReqPeriod = 0;
+    let daysInReqPeriod = 0;
 
     for (let m = startMonthStats; m <= endMonth; m++) {
       const monthPrefix = `${filterYear}-${m < 10 ? '0' + m : m}`;
@@ -2877,11 +2877,6 @@ export default function BranchesPage() {
       totalElec += mf.shop_elec + mf.room_elec; totalWifi += mf.wifi;
       totalSalary += actSal;
       totalFixedSalaryComp += (mFixed + actSal);
-      // Full base salary of the branch's active staff this month (no proration).
-      const mRefDate = `${monthPrefix}-${String(new Date(filterYear, m, 0).getDate()).padStart(2, '0')}`;
-      totalFullSalary += staff
-        .filter(s => effectiveBranchOnDate(s, mRefDate, transfers) === b.id && staffStatusForMonth(s, monthPrefix).status !== 'inactive')
-        .reduce((sum, s) => sum + (Number(s.salary) || 0), 0);
       daysInReqPeriod += new Date(filterYear, m, 0).getDate();
     }
 
@@ -2890,16 +2885,17 @@ export default function BranchesPage() {
     const totalIncSum = totalOnline + totalCash + totalMatInc;
     const totalVarExp = totalIncentiveExp + totalMatExp + totalOtherExp;
 
-    // Required daily average — daily income needed to cover the FULL operating
-    // cost, spread across the calendar days: fixed + full salary + variable
-    // (incentives + material + petrol/other) + GST. Income must clear this to
-    // break even on everything.
+    // Required daily average — daily income needed to cover the period's
+    // operating cost, spread across the calendar days: fixed + salary +
+    // variable (incentives + material + petrol/other) + GST. Uses the same
+    // actual (pro-rata) salary as the Expense Breakdown so the break-up total
+    // ties out to Total Expense. Income must clear this to break even.
     const reqDaily = daysInReqPeriod > 0
-      ? Math.round((totalShopRent + totalRoomRent + totalElec + totalWifi + totalFullSalary + totalVarExp + totalGstEst) / daysInReqPeriod)
+      ? Math.round((totalShopRent + totalRoomRent + totalElec + totalWifi + totalSalary + totalVarExp + totalGstEst) / daysInReqPeriod)
       : 0;
     const reqDailyBreakup = {
       fixed: totalShopRent + totalRoomRent + totalElec + totalWifi,
-      salary: totalFullSalary, variable: totalVarExp, gst: totalGstEst, days: daysInReqPeriod,
+      salary: totalSalary, variable: totalVarExp, gst: totalGstEst, days: daysInReqPeriod,
     };
     const netSum = totalIncSum - totalVarExp;
     const fullNetSum = netSum - totalFixedSalaryComp - totalGstEst;

@@ -420,11 +420,13 @@ export default function DashboardPage() {
   // variable (incentives + material + petrol/other) + GST. Month mode only.
   const _daysInMonthReq = new Date(filterYear, filterMonth, 0).getDate();
   const _fixedNet = branchData.reduce((s, d) => s + (d.fShopRent || 0) + (d.fRoomRent || 0) + (d.fWifi || 0) + (d.fElec || 0), 0);
-  const _fullSalaryNet = staff.filter(s => staffStatusForMonth(s, filterPrefix).status !== "inactive").reduce((s, st) => s + (Number(st.salary) || 0), 0);
+  // Actual (pro-rata) salary — same figure the Expense Breakdown / Total Expense
+  // uses, so the Req/Day break-up total ties out to Total Expense.
+  const _salaryNet = branchData.reduce((s, d) => s + (d.actualSalary || 0), 0);
   const _varNet = branchData.reduce((s, d) => s + (d.vInc || 0) + (d.vMatE || 0) + (d.vOther || 0), 0);
   const _gstNet = branchData.reduce((s, d) => s + (d.totalGst || 0), 0);
-  const reqDailyBreakup = { fixed: _fixedNet, salary: _fullSalaryNet, variable: _varNet, gst: _gstNet, days: _daysInMonthReq };
-  const reqDailyNet = (isYearly || _daysInMonthReq <= 0) ? 0 : Math.round((_fixedNet + _fullSalaryNet + _varNet + _gstNet) / _daysInMonthReq);
+  const reqDailyBreakup = { fixed: _fixedNet, salary: _salaryNet, variable: _varNet, gst: _gstNet, days: _daysInMonthReq };
+  const reqDailyNet = (isYearly || _daysInMonthReq <= 0) ? 0 : Math.round((_fixedNet + _salaryNet + _varNet + _gstNet) / _daysInMonthReq);
 
   // Active stylists for the period's reference month — the selected month in
   // month mode, or the current month (or Dec of a past year) in year mode.
@@ -2710,7 +2712,7 @@ function ReqDayPopover({ bk, reqDaily }) {
     <div style={{ position: "absolute", top: "100%", right: 0, marginTop: 6, zIndex: 30, minWidth: 220, background: "var(--bg2)", border: "1px solid var(--border2)", borderRadius: 10, padding: "10px 12px", boxShadow: "0 12px 30px rgba(0,0,0,0.6)", textAlign: "left" }}>
       <div style={{ fontSize: 10, fontWeight: 800, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 }}>Req / Day break-up</div>
       {Row("Fixed (shop + room rent · elec · wifi)", bk.fixed, "var(--orange)")}
-      {Row("Salary (full month)", bk.salary, "var(--blue, #60a5fa)")}
+      {Row("Salary (this month)", bk.salary, "var(--blue, #60a5fa)")}
       {Row("Variable (inc · mat · petrol)", bk.variable, "var(--red)")}
       {Row("GST", bk.gst, "var(--red)")}
       <div style={{ borderTop: "1px dashed var(--border2)", margin: "6px 0", paddingTop: 6, display: "flex", justifyContent: "space-between", fontSize: 11 }}>
