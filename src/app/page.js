@@ -74,7 +74,7 @@ export default function LoginPage() {
     try {
       if (db) {
         const timeout = new Promise((_, reject) =>
-          setTimeout(() => reject(new Error("timeout")), 6000)
+          setTimeout(() => reject(new Error("timeout")), 12000)
         );
         const snap = await Promise.race([getDocs(collection(db, "users")), timeout]);
         snap.docs.forEach((d) => {
