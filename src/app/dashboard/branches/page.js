@@ -4454,7 +4454,7 @@ export default function BranchesPage() {
         <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 10px", border: "1px solid var(--border2)", borderRadius: 10, background: "var(--bg4)" }}>
           <ToggleGroup label="Type" options={[["all","All"],["mens","Mens"],["unisex","Unisex"]]} value={brTypeFilter} onChange={setBrTypeFilter} />
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", rowGap: 8 }}>
           <span style={{ fontSize: 10, color: "var(--text3)", textTransform: "uppercase", letterSpacing: ".5px" }}>Sort</span>
           <SearchSelect
             value={brSortCol}

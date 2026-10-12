@@ -480,16 +480,19 @@ export function PeriodWidget({ filterMode, setFilterMode, filterYear, setFilterY
         <div style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", pointerEvents: "none", color: "var(--text3)", fontSize: 8 }}>&#9660;</div>
       </div>
 
-      {/* Months */}
+      {/* Months — horizontally scrollable on narrow screens so all 12 stay
+          reachable instead of overflowing the viewport and getting clipped. */}
       {filterMode === "month" && (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(12, 1fr)", background: "var(--bg4)", padding: 3, borderRadius: 10, flex: "1 1 480px", minWidth: 420, position: "relative" }}>
-          <div style={{ position: "absolute", top: 3, bottom: 3, left: 3, width: "calc((100% - 6px) / 12)", background: "linear-gradient(135deg, var(--accent), var(--gold2))", borderRadius: 8, transform: `translateX(calc(100% * ${filterMonth - 1}))`, transition: "all 0.3s ease", zIndex: 1 }} />
-          {MONTHS.map((m, i) => (
-            <button key={i} onClick={() => setFilterMonth(i + 1)}
-              style={{ border: "none", background: "transparent", color: filterMonth === i + 1 ? "#000" : "var(--text3)", padding: "8px 0", fontSize: 10, fontWeight: 700, cursor: "pointer", zIndex: 2, transition: "color 0.3s", textTransform: "uppercase", textAlign: "center" }}>
-              {m}
-            </button>
-          ))}
+        <div style={{ flex: "1 1 320px", minWidth: 0, maxWidth: "100%", overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(12, 1fr)", background: "var(--bg4)", padding: 3, borderRadius: 10, minWidth: 360, position: "relative" }}>
+            <div style={{ position: "absolute", top: 3, bottom: 3, left: 3, width: "calc((100% - 6px) / 12)", background: "linear-gradient(135deg, var(--accent), var(--gold2))", borderRadius: 8, transform: `translateX(calc(100% * ${filterMonth - 1}))`, transition: "all 0.3s ease", zIndex: 1 }} />
+            {MONTHS.map((m, i) => (
+              <button key={i} onClick={() => setFilterMonth(i + 1)}
+                style={{ border: "none", background: "transparent", color: filterMonth === i + 1 ? "#000" : "var(--text3)", padding: "8px 0", fontSize: 10, fontWeight: 700, cursor: "pointer", zIndex: 2, transition: "color 0.3s", textTransform: "uppercase", textAlign: "center", whiteSpace: "nowrap" }}>
+                {m}
+              </button>
+            ))}
+          </div>
         </div>
       )}
 
