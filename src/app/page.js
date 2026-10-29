@@ -72,48 +72,51 @@ export default function LoginPage() {
 
     let allUsers = [...DEFAULTS_USERS];
     // **Why:** a failed Firestore fetch used to silently fall back to the 7
-    // hardcoded defaults and report "User not found" for real DB accounts. Track
-    // whether the DB was actually read so the error can say what went wrong, and
-    // fall back to the Firestore REST API when the SDK channel fails or times out.
+    // hardcoded defaults and report "User not found" for real DB accounts. The SDK
+    // fetch and a plain REST fetch race in parallel — whichever answers first wins —
+    // so a blocked/slow SDK channel no longer stacks two sequential timeouts
+    // (12s + 8s) before login responds.
     let dbFetched = false;
     const mergeUser = (ud, id) => {
       const existingIdx = allUsers.findIndex((u) => u.id === id);
       if (existingIdx !== -1) allUsers[existingIdx] = { ...ud, id };
       else allUsers.push({ ...ud, id });
     };
+    const sdkFetch = (async () => {
+      if (!db) throw new Error("no db");
+      const snap = await getDocs(collection(db, "users"));
+      return snap.docs.map((d) => ({ ud: d.data(), id: d.id }));
+    })();
+    const restFetch = (async () => {
+      const { projectId, apiKey } = app.options;
+      const res = await fetch(
+        `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/users?pageSize=300&key=${apiKey}`,
+        { signal: AbortSignal.timeout(8000) }
+      );
+      if (!res.ok) throw new Error(`REST ${res.status}`);
+      const data = await res.json();
+      return (data.documents || []).map((d) => ({
+        id: d.name.split("/").pop(),
+        ud: Object.fromEntries(
+          Object.entries(d.fields || {}).map(([k, v]) => [
+            k,
+            v.stringValue ?? v.integerValue ?? v.doubleValue ?? v.booleanValue ?? "",
+          ])
+        ),
+      }));
+    })();
+    // Silence the loser's unhandled rejection; Promise.any surfaces the first success.
+    sdkFetch.catch(() => {});
+    restFetch.catch(() => {});
     try {
-      if (db) {
-        const timeout = new Promise((_, reject) =>
-          setTimeout(() => reject(new Error("timeout")), 12000)
-        );
-        const snap = await Promise.race([getDocs(collection(db, "users")), timeout]);
-        snap.docs.forEach((d) => mergeUser(d.data(), d.id));
-        dbFetched = true;
-      }
+      const timeout = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("timeout")), 10000)
+      );
+      const users = await Promise.race([Promise.any([sdkFetch, restFetch]), timeout]);
+      users.forEach(({ ud, id }) => mergeUser(ud, id));
+      dbFetched = true;
     } catch (err) {
-      console.warn("Firebase SDK user fetch failed, trying REST:", err.message);
-      try {
-        const { projectId, apiKey } = app.options;
-        const res = await fetch(
-          `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/users?pageSize=300&key=${apiKey}`,
-          { signal: AbortSignal.timeout(8000) }
-        );
-        if (!res.ok) throw new Error(`REST ${res.status}`);
-        const data = await res.json();
-        (data.documents || []).forEach((d) => {
-          const id = d.name.split("/").pop();
-          const ud = Object.fromEntries(
-            Object.entries(d.fields || {}).map(([k, v]) => [
-              k,
-              v.stringValue ?? v.integerValue ?? v.doubleValue ?? v.booleanValue ?? "",
-            ])
-          );
-          mergeUser(ud, id);
-        });
-        dbFetched = true;
-      } catch (restErr) {
-        console.warn("Firebase REST user fetch failed (Using defaults):", restErr.message);
-      }
+      console.warn("User fetch failed on both SDK and REST (Using defaults):", err.message);
     }
 
     const uRole = selectedRole.toLowerCase().trim();
