@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState, useRef, useMemo, Fragment } from "react";
-import { collection, onSnapshot, query, orderBy, doc } from "firebase/firestore";
+import { collection, onSnapshot, query, orderBy, where, doc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useCurrentUser } from "@/lib/currentUser";
 import { INR, MONTHS, staffBillingInPeriod, makeFilterPrefix, periodLabel, proRataSalary, salaryByBranchForMonth, branchSalaryShare, staffLeavesInMonth, staffStatusForMonth, staffIncentivesInPeriod, parseLocalDate, getMonthlyFixed, MASK, computeIncentiveExpense, toTitleCase, shiftMonth, lastDayWithData, cumulativeCollection, fmtDelta } from "@/lib/calculations";
@@ -151,14 +151,6 @@ export default function DashboardPage() {
       onSnapshot(doc(db, "settings", "global"),
         sn => setGlobalSettings(sn.data() || {}),
         err("settings")),
-      onSnapshot(
-        query(collection(db, "entries"), orderBy("date", "desc")),
-        sn => {
-          setEntries(sn.docs.map(d => ({ ...d.data(), id: d.id })));
-          setLoading(false);
-        },
-        err("entries")
-      ),
       onSnapshot(collection(db, "staff_advances"),
         sn => setAdvances(sn.docs.map(d => ({ ...d.data(), id: d.id }))),
         err("staff_advances")),
@@ -184,6 +176,24 @@ export default function DashboardPage() {
     ];
     return () => unsubs.forEach(u => u());
   }, [subTick]);
+
+  // Entries are the heaviest collection (one fat rollup per branch per day, each
+  // with staff_billing arrays). The dashboard only shows the selected year plus
+  // prior-3-month comparisons, so scope the read to filterYear-1 onward instead
+  // of pulling the entire history on every open — the main cause of slow load.
+  useEffect(() => {
+    if (!db) return;
+    const start = `${filterYear - 1}-01-01`;
+    const unsub = onSnapshot(
+      query(collection(db, "entries"), where("date", ">=", start), orderBy("date", "desc")),
+      sn => {
+        setEntries(sn.docs.map(d => ({ ...d.data(), id: d.id })));
+        setLoading(false);
+      },
+      (e) => { console.warn("entries sync error:", e); setLoading(false); }
+    );
+    return () => unsub();
+  }, [subTick, filterYear]);
 
   const filterPrefix = makeFilterPrefix(filterYear, filterMonth);
   const plabel       = periodLabel(filterMode, filterYear, filterMonth);
