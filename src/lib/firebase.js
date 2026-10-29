@@ -4,6 +4,7 @@ import {
   persistentLocalCache,
   persistentMultipleTabManager,
   getFirestore,
+  CACHE_SIZE_UNLIMITED,
 } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 
@@ -25,7 +26,16 @@ const isBrowser = typeof window !== "undefined" && typeof indexedDB !== "undefin
 if (isBrowser) {
   try {
     db = initializeFirestore(app, {
-      localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
+      localCache: persistentLocalCache({
+        tabManager: persistentMultipleTabManager(),
+        // Default 40MB LRU-evicts the fat `entries` collection; unlimited keeps
+        // the whole dataset local so dashboards open instantly from cache.
+        cacheSizeBytes: CACHE_SIZE_UNLIMITED,
+      }),
+      // Some ISPs/proxies/antivirus break Firestore's WebChannel streaming while
+      // plain HTTPS works fine (login's REST fallback proved this in the field).
+      // Long-polling rides ordinary HTTPS requests, so reads work everywhere.
+      experimentalForceLongPolling: true,
     });
   } catch {
     // Already initialized (hot reload) or unsupported (e.g. private mode) — fall back.
