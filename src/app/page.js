@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect } from "react";
 import { collection, getDocs } from "firebase/firestore";
-import { db } from "@/lib/firebase";
+import { db, app } from "@/lib/firebase";
 import { DEFAULTS_USERS } from "@/lib/constants";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/ui";
@@ -71,21 +71,49 @@ export default function LoginPage() {
     setErrorMsg("");
 
     let allUsers = [...DEFAULTS_USERS];
+    // **Why:** a failed Firestore fetch used to silently fall back to the 7
+    // hardcoded defaults and report "User not found" for real DB accounts. Track
+    // whether the DB was actually read so the error can say what went wrong, and
+    // fall back to the Firestore REST API when the SDK channel fails or times out.
+    let dbFetched = false;
+    const mergeUser = (ud, id) => {
+      const existingIdx = allUsers.findIndex((u) => u.id === id);
+      if (existingIdx !== -1) allUsers[existingIdx] = { ...ud, id };
+      else allUsers.push({ ...ud, id });
+    };
     try {
       if (db) {
         const timeout = new Promise((_, reject) =>
           setTimeout(() => reject(new Error("timeout")), 12000)
         );
         const snap = await Promise.race([getDocs(collection(db, "users")), timeout]);
-        snap.docs.forEach((d) => {
-          const ud = d.data();
-          const existingIdx = allUsers.findIndex((u) => u.id === d.id);
-          if (existingIdx !== -1) allUsers[existingIdx] = { ...ud, id: d.id };
-          else allUsers.push({ ...ud, id: d.id });
-        });
+        snap.docs.forEach((d) => mergeUser(d.data(), d.id));
+        dbFetched = true;
       }
     } catch (err) {
-      console.warn("Firebase user fetch failed (Using defaults):", err.message);
+      console.warn("Firebase SDK user fetch failed, trying REST:", err.message);
+      try {
+        const { projectId, apiKey } = app.options;
+        const res = await fetch(
+          `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/users?pageSize=300&key=${apiKey}`,
+          { signal: AbortSignal.timeout(8000) }
+        );
+        if (!res.ok) throw new Error(`REST ${res.status}`);
+        const data = await res.json();
+        (data.documents || []).forEach((d) => {
+          const id = d.name.split("/").pop();
+          const ud = Object.fromEntries(
+            Object.entries(d.fields || {}).map(([k, v]) => [
+              k,
+              v.stringValue ?? v.integerValue ?? v.doubleValue ?? v.booleanValue ?? "",
+            ])
+          );
+          mergeUser(ud, id);
+        });
+        dbFetched = true;
+      } catch (restErr) {
+        console.warn("Firebase REST user fetch failed (Using defaults):", restErr.message);
+      }
     }
 
     const uRole = selectedRole.toLowerCase().trim();
@@ -106,6 +134,8 @@ export default function LoginPage() {
         if ((dbUser.password || "").trim() !== uPass) msg = "Incorrect password for " + dbUser.id;
         else if ((dbUser.role || "").toLowerCase().trim() !== uRole)
           msg = "Role mismatch (User as " + (dbUser.role || "none") + ")";
+      } else if (!dbFetched) {
+        msg = "Couldn't reach the user database — check your internet connection and try again.";
       } else {
         msg = "User not found (Checked " + allUsers.length + " local/DB entries)";
       }
