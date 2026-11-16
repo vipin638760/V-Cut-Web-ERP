@@ -1266,10 +1266,14 @@ export default function BranchesPage() {
     // Next's client-side router uses history.pushState; patch it to emit an event
     // so this page can re-sync when the user arrives via router.push while the
     // component is still mounted.
+    // **Why defer:** Next 16's router calls pushState inside a useInsertionEffect.
+    // Dispatching synchronously here ran applyUrlState's setState *during* that
+    // insertion effect, which React 19 rejects ("useInsertionEffect must not
+    // schedule updates"). queueMicrotask moves the re-sync out of that phase.
     const origPush = window.history.pushState;
     window.history.pushState = function (...args) {
       const result = origPush.apply(this, args);
-      window.dispatchEvent(new Event("vcut:urlchange"));
+      queueMicrotask(() => window.dispatchEvent(new Event("vcut:urlchange")));
       return result;
     };
     window.addEventListener("vcut:urlchange", applyUrlState);
