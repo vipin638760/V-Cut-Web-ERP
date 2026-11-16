@@ -2916,6 +2916,11 @@ export default function BranchesPage() {
           .pill-table tbody tr.totals-row > td:first-child { border-left: 1px solid rgba(var(--gold-rgb),0.25); }
           .pill-table tbody tr.totals-row > td:last-child { border-right: 1px solid rgba(var(--gold-rgb),0.25); }
           @media (max-width: 720px) { .pnl-hero { grid-template-columns: 1fr !important; } }
+          .exp-grp { border-bottom: 1px solid var(--border); }
+          .exp-grp > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 10px; padding: 12px 0; }
+          .exp-grp > summary::-webkit-details-marker { display: none; }
+          .exp-grp .chev { transition: transform .2s; color: var(--text3); font-size: 11px; }
+          .exp-grp[open] .chev { transform: rotate(90deg); }
         `}</style>
 
         {/* Back header */}
@@ -3148,31 +3153,54 @@ export default function BranchesPage() {
           {/* Expense Breakdown */}
           <Card style={{ padding: 0 }}>
             <div style={{ padding: "14px 16px", borderBottom: "1px solid var(--border)", fontWeight: 700, color: "var(--red)", fontSize: 12, textTransform: "uppercase", letterSpacing: 1 }}>Expense Breakdown</div>
-            <div style={{ padding: 16 }}>
-              {/* Each line links to its source page so a wrong figure is traceable.
-                  entry/materials filter by ?branch&month; expenses/payroll just land. */}
+            <div style={{ padding: "4px 16px 16px" }}>
+              {/* Grouped into 4 buckets (Premises / People / Material / Tax) to
+                  cut the 9-line list to 4 at-a-glance rows. Expand a group for
+                  its lines — each still links to the page its figure comes from,
+                  so a wrong number stays traceable. Salary stays admin-only. */}
               {(() => {
                 const q = `?branch=${b.id}` + (filterMode === "month" ? `&month=${filterPrefix}` : "");
                 const matTo = `/dashboard/materials${q}&tab=transfers&view=branches`;
-                return [
-                  ["Staff Incentives", INR(totalIncentiveExp), "var(--red)", `/dashboard/incentive-calculator${q}`],
-                  ["Material Cost", INR(totalMatExp), "var(--red)", matTo],
-                  ["Other / Petrol", INR(totalOtherExp), "var(--red)", `/dashboard/entry${q}`],
-                  ["Shop Rent", INR(totalShopRent), "var(--orange)", `/dashboard/expenses${q}&row=${encodeURIComponent("Shop Rent")}`],
-                  ["Room Rent", INR(totalRoomRent), "var(--orange)", `/dashboard/expenses${q}&row=${encodeURIComponent("Room Rent")}`],
-                  ["Electricity", INR(totalElec), "var(--orange)", `/dashboard/expenses${q}&row=${encodeURIComponent("Electricity Shop")}`],
-                  ["WiFi", INR(totalWifi), "var(--orange)", `/dashboard/expenses${q}&row=${encodeURIComponent("WiFi Bill")}`],
-                  ...(isAdmin ? [["Salary", INR(totalSalary), "var(--orange)", `/dashboard/payroll${q}${filterMode === "month" ? "&by=work" : ""}`]] : []),
-                  [`GST Extraction (${gstPct}%)`, INR(totalGstEst), "var(--red)", `/dashboard/entry${q}`],
-                ].map(([l, v, c, to]) => (
-                <div key={l} onClick={() => router.push(to)} title={`Open source: ${to.split("?")[0]}`}
-                  style={{ display: "flex", justifyContent: "space-between", padding: "7px 0", borderBottom: "1px solid var(--border)", fontSize: 12, cursor: "pointer" }}>
-                  <span style={{ color: "var(--accent)", fontWeight: 500, textDecoration: "underline", textDecorationStyle: "dotted", textUnderlineOffset: 3 }}>{l}</span>
-                  <span style={{ fontWeight: 600, color: c }}>{v}</span>
-                </div>
+                const go = (to) => (ev) => { ev.stopPropagation(); router.push(to); };
+                const Line = (l, v, to) => (
+                  <div key={l} onClick={go(to)} title={`Open source: ${to.split("?")[0]}`}
+                    style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0 6px 26px", fontSize: 12.5, cursor: "pointer" }}>
+                    <span style={{ color: "var(--accent)", fontWeight: 500, textDecoration: "underline", textDecorationStyle: "dotted", textUnderlineOffset: 3 }}>{l}</span>
+                    <span style={{ fontWeight: 600, color: "var(--text)" }}>{v}</span>
+                  </div>
+                );
+                const groups = [
+                  { k: "Premises", c: "var(--orange)", total: totalShopRent + totalRoomRent + totalElec + totalWifi, show: true, lines: [
+                    Line("Shop Rent", INR(totalShopRent), `/dashboard/expenses${q}&row=${encodeURIComponent("Shop Rent")}`),
+                    Line("Room Rent", INR(totalRoomRent), `/dashboard/expenses${q}&row=${encodeURIComponent("Room Rent")}`),
+                    Line("Electricity", INR(totalElec), `/dashboard/expenses${q}&row=${encodeURIComponent("Electricity Shop")}`),
+                    Line("WiFi", INR(totalWifi), `/dashboard/expenses${q}&row=${encodeURIComponent("WiFi Bill")}`),
+                  ] },
+                  { k: "People", c: "var(--blue, #60a5fa)", total: totalIncentiveExp + (isAdmin ? totalSalary : 0), show: isAdmin, lines: [
+                    ...(isAdmin ? [Line("Salary", INR(totalSalary), `/dashboard/payroll${q}${filterMode === "month" ? "&by=work" : ""}`)] : []),
+                    Line("Staff Incentives", INR(totalIncentiveExp), `/dashboard/incentive-calculator${q}`),
+                  ] },
+                  { k: "Material + Other", c: "var(--gold)", total: totalMatExp + totalOtherExp, show: true, lines: [
+                    Line("Material Cost", INR(totalMatExp), matTo),
+                    Line("Other / Petrol", INR(totalOtherExp), `/dashboard/entry${q}`),
+                  ] },
+                  { k: `GST (${gstPct}%)`, c: "var(--red)", total: totalGstEst, show: true, lines: [
+                    Line("GST Extraction", INR(totalGstEst), `/dashboard/entry${q}`),
+                  ] },
+                ];
+                return groups.map(g => (
+                  <details key={g.k} className="exp-grp">
+                    <summary>
+                      <span className="chev">▶</span>
+                      <span style={{ width: 9, height: 9, borderRadius: 3, background: g.c, flexShrink: 0 }} />
+                      <span style={{ flex: 1, fontSize: 13.5, fontWeight: 600, color: "var(--text)" }}>{g.k}</span>
+                      <span style={{ fontSize: 14, fontWeight: 700, color: "var(--text)", whiteSpace: "nowrap" }}>{g.show ? INR(g.total) : "•••••"}</span>
+                    </summary>
+                    <div style={{ paddingBottom: 6 }}>{g.lines}</div>
+                  </details>
                 ));
               })()}
-              <div style={{ display: "flex", justifyContent: "space-between", padding: "10px 0 4px", fontSize: 14, fontWeight: 700 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", padding: "12px 0 2px", fontSize: 14, fontWeight: 700 }}>
                 <span style={{ color: "var(--red)" }}>TOTAL</span>
                 <span style={{ color: "var(--red)" }}>{INR(totalVarExp + totalShopRent + totalRoomRent + totalElec + totalWifi + (isAdmin ? totalSalary : 0) + totalGstEst)}</span>
               </div>
