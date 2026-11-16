@@ -2915,6 +2915,7 @@ export default function BranchesPage() {
           .pill-table tbody tr.totals-row > td { background: linear-gradient(180deg, var(--bg4), var(--bg3)) !important; border-top: 1px solid rgba(var(--gold-rgb),0.25); border-bottom: 1px solid rgba(var(--gold-rgb),0.25); }
           .pill-table tbody tr.totals-row > td:first-child { border-left: 1px solid rgba(var(--gold-rgb),0.25); }
           .pill-table tbody tr.totals-row > td:last-child { border-right: 1px solid rgba(var(--gold-rgb),0.25); }
+          @media (max-width: 720px) { .pnl-hero { grid-template-columns: 1fr !important; } }
         `}</style>
 
         {/* Back header */}
@@ -2943,60 +2944,100 @@ export default function BranchesPage() {
 
         <PeriodWidget filterMode={filterMode} setFilterMode={setFilterMode} filterYear={filterYear} setFilterYear={setFilterYear} filterMonth={filterMonth} setFilterMonth={setFilterMonth} />
 
-        {/* KPIs — admin/accountant can click Variable Exp, Fixed Costs, or Total Expense for breakdown */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 16, marginBottom: 24 }}>
-          {[
-            { l: "Total Income", v: INR(totalIncSum), c: "var(--green)" },
-            { l: "Variable Exp", v: INR(totalVarExp), c: "var(--red)", click: canEdit ? "variable" : null },
-            { l: "Fixed Costs", v: canEdit ? INR(totalFixedSalaryComp) : "•••••", c: "var(--orange)", click: canEdit ? "fixed" : null },
-            { l: "GST Est.", v: canEdit ? INR(totalGstEst) : "•••••", c: "var(--red)" },
-            { l: "Total Expense", v: canEdit ? INR(totalVarExp + totalFixedSalaryComp + totalGstEst) : "•••••", c: "var(--red)", click: canEdit ? "total" : null },
-            { l: "Full Net P&L", v: canEdit ? (INR(fullNetSum)) : "•••••", c: fullNetSum >= 0 ? "var(--green)" : "var(--red)" },
-          ].map(({ l, v, c, click }) => {
-            const content = (
-              <>
-                <div style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, display: "flex", alignItems: "center", gap: 6 }}>
-                  {l}
-                  {click && <span title="Click for breakdown" style={{ fontSize: 10, color: "var(--accent)", opacity: 0.85 }}>ⓘ</span>}
+        {/* ── P&L hero: Income − Expense = Net, with cost composition ──
+            Replaces the 6-KPI band. Same figures (totalIncSum, Total Expense,
+            fullNetSum); masking matches the old cards (canEdit for expense/net,
+            isAdmin for the salary-derived People value). Click any composition
+            segment to open the same breakdown popup the old KPIs used. */}
+        {(() => {
+          const income = totalIncSum;
+          const expense = totalVarExp + totalFixedSalaryComp + totalGstEst;
+          const net = fullNetSum;
+          const onPct = income > 0 ? Math.round(totalOnline / income * 100) : 0;
+          const caPct = income > 0 ? Math.round(totalCash / income * 100) : 0;
+          const premises = totalShopRent + totalRoomRent + totalElec + totalWifi;
+          const people = totalSalary + totalIncentiveExp;
+          const material = totalMatExp + totalOtherExp;
+          const gst = totalGstEst;
+          const comp = [
+            { k: "Premises", v: premises, c: "var(--orange)", show: true, click: "fixed" },
+            { k: "People", v: people, c: "var(--blue, #60a5fa)", show: isAdmin, click: "fixed" },
+            { k: "Material", v: material, c: "var(--gold)", show: true, click: "variable" },
+            { k: "GST", v: gst, c: "var(--red)", show: true, click: "total" },
+          ];
+          const compTot = comp.reduce((s, x) => s + x.v, 0) || 1;
+          const series = breakdownStats.map(s => Number(s.income) || 0);
+          const spark = (() => {
+            if (series.length < 2) return null;
+            const max = Math.max(...series, 1);
+            const W = 320, H = 40;
+            const pts = series.map((v, i) => `${(i / (series.length - 1)) * W},${(H - (v / max) * (H - 4) - 2).toFixed(1)}`).join(" ");
+            return <polyline points={pts} fill="none" stroke="var(--green)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />;
+          })();
+          const tgt = Math.round(totalSalary * 3);
+          const tgtPct = tgt > 0 ? Math.round(totalIncSum / tgt * 100) : 0;
+          const tgtMet = tgt > 0 && totalIncSum >= tgt;
+          const labBase = { fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: 1.4, color: "var(--text3)" };
+          return (
+            <div style={{ marginBottom: 20 }}>
+              <div className="pnl-hero" style={{ display: "grid", gridTemplateColumns: "1.3fr 1fr", gap: 1, background: "var(--border)", border: "1px solid var(--border)", borderRadius: 16, overflow: "hidden" }}>
+                {/* Net */}
+                <div style={{ background: "var(--bg2)", padding: "22px 24px" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                    <span style={labBase}>Net profit · {plabel}</span>
+                    {isAdmin && tgt > 0 && (
+                      <span style={{ fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: 0.5, padding: "4px 10px", borderRadius: 20, background: tgtMet ? "rgba(74,222,128,0.12)" : "rgba(248,113,113,0.12)", color: tgtMet ? "var(--green)" : "var(--red)", border: `1px solid ${tgtMet ? "rgba(74,222,128,0.4)" : "rgba(248,113,113,0.4)"}` }}>
+                        {tgtMet ? "▲ Target met" : "▼ Below target"} · {tgtPct}%
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ fontSize: 34, fontWeight: 800, letterSpacing: -0.5, marginTop: 10, lineHeight: 1, color: !canEdit ? "var(--text3)" : net >= 0 ? "var(--green)" : "var(--red)" }}>{canEdit ? INR(net) : "•••••"}</div>
+                  <div style={{ fontSize: 12, color: "var(--text3)", marginTop: 8 }}>Full net P&L after all costs, salary &amp; GST</div>
+                  {spark && <svg width="100%" height="40" viewBox="0 0 320 40" preserveAspectRatio="none" style={{ marginTop: 14, display: "block" }}>{spark}</svg>}
                 </div>
-                <div style={{ fontSize: 22, fontWeight: 800, color: c, whiteSpace: "nowrap", marginTop: 4 }}>{v}</div>
-                <div style={{ fontSize: 10, color: "var(--blue)", fontWeight: 600, marginTop: 4 }}>{isYearly ? "This Year" : "This Month"}</div>
-              </>
-            );
-            if (!click) {
-              return (
-                <Card key={l} style={{ padding: "16px 20px", display: "flex", flexDirection: "column", minHeight: 90, justifyContent: "center" }}>
-                  {content}
-                </Card>
-              );
-            }
-            // Clickable KPI — use a plain div so onClick / hover handlers actually work.
-            return (
-              <div key={l}
-                role="button"
-                tabIndex={0}
-                onClick={() => setKpiBreakdown(click)}
-                onKeyDown={(ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); setKpiBreakdown(click); } }}
-                onMouseEnter={ev => { ev.currentTarget.style.transform = "translateY(-2px)"; ev.currentTarget.style.boxShadow = "0 6px 18px rgba(var(--accent-rgb),0.18)"; ev.currentTarget.style.borderColor = "rgba(var(--accent-rgb),0.35)"; }}
-                onMouseLeave={ev => { ev.currentTarget.style.transform = "none"; ev.currentTarget.style.boxShadow = "none"; ev.currentTarget.style.borderColor = "var(--border)"; }}
-                style={{
-                  padding: "16px 20px",
-                  minHeight: 90,
-                  background: "var(--bg2)",
-                  border: "1px solid var(--border)",
-                  borderRadius: 12,
-                  display: "flex",
-                  flexDirection: "column",
-                  justifyContent: "center",
-                  cursor: "pointer",
-                  transition: "transform .15s, box-shadow .15s, border-color .15s",
-                  userSelect: "none",
-                }}>
-                {content}
+                {/* Income + Expense */}
+                <div style={{ background: "var(--bg2)", padding: "22px 24px", display: "flex", flexDirection: "column", justifyContent: "center", gap: 16 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 10 }}>
+                    <div>
+                      <div style={labBase}>Income</div>
+                      <div style={{ fontSize: 20, fontWeight: 800, color: "var(--green)", marginTop: 2 }}>{INR(income)}</div>
+                    </div>
+                    <span style={{ fontSize: 11, color: "var(--text3)", fontWeight: 600 }}>{onPct}% online · {caPct}% cash</span>
+                  </div>
+                  <div style={{ height: 1, background: "var(--border)" }} />
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 10 }}>
+                    <div>
+                      <div style={labBase}>Expense</div>
+                      <div style={{ fontSize: 20, fontWeight: 800, color: "var(--red)", marginTop: 2 }}>{canEdit ? INR(expense) : "•••••"}</div>
+                    </div>
+                    <span style={{ fontSize: 11, color: "var(--text3)", fontWeight: 600 }}>incl GST {INR(gst)}</span>
+                  </div>
+                </div>
               </div>
-            );
-          })}
-        </div>
+              {/* Composition bar — click a segment for the same breakdown popup */}
+              {canEdit && (
+                <div style={{ marginTop: 14, padding: "16px 20px", background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 14 }}>
+                  <div style={labBase}>Where the expense goes</div>
+                  <div style={{ display: "flex", gap: 2, height: 10, marginTop: 14 }}>
+                    {comp.map(x => (
+                      <div key={x.k} onClick={() => setKpiBreakdown(x.click)} title={`${x.k} — click for detail`}
+                        style={{ width: `${x.v / compTot * 100}%`, background: x.c, borderRadius: 3, cursor: "pointer" }} />
+                    ))}
+                  </div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 20, marginTop: 14 }}>
+                    {comp.map(x => (
+                      <div key={x.k} onClick={() => setKpiBreakdown(x.click)} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+                        <span style={{ width: 8, height: 8, borderRadius: 3, background: x.c }} />
+                        <span style={{ fontSize: 11, color: "var(--text3)", fontWeight: 600 }}>{x.k}</span>
+                        <span style={{ fontSize: 13, color: "var(--text)", fontWeight: 700 }}>{x.show ? INR(x.v) : "•••••"}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
         {/* KPI breakdown popup */}
         {kpiBreakdown && canEdit && (() => {
@@ -3157,11 +3198,10 @@ export default function BranchesPage() {
           );
           return (
             <Card style={{ marginBottom: 20, padding: 0, overflow: "hidden",
-              border: `1px solid ${shopMet ? "rgba(74,222,128,0.35)" : "rgba(248,113,113,0.35)"}`,
-              boxShadow: shopMet ? "0 0 24px -10px rgba(74,222,128,0.5)" : "0 0 24px -10px rgba(248,113,113,0.5)" }}>
+              border: `1px solid ${shopMet ? "rgba(74,222,128,0.3)" : "rgba(248,113,113,0.3)"}` }}>
               <div style={{ padding: "14px 16px", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
                 <div style={{ fontWeight: 700, color: accent, fontSize: 12, textTransform: "uppercase", letterSpacing: 1 }}>
-                  🎯 Shop Target · 3× Salary
+                  Shop Target · 3× Salary
                 </div>
                 <span style={{ fontSize: 11, fontWeight: 900, letterSpacing: 1, textTransform: "uppercase", padding: "4px 12px", borderRadius: 20,
                   color: accent, background: shopMet ? "rgba(74,222,128,0.12)" : "rgba(248,113,113,0.12)", border: `1px solid ${accent}` }}>
