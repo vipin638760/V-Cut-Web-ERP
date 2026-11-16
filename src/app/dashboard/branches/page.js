@@ -798,8 +798,8 @@ function BranchStaffSalesChart({ periodEntries, branchStaff, allStaff, leaves = 
     <Card style={{ padding: 16, marginBottom: 16 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 10, marginBottom: 10 }}>
         <div>
-          <div style={{ fontSize: 11, fontWeight: 800, color: "var(--accent)", textTransform: "uppercase", letterSpacing: 1.5 }}>👥 Staff Sales Breakdown</div>
-          <div style={{ fontSize: 10, color: "var(--text3)", marginTop: 2 }}>{isMonth ? "Daily" : "Monthly"} sale split by staff · service + material</div>
+          <div style={{ fontSize: 11, fontWeight: 800, color: "var(--accent)", textTransform: "uppercase", letterSpacing: 1.5 }}>Staff Sales</div>
+          <div style={{ fontSize: 10, color: "var(--text3)", marginTop: 2 }}>Ranked by billing · service + material</div>
         </div>
         <div style={{ textAlign: "right" }}>
           <div style={{ fontSize: 9, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase" }}>Total Staff Sales</div>
@@ -810,64 +810,30 @@ function BranchStaffSalesChart({ periodEntries, branchStaff, allStaff, leaves = 
         <div style={{ height: H, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text3)", fontStyle: "italic", fontSize: 12 }}>No staff billing recorded.</div>
       ) : (
         <>
-          <div style={{ position: "relative", overflowX: "auto" }}>
-            <svg width={W} height={H + PAD_TOP + PAD_BOTTOM} style={{ display: "block" }}>
-              {Array.from({ length: 5 }, (_, i) => {
-                const y = PAD_TOP + (1 - i / 4) * H;
-                const v = Math.round(max * (i / 4));
-                return (
-                  <g key={i}>
-                    <line x1={LEFT} y1={y} x2={W} y2={y} stroke="rgba(255,255,255,0.05)" />
-                    <text x={LEFT - 5} y={y + 3} fontSize={9} fill="var(--text3)" textAnchor="end">{v >= 1000 ? `${Math.round(v / 1000)}k` : v}</text>
-                  </g>
-                );
-              })}
-              {buckets.map((b, i) => {
-                const x = LEFT + i * (BAR_W + GAP);
-                let accY = PAD_TOP + H;
-                const bucketTotal = Object.values(b.stacks).reduce((s, v) => s + v, 0);
-                const clickable = isMonth && bucketTotal > 0 && onDayClick;
-                return (
-                  <g key={i}>
-                    {activeStaffIds.map((sid, si) => {
-                      const v = b.stacks[sid] || 0;
-                      if (v <= 0) return null;
-                      const h = (v / max) * H;
-                      accY -= h;
-                      return (
-                        <rect key={sid} x={x} y={accY} width={BAR_W} height={h}
-                          fill={colorAt(si)}
-                          onMouseEnter={() => setHover({ i, bucket: b, sid, value: v, total: bucketTotal })}
-                          onMouseLeave={() => setHover(null)}
-                          onClick={clickable ? () => onDayClick(b.key, b.entryId) : undefined}
-                          opacity={hover && hover.i !== i ? 0.45 : 1}
-                          style={{ cursor: clickable ? "pointer" : "default", transition: "opacity .15s" }}
-                        />
-                      );
-                    })}
-                    <text x={x + BAR_W / 2} y={PAD_TOP + H + 14} fontSize={9} fill="var(--text3)" textAnchor="middle" fontWeight={600}>{b.label}</text>
-                  </g>
-                );
-              })}
-            </svg>
-            {hover && (
-              <div style={{
-                position: "absolute",
-                left: Math.min(LEFT + hover.i * (BAR_W + GAP) + BAR_W + 10, W - 170),
-                top: 4, pointerEvents: "none",
-                background: "var(--bg4)", border: "1px solid rgba(var(--accent-rgb),0.35)", borderRadius: 8,
-                padding: "6px 10px", fontSize: 11, zIndex: 3, boxShadow: "0 6px 20px rgba(0,0,0,0.5)",
-                minWidth: 150,
-              }}>
-                <div style={{ fontSize: 9, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase" }}>{hover.bucket.key}</div>
-                <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text2)", marginTop: 2 }}>{staffById[hover.sid]?.name || "Unknown"}</div>
-                <div style={{ fontSize: 13, fontWeight: 800, color: "var(--green)", marginTop: 2 }}>{INR(hover.value)}</div>
-                <div style={{ fontSize: 9, color: "var(--text3)", marginTop: 2 }}>{isMonth ? "Day" : "Month"} total: {INR(hover.total)}</div>
-                {isMonth && onDayClick && (
-                  <div style={{ fontSize: 9, color: "var(--accent)", marginTop: 3, fontWeight: 700 }}>Click → open Daily Entry</div>
-                )}
-              </div>
-            )}
+          {/* Ranked leaderboard — each stylist's share of staff sales. Clearer
+              than the old stacked daily chart for "who sold most"; the per-staff
+              stats below still carry the daily high / low / average detail. */}
+          <div>
+            {activeStaffIds.map((sid, i) => {
+              const st = staffStats[sid] || { total: 0 };
+              const nm = staffById[sid]?.name || "Staff";
+              const initials = nm.trim().slice(0, 2).toUpperCase();
+              const pct = total > 0 ? Math.round(st.total / total * 100) : 0;
+              const topTotal = staffStats[activeStaffIds[0]]?.total || 1;
+              const w = Math.round(st.total / topTotal * 100);
+              return (
+                <div key={sid} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 0", borderBottom: i < activeStaffIds.length - 1 ? "1px solid var(--border)" : "none" }}>
+                  <span style={{ width: 22, height: 22, borderRadius: 7, background: i === 0 ? "rgba(233,196,106,0.16)" : "var(--bg4)", color: i === 0 ? "var(--gold)" : "var(--text2)", fontSize: 11, fontWeight: 700, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{i + 1}</span>
+                  <span style={{ width: 28, height: 28, borderRadius: "50%", background: "var(--bg4)", color: "var(--text2)", fontSize: 11, fontWeight: 600, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{initials}</span>
+                  <span style={{ width: 92, flexShrink: 0, fontSize: 13, fontWeight: 500, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{nm}</span>
+                  <span style={{ flex: 1, minWidth: 50, height: 8, borderRadius: 6, background: "var(--bg4)", overflow: "hidden" }}>
+                    <span style={{ display: "block", height: "100%", width: `${w}%`, borderRadius: 6, background: "var(--blue, #60a5fa)" }} />
+                  </span>
+                  <span style={{ width: 90, textAlign: "right", fontSize: 13, fontWeight: 600, color: "var(--text)", flexShrink: 0 }}>{INR(st.total)}</span>
+                  <span style={{ width: 36, textAlign: "right", fontSize: 11, color: "var(--text3)", flexShrink: 0 }}>{pct}%</span>
+                </div>
+              );
+            })}
           </div>
           {/* Per-staff stats grid — elegant cards with rank, big total,
               avg / highest / lowest triad, and short humanised dates. */}
@@ -3299,41 +3265,29 @@ export default function BranchesPage() {
           </>);
         })()}
 
-        {/* Section picker — click a card to reveal its detail table below.
-            Multiple cards may be open at once so we can cross-reference numbers. */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 12, marginBottom: 18 }}>
+        {/* Section picker — a chip toggles its detail table below. Several may be
+            open at once to cross-reference numbers. Replaces the old emoji tiles. */}
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 18 }}>
           {[
-            { id: "cashflow", label: "Daily Cash Flow", sub: "Match bank deposits", emoji: "💰", accent: "var(--blue, #60a5fa)" },
-            { id: "performance", label: "Performance Breakdown", sub: filterMode === "month" ? "Day-by-day P&L" : "Month-by-month P&L", emoji: "📊", accent: "var(--gold)" },
-            { id: "materials", label: "Materials Received", sub: "Stock transfers", emoji: "📦", accent: "var(--accent)" },
-            { id: "entries", label: "Recent Entries", sub: "Latest daily entries", emoji: "📝", accent: "var(--green)" },
-            { id: "staff", label: `Branch Staff (${branchStaff.length})`, sub: "Roster · billing · leaves", emoji: "👥", accent: "var(--accent)" },
+            { id: "cashflow", label: "Daily Cash Flow", sub: "Match bank deposits" },
+            { id: "performance", label: "Performance", sub: filterMode === "month" ? "Day-by-day P&L" : "Month-by-month P&L" },
+            { id: "materials", label: "Materials", sub: "Stock transfers" },
+            { id: "entries", label: "Recent Entries", sub: "Latest daily entries" },
+            { id: "staff", label: `Staff (${branchStaff.length})`, sub: "Roster · billing · leaves" },
           ].map(s => {
             const isOpen = openSections.has(s.id);
             return (
-              <div key={s.id} onClick={() => toggleSection(s.id)}
-                role="button" tabIndex={0}
-                onKeyDown={(ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); toggleSection(s.id); } }}
+              <button key={s.id} onClick={() => toggleSection(s.id)} title={s.sub}
                 style={{
-                  padding: "18px 20px",
-                  borderRadius: 12,
-                  background: isOpen ? "rgba(var(--accent-rgb),0.1)" : "var(--bg3)",
-                  border: `1.5px solid ${isOpen ? "var(--accent)" : "var(--border2)"}`,
-                  cursor: "pointer",
-                  transition: "background .15s, border .15s, transform .15s",
-                  transform: isOpen ? "translateY(-1px)" : "none",
-                  boxShadow: isOpen ? "0 6px 18px rgba(var(--accent-rgb),0.22)" : "none",
-                  userSelect: "none",
-                  display: "flex", alignItems: "center", gap: 14,
-                  minHeight: 76,
+                  padding: "9px 15px", borderRadius: 10, fontSize: 12.5, fontWeight: 600,
+                  cursor: "pointer", userSelect: "none", display: "inline-flex", alignItems: "center", gap: 8,
+                  background: isOpen ? "rgba(var(--accent-rgb),0.12)" : "var(--bg3)",
+                  border: `1px solid ${isOpen ? "rgba(var(--accent-rgb),0.5)" : "var(--border2)"}`,
+                  color: isOpen ? "var(--accent)" : "var(--text2)", transition: "all .15s",
                 }}>
-                <div style={{ fontSize: 30, lineHeight: 1, flexShrink: 0 }}>{s.emoji}</div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 14, fontWeight: 800, color: s.accent, lineHeight: 1.2 }}>{s.label}</div>
-                  <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 4 }}>{s.sub}</div>
-                </div>
-                <div style={{ fontSize: 13, fontWeight: 800, color: isOpen ? "var(--accent)" : "var(--text3)", flexShrink: 0 }}>{isOpen ? "▲" : "▼"}</div>
-              </div>
+                {s.label}
+                <span style={{ fontSize: 9, opacity: 0.7 }}>{isOpen ? "▲" : "▼"}</span>
+              </button>
             );
           })}
         </div>
