@@ -359,48 +359,65 @@ function BranchSameDateCompareChart({ allEntries = [], branchId, filterYear, fil
     return { y, m, dim, byDay };
   });
 
-  const max = Math.max(1, ...data.flatMap(d => d.byDay));
+  // Prior-3-month summary tiles + the "month vs prev" delta (kept for context).
   const monStats = data.map(d => {
     const total = d.byDay.reduce((s, v) => s + v, 0);
     const working = d.byDay.filter(v => v > 0).length;
     const avg = working ? Math.round(total / working) : 0;
-    let bestDay = 0, bestVal = 0;
-    d.byDay.forEach((v, i) => { if (v > bestVal) { bestVal = v; bestDay = i + 1; } });
-    return { total, avg, bestDay, bestVal };
+    return { total, avg };
   });
   const monTotals = monStats.map(s => s.total);
   const newest = monTotals[2], prev = monTotals[1];
   const delta = prev > 0 ? Math.round(((newest - prev) / prev) * 100) : null;
 
-  const H = 180;
-  const GROUP_GAP = 10;
-  const BAR_W = 7;
-  const BAR_GAP = 2;
-  const groupW = 3 * BAR_W + 2 * BAR_GAP;
-  const LEFT = 8;
-  const W = LEFT + daysInSel * (groupW + GROUP_GAP);
+  // The month shown above (filterMonth) — its actual per-day sales…
+  const curDim = new Date(filterYear, filterMonth, 0).getDate();
+  const curByDay = Array.from({ length: curDim }, () => 0);
+  allEntries.forEach(e => {
+    if (!e.date || e.branch_id !== branchId) return;
+    const [ey, em, ed] = e.date.split("-").map(Number);
+    if (ey !== filterYear || em !== filterMonth) return;
+    const idx = ed - 1;
+    if (idx < 0 || idx >= curDim) return;
+    const matSale = (e.staff_billing || []).reduce((s, sb) => s + (sb.material || 0), 0);
+    curByDay[idx] += (e.online || 0) + (e.cash || 0) + matSale;
+  });
+  // …and each date's "usual" = average of the prior 3 months on the same
+  // day-of-month, over the months that actually traded that day.
+  const avgByDay = Array.from({ length: curDim }, (_, i) => {
+    const vals = data.map(d => (i < d.dim ? d.byDay[i] : null)).filter(v => v != null && v > 0);
+    return vals.length ? Math.round(vals.reduce((s, v) => s + v, 0) / vals.length) : 0;
+  });
+  // Render the elapsed part of the month (through the last day with sales).
+  let lastCur = -1;
+  curByDay.forEach((v, i) => { if (v > 0) lastCur = i; });
+  const cutoff = lastCur + 1;
 
-  const weekdayOf = (d) => new Date(ref.y, ref.m - 1, d).toLocaleDateString("en-US", { weekday: "narrow" });
-  const isWeekend = (d) => { const w = new Date(ref.y, ref.m - 1, d).getDay(); return w === 0 || w === 6; };
+  const curMonLabel = new Date(filterYear, filterMonth - 1, 1).toLocaleDateString("en-US", { month: "long" });
+  const max = Math.max(1, ...curByDay, ...avgByDay);
+  const H = 170;
+  const BAR_W = 15;
+  const GAP = 6;
+  const LEFT = 8;
+  const W = LEFT + Math.max(cutoff, 1) * (BAR_W + GAP);
+
+  const weekdayOf = (d) => new Date(filterYear, filterMonth - 1, d).toLocaleDateString("en-US", { weekday: "narrow" });
+  const isWeekend = (d) => { const w = new Date(filterYear, filterMonth - 1, d).getDay(); return w === 0 || w === 6; };
 
   return (
     <Card style={{ padding: 16, marginBottom: 12, overflow: "visible" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 10, marginBottom: 12 }}>
         <div>
-          <div style={{ fontSize: 11, fontWeight: 800, color: "var(--accent)", textTransform: "uppercase", letterSpacing: 1.5 }}>📊 Same-Date Compare</div>
-          <div style={{ fontSize: 15, fontWeight: 800, color: "var(--gold)", fontFamily: "var(--font-headline, var(--font-outfit))", marginTop: 2 }}>Every day · {months.map(m => m.label).join(" · ")} {months[2].y}</div>
-          <div style={{ fontSize: 10, color: "var(--text3)", fontWeight: 600, marginTop: 2 }}>Prior 3 completed months for this branch — {new Date(filterYear, filterMonth - 1, 1).toLocaleDateString("en-US", { month: "long" })} shown above</div>
+          <div style={{ fontSize: 11, fontWeight: 800, color: "var(--accent)", textTransform: "uppercase", letterSpacing: 1.5 }}>Daily Sales vs Usual</div>
+          <div style={{ fontSize: 15, fontWeight: 800, color: "var(--gold)", fontFamily: "var(--font-headline, var(--font-outfit))", marginTop: 2 }}>{curMonLabel} — each day vs its average</div>
+          <div style={{ fontSize: 10, color: "var(--text3)", fontWeight: 600, marginTop: 2 }}>Dashed line = this date&apos;s average over {months.map(m => m.label).join(" · ")} {months[2].y}</div>
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "stretch", flexWrap: "wrap" }}>
           {months.map((mo, i) => (
-            <div key={i} style={{ display: "flex", flexDirection: "column", gap: 2, padding: "6px 10px", borderRadius: 10, background: "var(--bg3)", border: `1px solid ${COLORS[i]}55`, minWidth: 120 }}>
+            <div key={i} style={{ display: "flex", flexDirection: "column", gap: 2, padding: "6px 10px", borderRadius: 10, background: "var(--bg3)", border: `1px solid ${COLORS[i]}44`, minWidth: 108 }}>
               <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
                 <span style={{ width: 9, height: 9, borderRadius: 3, background: COLORS[i] }} />
                 <span style={{ fontSize: 10.5, fontWeight: 800, color: "var(--text)" }}>{mo.label} {mo.y}</span>
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 9.5 }}>
-                <span style={{ color: "var(--text3)", fontWeight: 700 }}>Total</span>
-                <span style={{ color: "var(--text)", fontWeight: 800 }}>{INR(monTotals[i])}</span>
               </div>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 9.5 }}>
                 <span style={{ color: "var(--text3)", fontWeight: 700 }}>Avg / day</span>
@@ -417,29 +434,29 @@ function BranchSameDateCompareChart({ allEntries = [], branchId, filterYear, fil
         </div>
       </div>
 
-      {max <= 1 ? (
-        <div style={{ height: H, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text3)", fontStyle: "italic", fontSize: 12 }}>No business for this branch in the prior 3 months.</div>
+      {cutoff < 1 ? (
+        <div style={{ height: H, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text3)", fontStyle: "italic", fontSize: 12 }}>No sales recorded yet for {curMonLabel}.</div>
       ) : (
         <div style={{ position: "relative" }}>
           <div style={{ overflowX: "auto", paddingBottom: 4 }}>
-            <div style={{ position: "relative", width: W, height: H + 34, display: "flex", alignItems: "flex-end", gap: GROUP_GAP, paddingLeft: LEFT }}>
-              {Array.from({ length: daysInSel }, (_, di) => {
+            <div style={{ position: "relative", width: W, height: H + 32, display: "flex", alignItems: "flex-end", gap: GAP, paddingLeft: LEFT }}>
+              {Array.from({ length: cutoff }, (_, di) => {
                 const day = di + 1;
+                const cur = curByDay[di] || 0;
+                const avg = avgByDay[di] || 0;
                 const wknd = isWeekend(day);
+                const above = cur > 0 && cur >= avg;
+                const barH = Math.max(cur > 0 ? 3 : 0, Math.round((cur / max) * H));
+                const avgY = Math.round((avg / max) * H);
+                const on = hover && hover.day === day;
                 return (
-                  <div key={day} style={{ display: "flex", flexDirection: "column", alignItems: "center", width: groupW }}>
-                    <div style={{ display: "flex", alignItems: "flex-end", gap: BAR_GAP, height: H }}>
-                      {data.map((d, mi) => {
-                        const val = d.byDay[day - 1] || 0;
-                        const missing = day > d.dim;
-                        const barH = Math.max(val > 0 ? 3 : 0, Math.round((val / max) * H));
-                        const on = hover && hover.day === day && hover.mi === mi;
-                        return (
-                          <div key={mi} onMouseEnter={() => !missing && setHover({ day, mi })} onMouseLeave={() => setHover(null)}
-                            title={missing ? "" : `${months[mi].label} ${day} · ${INR(val)}`}
-                            style={{ width: BAR_W, height: barH, minHeight: missing ? 0 : val > 0 ? 3 : 2, borderRadius: "3px 3px 0 0", background: missing ? "transparent" : val > 0 ? GRADS[mi] : "var(--bg4)", opacity: on ? 1 : hover ? 0.55 : 1, transition: "opacity .12s", cursor: missing ? "default" : "pointer" }} />
-                        );
-                      })}
+                  <div key={day} style={{ display: "flex", flexDirection: "column", alignItems: "center", width: BAR_W }}
+                    onMouseEnter={() => setHover({ day, cur, avg })} onMouseLeave={() => setHover(null)}>
+                    <div style={{ position: "relative", height: H, width: BAR_W, display: "flex", alignItems: "flex-end" }}>
+                      <div style={{ width: "100%", height: barH, minHeight: cur > 0 ? 3 : 2, borderRadius: "3px 3px 0 0",
+                        background: cur <= 0 ? "var(--bg4)" : above ? "var(--green)" : "var(--text3)",
+                        opacity: cur <= 0 ? 0.5 : on ? 1 : above ? 1 : 0.65, transition: "opacity .12s", cursor: "pointer" }} />
+                      {avg > 0 && <div style={{ position: "absolute", left: -2, right: -2, bottom: avgY, borderTop: "2px dashed var(--text3)", opacity: 0.65 }} />}
                     </div>
                     <div style={{ marginTop: 6, textAlign: "center", lineHeight: 1.1 }}>
                       <div style={{ fontSize: 9.5, fontWeight: 800, color: wknd ? "var(--orange, #f59e0b)" : "var(--text2)" }}>{day}</div>
@@ -452,26 +469,33 @@ function BranchSameDateCompareChart({ allEntries = [], branchId, filterYear, fil
           </div>
 
           {hover && (() => {
-            const day = hover.day;
+            const diff = hover.cur - hover.avg;
             return (
-              <div style={{ position: "absolute", top: 0, left: "50%", transform: "translateX(-50%)", background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 10, padding: "10px 12px", boxShadow: "0 8px 24px rgba(0,0,0,0.5)", zIndex: 20, minWidth: 180, pointerEvents: "none" }}>
-                <div style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", marginBottom: 4 }}>Day {day} · same-date</div>
-                {data.map((d, mi) => (
-                  <div key={mi} style={{ display: "flex", justifyContent: "space-between", gap: 14, fontSize: 11.5, padding: "2px 0" }}>
-                    <span style={{ display: "inline-flex", alignItems: "center", gap: 6, color: "var(--text2)", fontWeight: 700 }}>
-                      <span style={{ width: 8, height: 8, borderRadius: 2, background: COLORS[mi] }} />{months[mi].label}
-                    </span>
-                    <span style={{ color: (d.byDay[day - 1] || 0) > 0 ? "var(--gold)" : "var(--text3)", fontWeight: 800 }}>{INR(d.byDay[day - 1] || 0)}</span>
-                  </div>
-                ))}
+              <div style={{ position: "absolute", top: 0, left: "50%", transform: "translateX(-50%)", background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 10, padding: "10px 12px", boxShadow: "0 8px 24px rgba(0,0,0,0.5)", zIndex: 20, minWidth: 170, pointerEvents: "none" }}>
+                <div style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", marginBottom: 4 }}>{curMonLabel} {hover.day}</div>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 14, fontSize: 12, padding: "2px 0" }}>
+                  <span style={{ color: "var(--text2)", fontWeight: 700 }}>This day</span>
+                  <span style={{ color: "var(--gold)", fontWeight: 800 }}>{INR(hover.cur)}</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 14, fontSize: 12, padding: "2px 0" }}>
+                  <span style={{ color: "var(--text2)", fontWeight: 700 }}>Usual (avg)</span>
+                  <span style={{ color: "var(--text3)", fontWeight: 800 }}>{INR(hover.avg)}</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 14, fontSize: 12, padding: "4px 0 0", marginTop: 3, borderTop: "1px solid var(--border)" }}>
+                  <span style={{ color: "var(--text2)", fontWeight: 700 }}>vs usual</span>
+                  <span style={{ color: diff >= 0 ? "var(--green)" : "var(--red)", fontWeight: 800 }}>{diff >= 0 ? "▲ +" : "▼ "}{INR(Math.abs(diff))}</span>
+                </div>
               </div>
             );
           })()}
         </div>
       )}
 
-      <div style={{ fontSize: 10, color: "var(--text3)", marginTop: 8, textAlign: "center" }}>
-        Three bars per day = the three months. Weekdays under each day (weekends orange). Hover for the same-date split.
+      <div style={{ display: "flex", gap: 16, justifyContent: "center", flexWrap: "wrap", fontSize: 10.5, color: "var(--text3)", marginTop: 8 }}>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><span style={{ width: 9, height: 9, borderRadius: 2, background: "var(--green)" }} /> Above usual</span>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><span style={{ width: 9, height: 9, borderRadius: 2, background: "var(--text3)" }} /> Below usual</span>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><span style={{ width: 14, borderTop: "2px dashed var(--text3)" }} /> 3-month average</span>
+        <span style={{ color: "var(--orange, #f59e0b)" }}>Weekends in orange</span>
       </div>
     </Card>
   );
