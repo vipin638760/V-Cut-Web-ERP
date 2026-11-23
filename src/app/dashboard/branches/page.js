@@ -4392,10 +4392,16 @@ export default function BranchesPage() {
   }
 
   // ── Main Branch List ─────────────────────────────────────────────
+  const kpiIncome = branchData.reduce((s, d) => s + d.i, 0);
+  const kpiNet = branchData.reduce((s, d) => s + d.n, 0);
+  const kpiProfit = branchData.filter(d => d.n > 0).length;
   return (
     <div>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20, flexWrap: "wrap", gap: 12 }}>
-        <div style={{ fontSize: 24, fontWeight: 800, color: "var(--gold)", letterSpacing: 1 }}>Branches</div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16, flexWrap: "wrap", gap: 12 }}>
+        <div>
+          <div style={{ fontSize: 24, fontWeight: 800, color: "var(--text)", letterSpacing: 0.5, fontFamily: "var(--font-headline, var(--font-outfit))" }}>Branches</div>
+          <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text3)", marginTop: 2 }}>{branchData.length} branch{branchData.length === 1 ? "" : "es"} · network overview</div>
+        </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", flex: 1, justifyContent: "flex-end", minWidth: 0 }}>
           <BranchEmployeeSearch
             branches={branches}
@@ -4412,6 +4418,14 @@ export default function BranchesPage() {
             <Icon name="plus" size={14} /> Add Branch
           </button>}
         </div>
+      </div>
+
+      {/* Network KPI strip */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12, marginBottom: 16 }}>
+        <KpiTile label="Branches" value={`${branchData.length}`} icon="store" tint="34,211,238" />
+        <KpiTile label="Total Income" value={INR(kpiIncome)} icon="trending" tint="74,222,128" valueColor="var(--green)" />
+        <KpiTile label="Net P&amp;L" value={isAdmin ? INR(kpiNet) : "•••"} icon="pie" tint={kpiNet >= 0 ? "74,222,128" : "248,113,113"} valueColor={isAdmin ? (kpiNet >= 0 ? "var(--green)" : "var(--red)") : "var(--text3)"} />
+        <KpiTile label="Profitable" value={`${kpiProfit}/${branchData.length}`} icon="checkCircle" tint="96,165,250" />
       </div>
 
       <PeriodWidget filterMode={filterMode} setFilterMode={setFilterMode} filterYear={filterYear} setFilterYear={setFilterYear} filterMonth={filterMonth} setFilterMonth={setFilterMonth} />
@@ -4491,19 +4505,16 @@ export default function BranchesPage() {
       )}
 
       {/* Controls */}
-      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", background: "var(--bg3)", border: "1px solid var(--border)", borderRadius: 8, padding: "8px 12px", marginBottom: 16 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 10px", border: "1px solid var(--border2)", borderRadius: 10, background: "var(--bg4)" }}>
-          <ToggleGroup label="P&L" options={[["all","All"],["profit","Profit"],["loss","Loss"]]} value={brFilter} onChange={setBrFilter} />
-        </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap", background: "var(--bg3)", border: "1px solid var(--border)", borderRadius: 12, padding: "12px 16px", marginBottom: 16, boxShadow: "0 4px 16px rgba(0,0,0,0.18)" }}>
+        <ToggleGroup label="P&L" options={[["all","All"],["profit","Profit"],["loss","Loss"]]} value={brFilter} onChange={setBrFilter} />
         {isAdmin && (
-          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 10px", border: "1px solid var(--border2)", borderRadius: 10, background: "var(--bg4)" }}>
-            <ToggleGroup label="Target" options={[["all","All"],["met","Met"],["notmet","Not Met"]]} value={brTargetFilter} onChange={setBrTargetFilter}
-              colors={{ all: "var(--blue)", met: "var(--green)", notmet: "var(--red)" }} />
-          </div>
+          <ToggleGroup label="Target" options={[["all","All"],["met","Met"],["notmet","Not Met"]]} value={brTargetFilter} onChange={setBrTargetFilter}
+            colors={{ all: "var(--blue)", met: "var(--green)", notmet: "var(--red)" }} />
         )}
-        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 10px", border: "1px solid var(--border2)", borderRadius: 10, background: "var(--bg4)" }}>
-          <ToggleGroup label="Type" options={[["all","All"],["mens","Mens"],["unisex","Unisex"]]} value={brTypeFilter} onChange={setBrTypeFilter} />
-        </div>
+        <ToggleGroup label="Type" options={[["all","All"],["mens","Mens"],["unisex","Unisex"]]} value={brTypeFilter} onChange={setBrTypeFilter} />
+
+        <div style={{ width: 1, alignSelf: "stretch", background: "var(--border)", margin: "2px 2px" }} />
+
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", rowGap: 8 }}>
           <span style={{ fontSize: 10, color: "var(--text3)", textTransform: "uppercase", letterSpacing: ".5px" }}>Sort</span>
           <SearchSelect
@@ -4728,6 +4739,14 @@ function DraggableBranchGrid({ branchData, isAdmin, canSelect, selectedBranches,
         const isProfit = n > 0;
         const accent = isSelected ? "var(--accent)" : isProfit ? "var(--green)" : "var(--red)";
         const accentBg = isSelected ? "rgba(34,211,238,0.06)" : isProfit ? "rgba(74,222,128,0.06)" : "rgba(248,113,113,0.06)";
+        const auraRgb = isSelected ? "34,211,238" : isProfit ? "74,222,128" : "248,113,113";
+        const baseShadow = isOver
+          ? "0 12px 32px rgba(var(--gold-rgb),0.24)"
+          : isDragging
+            ? "0 16px 42px rgba(0,0,0,0.55)"
+            : isSelected
+              ? "0 10px 28px rgba(34,211,238,0.22)"
+              : `0 8px 24px rgba(0,0,0,0.32), 0 0 0 1px rgba(${auraRgb},0.05) inset`;
 
         return (
           <div key={b.id}
@@ -4743,35 +4762,35 @@ function DraggableBranchGrid({ branchData, isAdmin, canSelect, selectedBranches,
               border: isOver
                 ? "1.5px dashed var(--gold)"
                 : `1px solid ${isSelected ? "rgba(34,211,238,0.45)" : isProfit ? "rgba(74,222,128,0.22)" : "rgba(248,113,113,0.22)"}`,
-              borderRadius: 14,
+              borderRadius: 16,
               overflow: "hidden",
               cursor: isDragging ? "grabbing" : "grab",
               transition: "transform .2s ease, box-shadow .2s ease, border-color .2s",
               opacity: isDragging ? 0.45 : 1,
               transform: isOver ? "scale(1.015)" : "scale(1)",
-              boxShadow: isOver
-                ? "0 10px 28px rgba(var(--gold-rgb),0.22)"
-                : isDragging
-                  ? "0 14px 36px rgba(0,0,0,0.55)"
-                  : isSelected
-                    ? "0 6px 22px rgba(34,211,238,0.25)"
-                    : isProfit
-                      ? "0 4px 18px rgba(0,0,0,0.28), 0 0 0 1px rgba(74,222,128,0.04) inset"
-                      : "0 4px 18px rgba(0,0,0,0.28), 0 0 0 1px rgba(248,113,113,0.04) inset",
+              boxShadow: baseShadow,
               userSelect: "none"
             }}
             onMouseEnter={ev => {
-              if (!isDragging) ev.currentTarget.style.transform = "translateY(-2px)";
+              if (!isDragging && !isOver) {
+                ev.currentTarget.style.transform = "translateY(-4px)";
+                ev.currentTarget.style.boxShadow = `0 18px 40px rgba(0,0,0,0.45), 0 0 0 1px rgba(${auraRgb},0.18) inset`;
+              }
             }}
             onMouseLeave={ev => {
-              if (!isDragging && !isOver) ev.currentTarget.style.transform = "scale(1)";
+              if (!isDragging && !isOver) {
+                ev.currentTarget.style.transform = "scale(1)";
+                ev.currentTarget.style.boxShadow = baseShadow;
+              }
             }}
           >
             {/* Left accent stripe — profit/loss indicator at a glance */}
             <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 3, background: `linear-gradient(180deg, ${accent}, transparent)`, opacity: 0.8 }} />
+            {/* Profit/loss aura — adds depth behind the hero */}
+            <div style={{ position: "absolute", top: -46, right: -34, width: 150, height: 150, borderRadius: "50%", background: `radial-gradient(circle, rgba(${auraRgb},0.18), transparent 70%)`, pointerEvents: "none", filter: "blur(6px)" }} />
 
             {/* Header */}
-            <div style={{ padding: "12px 14px 10px", display: "flex", alignItems: "center", gap: 8 }}>
+            <div style={{ position: "relative", padding: "12px 14px 10px", display: "flex", alignItems: "center", gap: 8 }}>
               {canSelect && (
                 <span
                   role="button"
@@ -4809,36 +4828,43 @@ function DraggableBranchGrid({ branchData, isAdmin, canSelect, selectedBranches,
             </div>
 
             {/* Hero: Income + P&L chip */}
-            <div style={{ padding: "2px 14px 12px", display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 10 }}>
+            <div style={{ position: "relative", padding: "2px 14px 12px", display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 10 }}>
               <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: 8.5, color: "var(--text3)", fontWeight: 800, letterSpacing: 1.4, textTransform: "uppercase" }}>Income</div>
-                <div style={{ fontSize: 20, fontWeight: 800, color: "var(--green)", fontFamily: "var(--font-headline, var(--font-outfit))", letterSpacing: -0.5, lineHeight: 1.15 }}>
+                <div style={{ fontSize: 9, color: "var(--text3)", fontWeight: 800, letterSpacing: 1.6, textTransform: "uppercase" }}>Income</div>
+                <div style={{ fontSize: 27, fontWeight: 900, color: "var(--text)", fontFamily: "var(--font-headline, var(--font-outfit))", letterSpacing: -1, lineHeight: 1.08 }}>
                   {INR(i)}
                 </div>
               </div>
-              <div style={{
-                padding: "5px 10px", borderRadius: 999,
-                background: isAdmin ? accentBg : "var(--bg4)",
-                border: `1px solid ${isAdmin ? accent : "var(--border)"}`,
-                color: isAdmin ? accent : "var(--text3)",
-                fontSize: 11, fontWeight: 800, letterSpacing: 0.3,
-                fontFamily: "var(--font-headline, var(--font-outfit))",
-                whiteSpace: "nowrap", flexShrink: 0,
-              }}>
-                {isAdmin ? (n > 0 ? "▲ " : n < 0 ? "▼ " : "") + INR(Math.abs(n)) : "P&L •••"}
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4, flexShrink: 0 }}>
+                <span style={{ fontSize: 8, fontWeight: 800, letterSpacing: 1, textTransform: "uppercase", color: isAdmin ? accent : "var(--text3)" }}>
+                  {isAdmin ? (isProfit ? "Profit" : n < 0 ? "Loss" : "Break-even") : "P&L"}
+                </span>
+                <div style={{
+                  padding: "5px 11px", borderRadius: 999,
+                  background: isAdmin ? accentBg : "var(--bg4)",
+                  border: `1px solid ${isAdmin ? accent : "var(--border)"}`,
+                  color: isAdmin ? accent : "var(--text3)",
+                  fontSize: 12.5, fontWeight: 800, letterSpacing: 0.3,
+                  fontFamily: "var(--font-headline, var(--font-outfit))",
+                  whiteSpace: "nowrap",
+                }}>
+                  {isAdmin ? (n > 0 ? "▲ " : n < 0 ? "▼ " : "") + INR(Math.abs(n)) : "•••"}
+                </div>
               </div>
             </div>
 
-            {/* Metric grid — two columns, grouped visually by a thin inner divider */}
-            <div style={{ padding: "0 14px 12px", display: "grid", gridTemplateColumns: "1fr 1fr", columnGap: 12, rowGap: 10, borderTop: "1px solid var(--border)", paddingTop: 12, marginTop: 0 }}>
-              <ElegantRow label="Salary" val={isAdmin ? INR(actualSalary) : "•••••"} col="var(--blue)" />
-              <ElegantRow label="Inc / Mat" val={INR(vInc + vMatE)} col="var(--red)" />
-              <ElegantRow label="Rent (Shop)" val={INR(fShopRent)} col="var(--orange)" />
-              <ElegantRow label="Rent (Room)" val={INR(fRoomRent)} col="var(--orange)" />
-              <ElegantRow label="Elec / WiFi" val={INR(fElec + fWifi)} col="var(--orange)" />
-              <ElegantRow label="Travel" val={INR(vOther)} col="var(--red)" />
-              <ElegantRow label="Leaves" val={actualLeaves > 0 ? `${actualLeaves} days` : "None"} col={actualLeaves > 0 ? "var(--purple, #c084fc)" : "var(--text3)"} />
-              <ElegantRow label="Staff" val={`${staffCount}`} col="var(--text2)" />
+            {/* Metric grid — recessed panel, two columns */}
+            <div style={{ padding: "0 14px 12px" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", columnGap: 14, rowGap: 11, background: "rgba(0,0,0,0.20)", border: "1px solid var(--border)", borderRadius: 12, padding: "12px 14px" }}>
+                <ElegantRow label="Salary" val={isAdmin ? INR(actualSalary) : "•••••"} col="var(--blue)" />
+                <ElegantRow label="Inc / Mat" val={INR(vInc + vMatE)} col="var(--red)" />
+                <ElegantRow label="Rent (Shop)" val={INR(fShopRent)} col="var(--orange)" />
+                <ElegantRow label="Rent (Room)" val={INR(fRoomRent)} col="var(--orange)" />
+                <ElegantRow label="Elec / WiFi" val={INR(fElec + fWifi)} col="var(--orange)" />
+                <ElegantRow label="Travel" val={INR(vOther)} col="var(--red)" />
+                <ElegantRow label="Leaves" val={actualLeaves > 0 ? `${actualLeaves} days` : "None"} col={actualLeaves > 0 ? "var(--purple, #c084fc)" : "var(--text3)"} />
+                <ElegantRow label="Staff" val={`${staffCount}`} col="var(--text2)" />
+              </div>
             </div>
 
             {/* Shop target pill — 3× salary. Admin-only (derives from salary). */}
@@ -4899,6 +4925,22 @@ function ElegantRow({ label, val, col }) {
     <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
       <span style={{ fontSize: 8.5, color: "var(--text3)", fontWeight: 700, letterSpacing: 0.8, textTransform: "uppercase", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{label}</span>
       <span style={{ fontSize: 12.5, fontWeight: 700, color: col, fontFamily: "var(--font-headline, var(--font-outfit))", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", letterSpacing: -0.2 }}>{val}</span>
+    </div>
+  );
+}
+
+// Network KPI tile — used in the branches page summary strip.
+function KpiTile({ label, value, icon, tint, valueColor }) {
+  return (
+    <div style={{ position: "relative", overflow: "hidden", background: "var(--bg3)", border: `1px solid rgba(${tint},0.28)`, borderRadius: 14, padding: "14px 16px", boxShadow: `0 6px 18px rgba(0,0,0,0.25), 0 0 0 1px rgba(${tint},0.05) inset` }}>
+      <div style={{ position: "absolute", top: -22, right: -22, width: 84, height: 84, borderRadius: "50%", background: `radial-gradient(circle, rgba(${tint},0.20), transparent 70%)`, pointerEvents: "none" }} />
+      <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+        <span style={{ width: 28, height: 28, borderRadius: 8, display: "inline-flex", alignItems: "center", justifyContent: "center", background: `rgba(${tint},0.14)`, color: `rgb(${tint})` }}>
+          <Icon name={icon} size={15} />
+        </span>
+        <span style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: 1.2, textTransform: "uppercase", color: "var(--text3)" }}>{label}</span>
+      </div>
+      <div style={{ position: "relative", fontSize: 22, fontWeight: 900, letterSpacing: -0.5, color: valueColor || "var(--text)", fontFamily: "var(--font-headline, var(--font-outfit))" }}>{value}</div>
     </div>
   );
 }

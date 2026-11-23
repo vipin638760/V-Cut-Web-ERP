@@ -113,6 +113,20 @@ export const Icons = {
   bell: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>,
   star: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>,
   calendar: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>,
+  store: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 9l1.5-5.5A1 1 0 0 1 5.47 3h13.06a1 1 0 0 1 .97.76L21 9"/><path d="M3 9h18v2a3 3 0 0 1-6 0 3 3 0 0 1-6 0 3 3 0 0 1-6 0z"/><path d="M4 11v9a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-9"/><path d="M9 21v-5h6v5"/></svg>,
+  creditCard: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>,
+  box: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 8l-9-5-9 5 9 5 9-5z"/><path d="M3 8v8l9 5 9-5V8"/><line x1="12" y1="13" x2="12" y2="21"/></svg>,
+  archive: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8"/><line x1="10" y1="12" x2="14" y2="12"/></svg>,
+  idCard: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="4" width="20" height="16" rx="2"/><circle cx="8.5" cy="11" r="2.2"/><path d="M5 17c0-1.7 1.6-3 3.5-3s3.5 1.3 3.5 3"/><line x1="15" y1="9" x2="19" y2="9"/><line x1="15" y1="13" x2="19" y2="13"/></svg>,
+  phone: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.8 19.8 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.8 19.8 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.9.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z"/></svg>,
+  barChart: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>,
+  scissors: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><line x1="20" y1="4" x2="8.12" y2="15.88"/><line x1="14.47" y1="14.48" x2="20" y2="20"/><line x1="8.12" y1="8.12" x2="12" y2="12"/></svg>,
+  receipt: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 2v20l2-1.5L8 22l2-1.5L12 22l2-1.5L16 22l2-1.5L20 22V2l-2 1.5L16 2l-2 1.5L12 2l-2 1.5L8 2 6 3.5 4 2z"/><line x1="8" y1="8" x2="16" y2="8"/><line x1="8" y1="12" x2="16" y2="12"/></svg>,
+  coins: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="8" cy="8" r="6"/><path d="M18.09 10.37A6 6 0 1 1 10.34 18M7 6h1v4M16.71 13.88l.7.71-2.82 2.82"/></svg>,
+  percent: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="19" y1="5" x2="5" y2="19"/><circle cx="6.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="17.5" r="2.5"/></svg>,
+  bookOpen: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>,
+  award: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="8" r="6"/><path d="M15.47 12.89 17 22l-5-3-5 3 1.53-9.11"/></svg>,
+  filter: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>,
 };
 
 export function Icon({ name, size = 16, color = "currentColor" }) {
@@ -126,16 +140,18 @@ export function Icon({ name, size = 16, color = "currentColor" }) {
 }
 
 // Icon button
-export function IconBtn({ name, onClick, title, variant = "secondary", size = 32 }) {
+export function IconBtn({ name, onClick, title, variant = "secondary", size = 32, disabled = false, style }) {
   const styles = {
-    secondary: { background: "var(--bg4)", border: "1px solid rgba(72,72,71,0.2)", color: "var(--text2)" },
-    danger:    { background: "var(--red-bg)", border: "1px solid rgba(248,113,113,0.2)", color: "var(--red)" },
-    success:   { background: "var(--green-bg)", border: "1px solid rgba(74,222,128,0.2)", color: "var(--green)" },
-    primary:   { background: "linear-gradient(135deg,var(--accent),var(--gold2))", border: "none", color: "#000" },
+    secondary: { background: "var(--bg4)", border: "1px solid var(--border)", color: "var(--text2)" },
+    ghost:     { background: "transparent", border: "1px solid transparent", color: "var(--text3)" },
+    danger:    { background: "var(--red-bg)", border: "1px solid rgba(248,113,113,0.25)", color: "var(--red)" },
+    success:   { background: "var(--green-bg)", border: "1px solid rgba(74,222,128,0.25)", color: "var(--green)" },
+    primary:   { background: "linear-gradient(135deg,var(--accent),var(--gold2))", border: "none", color: "#000", boxShadow: "0 2px 10px rgba(var(--accent-rgb),0.35)" },
   };
   return (
-    <button onClick={onClick} title={title}
-      style={{ width: size, height: size, borderRadius: 10, display: "inline-flex", alignItems: "center", justifyContent: "center", cursor: "pointer", transition: "all .2s", flexShrink: 0, ...styles[variant] }}>
+    <button type="button" onClick={onClick} title={title} aria-label={title || name} disabled={disabled}
+      className="vcut-icon-btn"
+      style={{ width: size, height: size, borderRadius: 10, display: "inline-flex", alignItems: "center", justifyContent: "center", cursor: disabled ? "not-allowed" : "pointer", transition: "transform .15s, box-shadow .2s, background .2s, border-color .2s", flexShrink: 0, opacity: disabled ? 0.5 : 1, ...styles[variant], ...style }}>
       <Icon name={name} size={size * 0.5} />
     </button>
   );
@@ -549,7 +565,7 @@ export function TabNav({ tabs, activeTab, onTabChange }) {
 // ── Sidebar ──
 // Hamburger-style: closed by default, slides in when `isOpen` is true.
 // `isPinned` keeps it locked open (desktop only — mobile always overlays).
-export function Sidebar({ children, isOpen, isPinned, onClose, isMobile }) {
+export function Sidebar({ children, isOpen, isPinned, onClose, isMobile, width = 260 }) {
   const visible = isOpen || (isPinned && !isMobile);
   return (
     <>
@@ -560,12 +576,14 @@ export function Sidebar({ children, isOpen, isPinned, onClose, isMobile }) {
       )}
       <aside
         style={{
-          width: 260, height: "100vh", position: "fixed", left: 0, top: 0,
-          background: "var(--bg2)", display: "flex", flexDirection: "column",
+          width, height: "100vh", position: "fixed", left: 0, top: 0,
+          background: "linear-gradient(180deg, var(--bg2) 0%, var(--bg1) 100%)",
+          borderRight: "1px solid var(--border)",
+          display: "flex", flexDirection: "column",
           zIndex: 50, padding: 0,
           transform: visible ? "translateX(0)" : "translateX(-100%)",
-          transition: "transform .25s ease",
-          boxShadow: visible ? "4px 0 20px rgba(0,0,0,0.3)" : "none",
+          transition: "transform .25s ease, width .2s ease",
+          boxShadow: visible ? "4px 0 24px rgba(0,0,0,0.35)" : "none",
         }}>
         {children}
       </aside>
@@ -609,7 +627,7 @@ export function SidebarPin({ pinned, onClick }) {
   );
 }
 
-export const SidebarItem = memo(function SidebarItem({ id, icon, label, isActive, onClick, onMouseEnter, onFocus, neon }) {
+export const SidebarItem = memo(function SidebarItem({ id, icon, label, isActive, onClick, onMouseEnter, onFocus, neon, collapsed = false }) {
   const handleClick = useCallback(() => onClick?.(id), [onClick, id]);
   const handleEnter = useCallback(() => onMouseEnter?.(id), [onMouseEnter, id]);
   const handleFocus = useCallback(() => onFocus?.(id), [onFocus, id]);
@@ -617,20 +635,32 @@ export const SidebarItem = memo(function SidebarItem({ id, icon, label, isActive
     <button onClick={handleClick} onMouseEnter={handleEnter} onFocus={handleFocus}
       className="vcut-sidebar-item"
       data-active={isActive ? "true" : "false"}
+      aria-current={isActive ? "page" : undefined}
+      title={label}
       style={{
-        width: "100%", display: "flex", alignItems: "center", gap: 14, padding: "12px 20px", border: "none",
-        background: isActive ? "rgba(var(--accent-rgb), 0.10)" : "transparent",
+        width: "100%", display: "flex", alignItems: "center", gap: collapsed ? 0 : 12,
+        justifyContent: collapsed ? "center" : "flex-start",
+        padding: collapsed ? "9px 0" : "9px 14px", border: "none",
+        background: isActive ? "rgba(var(--accent-rgb), 0.12)" : "transparent",
         color: isActive ? "var(--text)" : "var(--text2)", cursor: "pointer", transition: "all 0.2s",
         position: "relative", textAlign: "left", borderRadius: 10, margin: "1px 0",
       }}>
-      {isActive && <div style={{ position: "absolute", left: 0, top: "25%", bottom: "25%", width: 3, background: "var(--accent)", borderRadius: "0 3px 3px 0" }} />}
-      <div style={{ color: isActive ? "var(--accent)" : "var(--text2)", transition: "all 0.2s", opacity: isActive ? 1 : 0.85 }}>
-        <Icon name={icon} size={18} />
-      </div>
-      <span style={{ fontSize: 13, fontWeight: isActive ? 800 : 600, letterSpacing: "0.3px", textTransform: "uppercase", fontFamily: "var(--font-body, var(--font-outfit))" }}>
-        {label}
+      {isActive && <div style={{ position: "absolute", left: 0, top: "22%", bottom: "22%", width: 3, background: "var(--accent)", borderRadius: "0 3px 3px 0", boxShadow: "0 0 8px rgba(var(--accent-rgb),0.6)" }} />}
+      <span className="vcut-nav-ico" style={{
+        width: 30, height: 30, borderRadius: 8, flexShrink: 0,
+        display: "inline-flex", alignItems: "center", justifyContent: "center",
+        background: isActive ? "rgba(var(--accent-rgb),0.16)" : "transparent",
+        color: isActive ? "var(--accent)" : "var(--text3)",
+        opacity: isActive ? 1 : 0.9,
+      }}>
+        <Icon name={icon} size={17} />
       </span>
-      {neon && <div style={{ marginLeft: "auto", width: 6, height: 6, borderRadius: "50%", background: "var(--accent)" }} />}
+      {!collapsed && (
+        <span style={{ fontSize: 13, fontWeight: isActive ? 700 : 600, letterSpacing: "0.1px", fontFamily: "var(--font-body, var(--font-outfit))", opacity: isActive ? 1 : 0.82, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {label}
+        </span>
+      )}
+      {neon && !collapsed && <div style={{ marginLeft: "auto", width: 6, height: 6, borderRadius: "50%", background: "var(--accent)" }} />}
     </button>
   );
 });
