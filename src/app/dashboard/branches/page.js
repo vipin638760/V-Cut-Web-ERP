@@ -5017,11 +5017,12 @@ function SummaryView({ summaryTab, setSummaryTab, branchData, branches, entries,
         // actually trigger scroll instead of the whole card pushing past the
         // viewport edge. A one-off <style> adds a stacking breakpoint so
         // phones get each table full-width.
-        <>
-        <style>{`@media (max-width: 900px) { .vcut-summary-grid { grid-template-columns: minmax(0, 1fr) !important; } }`}</style>
-        <div className="vcut-summary-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 2fr)", gap: 16 }}>
-          {/* INCOME TABLE */}
-          <Card style={{ padding: 0, overflow: "hidden", minWidth: 0 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          {/* INCOME TABLE — stacked full-width above Expenses so neither table
+              clips at narrow desktop widths (the old 1:2 side-by-side needed
+              ~1676px and collided below that). Income capped so its 5 columns
+              don't sprawl; Expenses takes the full width its 13 columns need. */}
+          <Card style={{ padding: 0, overflow: "hidden", minWidth: 0, width: "100%", maxWidth: 820 }}>
             <div style={{ padding: "12px 16px", background: "linear-gradient(135deg, rgba(74,222,128,0.18), rgba(74,222,128,0.04))", borderBottom: "1px solid rgba(74,222,128,0.25)", fontWeight: 800, color: "var(--green)", fontSize: 13, letterSpacing: 1.5, textAlign: "center" }}>INCOME</div>
             <div style={{ overflowX: "auto" }}>
               {/* minWidth forces the table wider than any narrow card so the
@@ -5152,7 +5153,6 @@ function SummaryView({ summaryTab, setSummaryTab, branchData, branches, entries,
             </div>
           </div>
         </div>
-        </>
       ) : summaryTab === "monthly" ? (
         <MonthlyBusinessMatrix branches={branches} entries={entries} filterYear={filterYear} />
       ) : (
