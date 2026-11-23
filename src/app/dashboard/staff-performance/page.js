@@ -315,10 +315,10 @@ export default function StaffPerformancePage() {
         <PeriodWidget filterMode={filterMode} setFilterMode={setFilterMode} filterYear={filterYear} setFilterYear={setFilterYear} filterMonth={filterMonth} setFilterMonth={setFilterMonth} />
       </div>
 
-      {/* KPI strip — flex-wrap + centered so an odd tile count (9 for admin,
-          6 for others) never leaves a lone left-aligned orphan; the last row
-          centers under the rest. Equal fixed basis keeps every tile one width. */}
-      <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: 12 }}>
+      {/* KPI strip — equal-width grid columns (every tile is 1fr, same shape
+          and size) that pack into one clean row on wide screens and wrap to
+          equal-width rows when narrower. */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12 }}>
         <KpiTile label="Total Staff" value={kpi.total} color="var(--text)" />
         <KpiTile label="Active" value={kpi.act} color="var(--green)" sub={`in ${new Date(statusMonth + "-01").toLocaleDateString("en-US", { month: "short", year: "numeric" })}`} />
         <KpiTile label="Inactive" value={kpi.inact} color="var(--red)" sub={`in ${new Date(statusMonth + "-01").toLocaleDateString("en-US", { month: "short", year: "numeric" })}`} />
@@ -442,9 +442,9 @@ export default function StaffPerformancePage() {
 
 function KpiTile({ label, value, color, sub }) {
   return (
-    <Card style={{ padding: "16px 18px", flex: "0 1 190px", minWidth: 150, boxSizing: "border-box" }}>
-      <div style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.2 }}>{label}</div>
-      <div style={{ fontSize: 22, fontWeight: 900, color, marginTop: 4, fontFamily: "var(--font-headline, var(--font-outfit))" }}>{value}</div>
+    <Card style={{ padding: "16px 18px", height: 104, boxSizing: "border-box", display: "flex", flexDirection: "column", justifyContent: "center", overflow: "hidden" }}>
+      <div style={{ fontSize: 10, color: "var(--text3)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{label}</div>
+      <div style={{ fontSize: 21, fontWeight: 900, color, marginTop: 4, fontFamily: "var(--font-headline, var(--font-outfit))", whiteSpace: "nowrap" }}>{value}</div>
       {sub && <div style={{ fontSize: 10, color: "var(--text3)", fontWeight: 600, marginTop: 2 }}>{sub}</div>}
     </Card>
   );
