@@ -17,7 +17,9 @@ const NOW = new Date();
 
 const _MTD_MONS = MONTHS;
 
-const PremiumStatCard = ({ label, value, sub, icon, color = "var(--accent)", trend, onClick, linkLabel }) => (
+const PremiumStatCard = ({ label, value, sub, icon, color = "var(--accent)", trend, onClick, linkLabel }) => {
+  const restShadow = `0 8px 22px rgba(0,0,0,0.26), 0 0 0 1px color-mix(in srgb, ${color} 8%, transparent) inset`;
+  return (
   <div
     onClick={onClick}
     role={onClick ? "button" : undefined}
@@ -31,23 +33,24 @@ const PremiumStatCard = ({ label, value, sub, icon, color = "var(--accent)", tre
       minWidth: 220,
       position: "relative",
       overflow: "hidden",
-      border: "1px solid rgba(72,72,71,0.1)",
+      border: `1px solid color-mix(in srgb, ${color} 24%, var(--border))`,
+      boxShadow: restShadow,
       cursor: onClick ? "pointer" : "default",
-      transition: "transform .15s, box-shadow .15s, border-color .15s",
+      transition: "transform .15s, box-shadow .2s, border-color .2s",
     }}
-    onMouseEnter={onClick ? (e) => { e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.boxShadow = `0 6px 20px ${color}33`; e.currentTarget.style.borderColor = `${color}55`; } : undefined}
-    onMouseLeave={onClick ? (e) => { e.currentTarget.style.transform = "none"; e.currentTarget.style.boxShadow = "none"; e.currentTarget.style.borderColor = "rgba(72,72,71,0.1)"; } : undefined}>
-    <div style={{ position: "absolute", top: -15, right: -15, width: 80, height: 80, background: color, filter: "blur(40px)", opacity: 0.06, borderRadius: "50%" }} />
+    onMouseEnter={onClick ? (e) => { e.currentTarget.style.transform = "translateY(-3px)"; e.currentTarget.style.boxShadow = `0 16px 34px rgba(0,0,0,0.4), 0 0 0 1px color-mix(in srgb, ${color} 30%, transparent) inset`; } : undefined}
+    onMouseLeave={onClick ? (e) => { e.currentTarget.style.transform = "none"; e.currentTarget.style.boxShadow = restShadow; } : undefined}>
+    <div style={{ position: "absolute", top: -28, right: -28, width: 120, height: 120, borderRadius: "50%", background: `radial-gradient(circle, color-mix(in srgb, ${color} 24%, transparent), transparent 70%)`, pointerEvents: "none" }} />
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", position: "relative", zIndex: 1 }}>
       <div>
-        <div style={{ fontSize: 10, fontWeight: 600, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.5, marginBottom: 10, fontFamily: "var(--font-body, var(--font-outfit))", display: "flex", alignItems: "center", gap: 6 }}>
+        <div style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 1.5, marginBottom: 10, fontFamily: "var(--font-body, var(--font-outfit))", display: "flex", alignItems: "center", gap: 6 }}>
           {label}
           {onClick && <span title={linkLabel || "Open details"} style={{ color: color, fontSize: 11, opacity: 0.9 }}>↗</span>}
         </div>
-        <div style={{ fontSize: 28, fontWeight: 800, color: color, letterSpacing: -0.5, fontFamily: "var(--font-headline, var(--font-outfit))" }}>{value}</div>
-        {sub && <div style={{ fontSize: 11, color: "var(--text3)", fontWeight: 500, marginTop: 4 }}>{sub}</div>}
+        <div style={{ fontSize: 30, fontWeight: 900, color: color, letterSpacing: -0.6, fontFamily: "var(--font-headline, var(--font-outfit))", lineHeight: 1.05 }}>{value}</div>
+        {sub && <div style={{ fontSize: 11, color: "var(--text3)", fontWeight: 500, marginTop: 5 }}>{sub}</div>}
       </div>
-      <div style={{ background: "var(--bg4)", padding: 10, borderRadius: 12, color: color, opacity: 0.7 }}>
+      <div style={{ background: `color-mix(in srgb, ${color} 16%, transparent)`, padding: 10, borderRadius: 12, color: color, display: "inline-flex" }}>
         <Icon name={icon} size={20} />
       </div>
     </div>
@@ -58,7 +61,8 @@ const PremiumStatCard = ({ label, value, sub, icon, color = "var(--accent)", tre
       </div>
     )}
   </div>
-);
+  );
+};
 
 const ActivityItem = ({ title, sub, time, icon, color = "var(--accent)" }) => (
   <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 0", borderBottom: "1px solid rgba(72,72,71,0.08)" }}>

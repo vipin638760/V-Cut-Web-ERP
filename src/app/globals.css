@@ -424,3 +424,136 @@ body {
   /* Ensure dark menu keeps its look when printed */
   #menu-print { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
 }
+
+/* ══════════════════════════════════════════════════════════════
+   Dashboard chrome — sidebar, command bar, icon buttons
+   Real :hover / :focus-visible states (inline styles can't do them)
+   ══════════════════════════════════════════════════════════════ */
+
+/* ── Sidebar nav items ── */
+.vcut-sidebar-item { outline: none; }
+.vcut-sidebar-item:hover {
+  background: rgba(var(--accent-rgb), 0.07) !important;
+  color: var(--text) !important;
+}
+.vcut-sidebar-item:hover .vcut-nav-ico {
+  color: var(--accent);
+  opacity: 1;
+  transform: scale(1.06);
+}
+.vcut-sidebar-item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.vcut-nav-ico { transition: color .2s, transform .2s, opacity .2s; }
+
+/* ── Sidebar section headers ── */
+.vcut-nav-section {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 20px 6px;
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 1.6px;
+  text-transform: uppercase;
+  color: var(--text3);
+  opacity: 0.7;
+  user-select: none;
+}
+.vcut-nav-section::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, var(--border2), transparent);
+}
+.vcut-nav-section-btn {
+  font-family: var(--font-body, var(--font-outfit));
+  text-align: left;
+  outline: none;
+}
+.vcut-nav-section-btn:hover { opacity: 1; color: var(--accent); }
+.vcut-nav-section-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 6px; }
+
+/* ── Sidebar quick-filter ── */
+.vcut-nav-filter {
+  width: 100%;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 9px 12px 9px 34px;
+  outline: none;
+  transition: border-color .2s, background .2s;
+}
+.vcut-nav-filter::placeholder { color: var(--text3); opacity: 0.7; }
+.vcut-nav-filter:focus {
+  border-color: var(--accent);
+  background: var(--bg2);
+}
+
+/* Thin, themed scrollbar for the nav list */
+.vcut-nav-scroll::-webkit-scrollbar { width: 6px; }
+.vcut-nav-scroll::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 6px;
+}
+
+/* ── Icon buttons (top bar + inline actions) ── */
+.vcut-icon-btn {
+  position: relative;
+  outline: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.vcut-icon-btn::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: currentColor;
+  opacity: 0;
+  transition: opacity .2s;
+}
+.vcut-icon-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(0,0,0,0.22);
+}
+.vcut-icon-btn:hover::after { opacity: 0.08; }
+.vcut-icon-btn:active { transform: translateY(0) scale(0.95); }
+.vcut-icon-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ── Command bar (sticky top) ── */
+.vcut-cmdbar {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  background: color-mix(in srgb, var(--bg1) 82%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border);
+}
+/* Fallback for browsers without color-mix */
+@supports not (background: color-mix(in srgb, red, blue)) {
+  .vcut-cmdbar { background: var(--bg1); }
+}
+
+/* Search trigger in the command bar */
+.vcut-cmd-search { transition: border-color .2s, background .2s; }
+.vcut-cmd-search:hover {
+  border-color: rgba(var(--accent-rgb), 0.4) !important;
+  background: var(--bg4) !important;
+}
+
+/* ── Page depth — subtle corner glow behind everything ── */
+body {
+  background-image:
+    radial-gradient(1100px 560px at 100% -8%, rgba(var(--accent-rgb), 0.06), transparent 60%),
+    radial-gradient(900px 520px at -8% 108%, rgba(var(--accent-rgb), 0.045), transparent 55%);
+  background-attachment: fixed;
+  background-repeat: no-repeat;
+}
